@@ -1,0 +1,2 @@
+./404.html:51:      <div id="footer"> 
+./javascripts/jst/collaborations/edit.js:45:    + "\n    </textarea>\n  </div>\n\n  <div class=\"footer\">\n    <div class=\"collaborator_list\"></div>\n  </div>\n\n  <div class=\"collaboration-actions form-actions\">\n    <button type=\"button\" class=\"btn cancel_button\">\n      ";

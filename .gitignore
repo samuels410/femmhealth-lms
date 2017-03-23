@@ -49,3 +49,4 @@ Gemfile.lock
 /public/plugins/
 /spec/coffeescripts/plugins/
 /spec/plugins/
+/vendor/bundle/
