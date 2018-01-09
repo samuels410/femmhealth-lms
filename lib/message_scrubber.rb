@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -38,6 +38,10 @@ class MessageScrubber
     @limit      = Integer(Setting.get(limit_setting, limit_size)).days.ago
     @delay      = options.fetch(:delay, MIN_DELAY)
     @logger     = options.fetch(:logger, Rails.logger)
+  end
+
+  def self.scrub
+    new.scrub
   end
 
   # Public: Delete old delayed messages on the current shard.
@@ -85,7 +89,7 @@ class MessageScrubber
   #
   # Returns a column name string.
   def filter_attribute
-    'sent_at'
+    'updated_at'
   end
 
   # Internal: The class object to delete records from (e.g. 'Message').
@@ -115,6 +119,6 @@ class MessageScrubber
   #
   # Returns nothing.
   def log(scope)
-    logger.info("#{self.class.to_s}: #{scope.count} records would be deleted (older than #{limit})")
+    logger.info("#{self.class}: #{scope.count} records would be deleted (older than #{limit})")
   end
 end

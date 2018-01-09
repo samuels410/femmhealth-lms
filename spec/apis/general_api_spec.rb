@@ -24,8 +24,8 @@ describe "API", type: :request do
       obj = Object.new
       obj.extend Api::V1::Json
       course_with_teacher
-      session = mock()
-      @course.expects(:as_json).with({ :include_root => false, :permissions => { :user => @user, :session => session, :include_permissions => false }, :only => [ :name, :sis_source_id ] })
+      session = double()
+      expect(@course).to receive(:as_json).with({ :include_root => false, :permissions => { :user => @user, :session => session, :include_permissions => false }, :only => [ :name, :sis_source_id ] })
       obj.api_json(@course, @user, session, :only => [:name, :sis_source_id])
     end
 
@@ -40,49 +40,50 @@ describe "API", type: :request do
 
       obj.extend Api::V1::Json
       course_with_teacher
-      session = mock()
+      session = double()
 
       json_hash = obj.api_json(@course, @user, session, :only => [:name]) do |json, object|
         json.mapped_value = obj.serialized[:nested_key]
       end
 
-      json_hash.should have_key(:mapped_value)
-      json_hash[:mapped_value].should == "foo"
+      expect(json_hash).to have_key(:mapped_value)
+      expect(json_hash[:mapped_value]).to eq "foo"
     end
   end
 
   describe "as_json extensions" do
     it "should skip attribute filtering if obj doesn't respond" do
       course_with_teacher
-      @course.respond_to?(:filter_attributes_for_user).should be_true
-      @course.as_json(:include_root => false, :permissions => { :user => @user }, :only => %w(name sis_source_id)).keys.sort.should == %w(name permissions sis_source_id)
+      expect(@course.respond_to?(:filter_attributes_for_user)).to be_truthy
+      expect(@course.as_json(:include_root => false, :permissions => { :user => @user }, :only => %w(name sis_source_id)).keys.sort).to eq %w(name permissions sis_source_id)
     end
 
     it "should do attribute filtering if obj responds" do
       course_with_teacher
+      @course.send(:extend, RSpec::Matchers)
       def @course.filter_attributes_for_user(hash, user, session)
-        user.should == self.teachers.first
-        session.should == nil
+        expect(user).to eq self.teachers.first
+        expect(session).to be_nil
         hash.delete('sis_source_id')
       end
-      @course.as_json(:include_root => false, :permissions => { :user => @user }, :only => %w(name sis_source_id)).keys.sort.should == %w(name permissions)
+      expect(@course.as_json(:include_root => false, :permissions => { :user => @user }, :only => %w(name sis_source_id)).keys.sort).to eq %w(name permissions)
     end
 
     it "should not return the permissions list if include_permissions is false" do
       course_with_teacher
-      @course.as_json(:include_root => false, :permissions => { :user => @user, :include_permissions => false }, :only => %w(name sis_source_id)).keys.sort.should == %w(name sis_source_id)
+      expect(@course.as_json(:include_root => false, :permissions => { :user => @user, :include_permissions => false }, :only => %w(name sis_source_id)).keys.sort).to eq %w(name sis_source_id)
     end
 
     it "should serialize permissions if obj responds" do
       course_with_teacher
-      @course.expects(:serialize_permissions).once.with(anything, @teacher, nil)
+      expect(@course).to receive(:serialize_permissions).once.with(anything, @teacher, nil)
       json = @course.as_json(:include_root => false, :permissions => { :user => @user, :session => nil, :include_permissions => true, :policies => [ "update" ] }, :only => %w(name))
-      json.keys.sort.should == %w(name permissions)
+      expect(json.keys.sort).to eq %w(name permissions)
     end
   end
 
   describe "json post format" do
-    before do
+    before :once do
       course_with_teacher(:user => user_with_pseudonym, :active_all => true)
       @token = @user.access_tokens.create!(:purpose => "specs")
     end
@@ -90,24 +91,24 @@ describe "API", type: :request do
     it "should use html form encoding by default" do
       html_request = "assignment[name]=test+assignment&assignment[points_possible]=15"
       # no content-type header is sent
-      post "/api/v1/courses/#{@course.id}/assignments", html_request, { "authorization" => "Bearer #{@token.full_token}" }
-      response.should be_success
-      response.header['content-type'].should == 'application/json; charset=utf-8'
+      post "/api/v1/courses/#{@course.id}/assignments", params: html_request, headers: { "HTTP_AUTHORIZATION" => "Bearer #{@token.full_token}" }
+      expect(response).to be_success
+      expect(response.header[content_type_key]).to eq 'application/json; charset=utf-8'
 
       @assignment = @course.assignments.order(:id).last
-      @assignment.title.should == "test assignment"
-      @assignment.points_possible.should == 15
+      expect(@assignment.title).to eq "test assignment"
+      expect(@assignment.points_possible).to eq 15
     end
 
     it "should support json POST request bodies" do
       json_request = { "assignment" => { "name" => "test assignment", "points_possible" => 15 } }
-      post "/api/v1/courses/#{@course.id}/assignments", json_request.to_json, { "content-type" => "application/json", "authorization" => "Bearer #{@token.full_token}" }
-      response.should be_success
-      response.header['content-type'].should == 'application/json; charset=utf-8'
+      post "/api/v1/courses/#{@course.id}/assignments", params: json_request.to_json, headers: { "CONTENT_TYPE" => "application/json", "HTTP_AUTHORIZATION" => "Bearer #{@token.full_token}" }
+      expect(response).to be_success
+      expect(response.header[content_type_key]).to eq 'application/json; charset=utf-8'
 
       @assignment = @course.assignments.order(:id).last
-      @assignment.title.should == "test assignment"
-      @assignment.points_possible.should == 15
+      expect(@assignment.title).to eq "test assignment"
+      expect(@assignment.points_possible).to eq 15
     end
 
     it "should use array params without the [] on the key" do
@@ -122,81 +123,37 @@ describe "API", type: :request do
                        "submission" => {
                           "submission_type" => "online_upload",
                           "file_ids" => [a1.id, a2.id] } }
-      post "/api/v1/courses/#{@course.id}/assignments/#{@assignment.id}/submissions", json_request.to_json, { "content-type" => "application/json", "authorization" => "Bearer #{@token.full_token}" }
-      response.should be_success
-      response.header['content-type'].should == 'application/json; charset=utf-8'
+      post "/api/v1/courses/#{@course.id}/assignments/#{@assignment.id}/submissions",
+        params: json_request.to_json, headers: { "CONTENT_TYPE" => "application/json", "HTTP_AUTHORIZATION" => "Bearer #{@token.full_token}" }
+      expect(response).to be_success
+      expect(response.header[content_type_key]).to eq 'application/json; charset=utf-8'
 
-      @submission = @assignment.submissions.find_by_user_id(@user.id)
-      @submission.attachments.map { |a| a.id }.sort.should == [a1.id, a2.id]
-      @submission.submission_comments.first.comment.should == "yay"
+      @submission = @assignment.submissions.where(user_id: @user).first
+      sub_a1 = Attachment.where(:root_attachment_id => a1).first
+      sub_a2 = Attachment.where(:root_attachment_id => a2).first
+      expect(@submission.attachments.map { |a| a.id }.sort).to eq [sub_a1.id, sub_a2.id]
+      expect(@submission.submission_comments.first.comment).to eq "yay"
     end
   end
 
   describe "application/json+canvas-string-ids" do
-    it "should stringify 'id' fields" do
-      account_admin_user(active_all: true)
-      json = api_call(:get, "/api/v1/accounts/#{Account.default.id}",
-        { controller: 'accounts', action: 'show', id: Account.default.to_param, format: 'json' },
-        {}, { 'Accept' => 'application/json+canvas-string-ids' })
-      json['id'].should == Account.default.id.to_s
-    end
-
-    it "should not stringify 'id' fields without Accept header" do
-      account_admin_user(active_all: true)
-      json = api_call(:get, "/api/v1/accounts/#{Account.default.id}",
-        { controller: 'accounts', action: 'show', id: Account.default.to_param, format: 'json' })
-      json['id'].should == Account.default.id
-    end
-
-    it "should stringify 'something_id' fields" do
+    it "should stringify fields with Accept header" do
       account = Account.default.sub_accounts.create!
       account_admin_user(active_all: true, account: account)
       json = api_call(:get, "/api/v1/accounts/#{account.id}",
         { controller: 'accounts', action: 'show', id: account.to_param, format: 'json' },
         {}, { 'Accept' => 'application/json+canvas-string-ids' })
-      json['root_account_id'].should == Account.default.id.to_s
+      expect(json['id']).to eq account.id.to_s
+      expect(json['root_account_id']).to eq Account.default.id.to_s
     end
 
-    it "should not stringify 'something_id' fields without Accept header" do
+    it "should not stringify fields without Accept header" do
       account = Account.default.sub_accounts.create!
       account_admin_user(active_all: true, account: account)
       json = api_call(:get, "/api/v1/accounts/#{account.id}",
         { controller: 'accounts', action: 'show', id: account.to_param, format: 'json' })
-      json['root_account_id'].should == Account.default.id
-    end
-
-    it "should pass through non-integer 'something_id' fields" do
-      account_admin_user(active_all: true)
-      json = api_call(:get, "/api/v1/accounts/#{Account.default.id}",
-        { controller: 'accounts', action: 'show', id: Account.default.to_param, format: 'json' },
-        {}, { 'Accept' => 'application/json+canvas-string-ids' })
-      json['root_account_id'].should be_nil
-    end
-
-    it "should stringify nested ids" do
-      user_with_pseudonym(active_user: true)
-      course_with_teacher(user: @user, active_all: true)
-      student_in_course(course: @course, active_all: true)
-      @user = @teacher
-
-      json = api_call(:post, "/api/v1/conversations",
-        { controller: 'conversations', action: 'create', format: 'json' },
-        { recipients: [@student.id], body: "test" },
-        { 'Accept' => 'application/json+canvas-string-ids' })
-      json.first["participants"].first["id"].should == @teacher.id.to_s
-    end
-
-    it "should stringify all ids in a 'something_ids' field" do
-      user_with_pseudonym(active_user: true)
-      course_with_teacher(user: @user, active_all: true)
-      student_in_course(course: @course, active_all: true)
-      @user = @teacher
-
-      json = api_call(:post, "/api/v1/conversations",
-        { controller: 'conversations', action: 'create', format: 'json' },
-        { recipients: [@student.id], body: "test" },
-        { 'Accept' => 'application/json+canvas-string-ids' })
-      json.first["messages"].first["participating_user_ids"].sort.should == [@teacher.id, @student.id].map{ |id| id.to_s }.sort
+      expect(json['id']).to eq account.id
+      expect(json['root_account_id']).to eq Account.default.id
     end
   end
 end

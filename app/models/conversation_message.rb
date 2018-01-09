@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,33 +16,32 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+require 'atom'
+
 class ConversationMessage < ActiveRecord::Base
   include HtmlTextHelper
 
-  if CANVAS_RAILS2
-    include ActionController::UrlWriter
-  else
-    include Rails.application.routes.url_helpers
-  end
+  include Rails.application.routes.url_helpers
   include SendToStream
   include SimpleTags::ReaderInstanceMethods
 
   belongs_to :conversation
   belongs_to :author, :class_name => 'User'
-  belongs_to :context, :polymorphic => true
+  belongs_to :context, polymorphic: [:account]
   has_many :conversation_message_participants
-  has_many :attachment_associations, :as => :context
-  has_many :attachments, :through => :attachment_associations, :order => 'attachments.created_at, attachments.id'
-  belongs_to :asset, :polymorphic => true, :types => :submission # TODO: move media comments into this
+  has_many :attachment_associations, :as => :context, :inverse_of => :context
+  # we used to attach submission comments to conversations via this asset
+  # TODO: remove this column when we're sure we don't want this relation anymore
+  belongs_to :asset, polymorphic: [:submission]
   delegate :participants, :to => :conversation
   delegate :subscribed_participants, :to => :conversation
-  attr_accessible
 
   after_create :generate_user_note!
+  after_save :update_attachment_associations
 
-  scope :human, where("NOT generated")
-  scope :with_attachments, where("attachment_ids<>'' OR has_attachments") # TODO: simplify post-migration
-  scope :with_media_comments, where("media_comment_id IS NOT NULL OR has_media_objects") # TODO: simplify post-migration
+  scope :human, -> { where("NOT generated") }
+  scope :with_attachments, -> { where("attachment_ids<>'' OR has_attachments") } # TODO: simplify post-migration
+  scope :with_media_comments, -> { where("media_comment_id IS NOT NULL OR has_media_objects") } # TODO: simplify post-migration
   scope :by_user, lambda { |user_or_id| where(:author_id => user_or_id) }
 
   def self.preload_latest(conversation_participants, author=nil)
@@ -72,12 +71,12 @@ class ConversationMessage < ActiveRecord::Base
 
       Shackles.activate(:slave) do
         ret = where(base_conditions).
-          joins('JOIN conversation_message_participants ON conversation_messages.id = conversation_message_id').
-          distinct_on(['conversation_id', 'user_id'],
-            :select => "conversation_messages.*, conversation_participant_id, conversation_message_participants.user_id, conversation_message_participants.tags",
-            :order => 'conversation_id DESC, user_id DESC, created_at DESC')
-        map = Hash[ret.map{ |m| [[m.conversation_id, m.user_id.to_i], m]}]
-        backmap = Hash[ret.map{ |m| [m.conversation_participant_id.to_i, m]}]
+          joins("JOIN #{ConversationMessageParticipant.quoted_table_name} ON conversation_messages.id = conversation_message_id").
+          select("conversation_messages.*, conversation_participant_id, conversation_message_participants.user_id, conversation_message_participants.tags").
+          order('conversation_id DESC, user_id DESC, created_at DESC').
+          distinct_on(:conversation_id, :user_id).to_a
+        map = Hash[ret.map{ |m| [[m.conversation_id, m.user_id], m]}]
+        backmap = Hash[ret.map{ |m| [m.conversation_participant_id, m]}]
         if author
           shard_participants.each{ |cp| cp.last_authored_message = map[[cp.conversation_id, cp.user_id]] || backmap[cp.id] }
         else
@@ -98,6 +97,10 @@ class ConversationMessage < ActiveRecord::Base
     p.dispatch :added_to_conversation
     p.to { self.new_recipients }
     p.whenever {|record| (record.just_created || @re_send_message) && record.generated && record.event_data[:event_type] == :users_added}
+
+    p.dispatch :conversation_created
+    p.to { [self.author] }
+    p.whenever {|record| record.cc_author && ((record.just_created || @re_send_message) && !record.generated && !record.submission)}
   end
 
   on_create_send_to_streams do
@@ -105,10 +108,8 @@ class ConversationMessage < ActiveRecord::Base
   end
 
   def after_participants_created_broadcast
-    conversation_message_participants(true) # reload this association so we get latest data
-    skip_broadcasts = false
+    conversation_message_participants.reload # reload this association so we get latest data
     @re_send_message = true
-    set_broadcast_flags
     broadcast_notifications
     queue_create_stream_items
     generate_user_note!
@@ -130,20 +131,32 @@ class ConversationMessage < ActiveRecord::Base
     true
   end
 
-  # override AR association magic 
+  # override AR association magic
   def attachment_ids
-    read_attribute :attachment_ids
+    (read_attribute(:attachment_ids) || "").split(',').map(&:to_i)
   end
 
   def attachment_ids=(ids)
-    self.attachments = author.conversation_attachments_folder.attachments.find_all_by_id(ids.map(&:to_i))
-    write_attribute(:attachment_ids, attachments.map(&:id).join(','))
+    ids = author.conversation_attachments_folder.attachments.where(id: ids.map(&:to_i)).pluck(:id) unless ids.empty?
+    write_attribute(:attachment_ids, ids.join(','))
   end
 
-  def clone
-    copy = super
-    copy.attachments = attachments
-    copy
+  def attachments
+    self.attachment_associations.map(&:attachment)
+  end
+
+  def update_attachment_associations
+    previous_attachment_ids = self.attachment_associations.pluck(:attachment_id)
+    deleted_attachment_ids = previous_attachment_ids - attachment_ids
+    new_attachment_ids = attachment_ids - previous_attachment_ids
+    self.attachment_associations.where(attachment_id: deleted_attachment_ids).find_each do |association|
+      association.destroy
+    end
+    if new_attachment_ids.any?
+      author.conversation_attachments_folder.attachments.where(id: new_attachment_ids).find_each do |attachment|
+        self.attachment_associations.create!(attachment: attachment)
+      end
+    end
   end
 
   def delete_from_participants
@@ -181,7 +194,8 @@ class ConversationMessage < ActiveRecord::Base
 
   def recipients
     return [] unless conversation
-    subscribed = subscribed_participants.reject{ |u| u.id == self.author_id }
+    subscribed = subscribed_participants.reject{ |u| u.id == self.author_id }.map{|x| x.becomes(User)}
+    ActiveRecord::Associations::Preloader.new.preload(conversation_message_participants, :user)
     participants = conversation_message_participants.map(&:user)
     subscribed & participants
   end
@@ -215,7 +229,7 @@ class ConversationMessage < ActiveRecord::Base
   def format_event_message
     case event_data[:event_type]
     when :users_added
-      user_names = User.find_all_by_id(event_data[:user_ids], :order => "id").map(&:short_name)
+      user_names = User.where(id: event_data[:user_ids]).order(:id).pluck(:name, :short_name).map{|name, short_name| short_name || name}
       EventFormatter.users_added(author.short_name, user_names)
     end
   end
@@ -224,13 +238,40 @@ class ConversationMessage < ActiveRecord::Base
   def generate_user_note!
     return if skip_broadcasts
     return unless @generate_user_note
-    return unless recipients.size == 1
-    recipient = recipients.first
-    return unless recipient.grants_right?(author, :create_user_notes) && recipient.associated_accounts.any?{|a| a.enable_user_notes }
+    valid_recipients = recipients.select{|recipient| recipient.grants_right?(author, :create_user_notes) && recipient.associated_accounts.any?{|a| a.enable_user_notes }}
+    return unless valid_recipients.any?
 
-    title = t(:subject, "Private message, %{timestamp}", :timestamp => date_string(created_at))
-    note = format_message(body).first
-    recipient.user_notes.create(:creator => author, :title => title, :note => note)
+    valid_recipients = User.where(:id => valid_recipients) # need to reload to get all the attributes needed for User#save
+    valid_recipients.each do |recipient|
+      title = if conversation.subject
+        t(:subject_specified, "Private message: %{subject}", subject: conversation.subject)
+      else
+        t(:subject, "Private message")
+      end
+      note = format_message(body).first
+      recipient.user_notes.create(:creator => author, :title => title, :note => note)
+    end
+  end
+
+
+  attr_accessor :cc_author
+
+  def author_short_name_with_shared_contexts(recipient)
+    if conversation.context
+      context_names = [conversation.context.name]
+    else
+      shared_tags = author.conversation_context_codes(false)
+      shared_tags &= recipient.conversation_context_codes(false)
+      shared_tags &= conversation.tags if conversation.tags.any?
+
+      context_components = shared_tags.map{|t| ActiveRecord::Base.parse_asset_string(t)}
+      context_names = Context.names_by_context_types_and_ids(context_components[0,2]).values
+    end
+    if context_names.empty?
+      author.short_name
+    else
+      "#{author.short_name} (#{context_names.to_sentence})"
+    end
   end
 
   def formatted_body(truncate=nil)
@@ -244,14 +285,15 @@ class ConversationMessage < ActiveRecord::Base
   end
 
   def reply_from(opts)
-    raise IncomingMail::IncomingMessageProcessor::UnknownAddressError if self.context.try(:root_account).try(:deleted?)
-    # If this is from conversations 2, only reply to the author.
-    recipients = conversation.context ? [author] : nil
+    raise IncomingMail::Errors::UnknownAddress if self.context.try(:root_account).try(:deleted?)
+    # It would be nice to have group conversations via e-mail, but if so, we need to make it much more obvious
+    # that replies to the e-mail will be sent to multiple recipients.
+    recipients = [author]
     conversation.reply_from(opts.merge(:root_account_id => self.root_account_id, :only_users => recipients))
   end
 
   def forwarded_messages
-    @forwarded_messages ||= forwarded_message_ids && self.class.send(:with_exclusive_scope){ self.class.find_all_by_id(forwarded_message_ids.split(','), :order => 'created_at DESC')} || []
+    @forwarded_messages ||= forwarded_message_ids && self.class.unscoped { self.class.where(id: forwarded_message_ids.split(',')).order('created_at DESC').to_a} || []
   end
 
   def all_forwarded_messages
@@ -277,7 +319,7 @@ class ConversationMessage < ActiveRecord::Base
     extend ApplicationHelper
     extend ConversationsHelper
 
-    title = ERB::Util.h(truncate_text(self.body, :max_words => 8, :max_length => 80))
+    title = ERB::Util.h(CanvasTextHelper.truncate_text(self.body, :max_words => 8, :max_length => 80))
 
     # build content, should be:
     # message body
@@ -331,4 +373,3 @@ class ConversationMessage < ActiveRecord::Base
     end
   end
 end
-

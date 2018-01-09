@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 - 2012 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -32,6 +32,7 @@ module Api::V1::QuizSubmission
     attempt
     extra_attempts
     extra_time
+    manually_unlocked
     started_at
     finished_at
     end_at
@@ -39,12 +40,16 @@ module Api::V1::QuizSubmission
     kept_score
     score
     score_before_regrade
+    has_seen_results
     validation_token
     workflow_state
   ].freeze
 
   QUIZ_SUBMISSION_JSON_FIELD_METHODS = %w[
     time_spent
+    attempts_left
+    overdue_and_needs_submission
+    excused?
   ].freeze
 
   def quiz_submission_json(qs, quiz, user, session, context = nil)
@@ -56,8 +61,12 @@ module Api::V1::QuizSubmission
     })
 
     hash.merge!({
-      html_url: course_quiz_quiz_submission_url(context, quiz, qs),
+      html_url: course_quiz_quiz_submission_url(context, quiz, qs)
     })
+
+    hash.merge!({
+      result_url: course_quiz_history_url(context, quiz, quiz_submission_id: qs.id, version: qs.version_number)
+    }) if qs.completed? || qs.needs_grading?
 
     hash
   end
@@ -74,17 +83,18 @@ module Api::V1::QuizSubmission
   # @return [Hash]
   #   A JSON-API complying construct representing the quiz submissions, and
   #   any associations requested.
-  def quiz_submissions_json(quiz_submissions, quiz, user, session, context = nil, includes = [])
+  def quiz_submissions_json(quiz_submissions, quiz, user, session, context, includes, params)
     hash = {}
     hash[:quiz_submissions] = [ quiz_submissions ].flatten.map do |qs|
       quiz_submission_json(qs, quiz, user, session, context)
     end
 
     if includes.include?('submission')
+      ActiveRecord::Associations::Preloader.new.preload(quiz_submissions, :submission)
       with_submissions = quiz_submissions.select { |qs| !!qs.submission }
 
       hash[:submissions] = with_submissions.map do |qs|
-        submission_json(qs.submission, quiz.assignment, user, session, context)
+        submission_json(qs.submission, quiz.assignment, user, session, context, includes, params)
       end
     end
 

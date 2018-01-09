@@ -1,14 +1,28 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 module DataFixup::MoveScribdDocsToRootAttachments
   def self.run
-    env = Shackles.environment
-    env = nil unless env == :deploy
-    Shackles.activate(env || :slave) do
-      Attachment.where("scribd_doc IS NOT NULL AND root_attachment_id IS NOT NULL").includes(:root_attachment).find_each do |a|
+    Shackles.activate(:slave) do
+      Attachment.where("scribd_doc IS NOT NULL AND root_attachment_id IS NOT NULL").preload(:root_attachment).find_each do |a|
         ra = a.root_attachment
         # bad data!
         next unless ra
-        # choose the latest inline view
-        ra.last_inline_view = [a.last_inline_view, ra.last_inline_view].compact.max
+
         # if the root doesn't have a scribd doc, move it over
         if !ra.scribd_doc
           ra.scribd_doc = a.scribd_doc
@@ -26,7 +40,7 @@ module DataFixup::MoveScribdDocsToRootAttachments
         a.scribd_doc = nil
         a.scribd_attempts = 0
         a.workflow_state = 'deleted'  # not file_state :P
-        Shackles.activate(env || :master) do
+        Shackles.activate(:master) do
           a.save!
           ra.save! if ra.changed?
         end

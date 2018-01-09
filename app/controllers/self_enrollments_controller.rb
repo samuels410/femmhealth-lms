@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,16 +17,21 @@
 #
 
 class SelfEnrollmentsController < ApplicationController
-  before_filter :infer_signup_info, :only => [:new]
+  before_action :infer_signup_info, :only => [:new]
 
   include Api::V1::Course
 
   def new
+    @domain_root_account.reload
     js_env :PASSWORD_POLICY => @domain_root_account.password_policy
-    if !@current_user && delegated_authentication_url?
+    @login_label_name = t("email")
+
+    login_handle_name = @domain_root_account.login_handle_name_with_inference
+    @login_label_name = login_handle_name if login_handle_name
+
+    if !@current_user && @domain_root_account.delegated_authentication? && !(params[:authentication_provider] == 'canvas')
       store_location
-      flash[:notice] = t('notices.login_required', "Please log in to join this course.")
-      return redirect_to login_url
+      return redirect_to login_url(params.permit(:authentication_provider))
     end
   end
 

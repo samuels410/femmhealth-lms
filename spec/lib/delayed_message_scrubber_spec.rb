@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -44,9 +44,9 @@ describe DelayedMessageScrubber do
   describe '#scrub' do
 
     before(:each) do
-      @context      = course
+      @context      = course_factory
       @notification = Notification.create!(name: 'Test Notification', category: 'Test')
-      @recipient    = user
+      @recipient    = user_factory
 
       @recipient.communication_channels.create!(path_type: 'email', path: 'user@example.com')
     end
@@ -55,7 +55,7 @@ describe DelayedMessageScrubber do
       messages = old_messages(2)
       scrubber = DelayedMessageScrubber.new
       scrubber.scrub
-      DelayedMessage.where(id: messages.map(&:id)).count.should == 0
+      expect(DelayedMessage.where(id: messages.map(&:id)).count).to eq 0
     end
 
     it 'should not delete messages younger than 90 days' do
@@ -63,15 +63,15 @@ describe DelayedMessageScrubber do
 
       scrubber = DelayedMessageScrubber.new
       scrubber.scrub
-      DelayedMessage.where(id: messages.map(&:id)).count.should == 1
+      expect(DelayedMessage.where(id: messages.map(&:id)).count).to eq 1
     end
 
     it 'should log predicted results if passed dry_run=true' do
-      logger   = mock
+      logger   = double
       messages = old_messages(2)
       scrubber = DelayedMessageScrubber.new(logger: logger)
 
-      logger.expects(:info).with("DelayedMessageScrubber: 2 records would be deleted (older than #{scrubber.limit})")
+      expect(logger).to receive(:info).with("DelayedMessageScrubber: 2 records would be deleted (older than #{scrubber.limit})")
       scrubber.scrub(dry_run: true)
     end
   end

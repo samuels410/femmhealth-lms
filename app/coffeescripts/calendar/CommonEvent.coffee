@@ -1,16 +1,35 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!calendar'
   'jquery'
+  'compiled/util/fcUtil'
   'jquery.ajaxJSON'
   'vendor/jquery.ba-tinypubsub'
-], (I18n, $) ->
+], (I18n, $, fcUtil) ->
 
   class
     readableTypes:
-      assignment: I18n.t('event_type.assignment', 'Assignment')
-      discussion: I18n.t('event_type.discussion', 'Discussion')
-      event: I18n.t('event_type.event', 'Event')
-      quiz: I18n.t('event_type.quiz', 'Quiz')
+      assignment: I18n.t('Assignment')
+      discussion: I18n.t('Discussion')
+      event: I18n.t('Event')
+      quiz: I18n.t('Quiz')
+      note: I18n.t('To Do')
 
     constructor: (data, contextInfo, actualContextInfo) ->
       @eventType = 'generic'
@@ -22,20 +41,22 @@ define [
 
       @copyDataFromObject(data)
 
-    isNewEvent: () =>
+    isNewEvent: () ->
       @eventType == 'generic' || !@object?.id
 
-    isAppointmentGroupFilledEvent: () =>
+    isAppointmentGroupFilledEvent: () ->
       @object?.child_events?.length > 0
 
-    isAppointmentGroupEvent: () =>
+    isAppointmentGroupEvent: () ->
       @object?.appointment_group_url
 
-    contextCode: () =>
+    contextCode: () ->
       @object?.effective_context_code || @object?.context_code || @contextInfo?.asset_string
 
-    isUndated: () =>
+    isUndated: () ->
       @start == null
+
+    isCompleted: -> false
 
     displayTimeString: () -> ""
     readableType: () -> ""
@@ -47,7 +68,7 @@ define [
 
     possibleContexts: () -> @allPossibleContexts || [ @contextInfo ]
 
-    addClass: (newClass) =>
+    addClass: (newClass) ->
       found = false
       for c in @className
         if c == newClass
@@ -55,7 +76,7 @@ define [
           break
       if !found then @className.push newClass
 
-    removeClass: (rmClass) =>
+    removeClass: (rmClass) ->
       idx = 0
       for c in @className
         if c == rmClass
@@ -63,13 +84,14 @@ define [
         else
           idx += 1
 
-    save: (params, success, error) =>
+    save: (params, success, error) ->
       onSuccess = (data) =>
         @copyDataFromObject(data)
         $.publish "CommonEvent/eventSaved", this
         success?()
 
       onError = (data) =>
+        @copyDataFromObject(data)
         $.publish "CommonEvent/eventSaveFailed", this
         error?()
 
@@ -80,23 +102,41 @@ define [
       $.ajaxJSON url, method, params, onSuccess, onError
 
     isDueAtMidnight: () ->
-      @start && (@midnightFudged || (@start.getHours() == 23 && @start.getMinutes() > 30))
+      @start && (@midnightFudged || (@start.hours() == 23 && @start.minutes() > 30) || (@start.hours() == 0 && @start.minutes() == 0))
+
+    isPast: () ->
+      @start && @start < fcUtil.now()
 
     copyDataFromObject: (data) ->
-      @originalStart = new Date(@start) if @start
+      @originalStart = (fcUtil.clone(@start) if @start)
       @midnightFudged = false # clear out cached value because now we have new data
       if @isDueAtMidnight()
         @midnightFudged = true
-        @start.setMinutes(30)
-        @start.setSeconds(0)
-        @end = new Date(@start.getTime()) unless @end
-      @forceMinimumDuration()
+        @start.minutes(30)
+        @start.seconds(0)
+        @end = fcUtil.clone(@start) unless @end
+      else
+        # minimum duration should only be enforced if not due at midnight
+        @forceMinimumDuration()
+      @preventWrappingAcrossDates()
+
+    formatTime: (datetime, allDay=false) ->
+      return null unless datetime
+      datetime = fcUtil.unwrap(datetime)
+      if allDay
+        formattedHtml = $.dateString(datetime)
+      else
+        formattedHtml = $.datetimeString(datetime)
+      "<time datetime='#{datetime.toISOString()}'>#{formattedHtml}</time>"
 
     forceMinimumDuration: () ->
-      minimumDuration = 30 * 60 * 1000 # 30 minutes
-      if @start && @end && (@end.getTime() - @start.getTime()) < minimumDuration
-        # new date so we don't mutate the original
-        @end = new Date(@start.getTime() + minimumDuration)
+      if @start && @end
+        minimumEnd = fcUtil.clone(@start).add(30, "minutes")
+        @end = minimumEnd if minimumEnd > @end
+
+    preventWrappingAcrossDates: () ->
+      if @start && @start.hours() == 23 && @start.minutes() > 0 && (!@end || @start.isSame(@end))
+        @end = fcUtil.clone(@start).add(60 - @start.minutes(), "minutes")
 
     assignmentType: () ->
       return if !@assignment
@@ -109,4 +149,19 @@ define [
       return 'assignment'
 
     iconType: ->
-      if type = @assignmentType() then type else 'calendar-month'
+      if type = @assignmentType()
+        type
+      else if  @eventType == 'planner_note'
+        'note-light'
+      else if ENV.CALENDAR.BETTER_SCHEDULER
+        if @isAppointmentGroupEvent() && (@isAppointmentGroupFilledEvent() || @appointmentGroupEventStatus == "Reserved")
+          'calendar-reserved'
+        else if @isAppointmentGroupEvent()
+          'calendar-add'
+        else
+          'calendar-month'
+      else
+        'calendar-month'
+
+    isOnCalendar: (context_code) ->
+      @calendarEvent.all_context_codes.match(///\b#{context_code}\b///)

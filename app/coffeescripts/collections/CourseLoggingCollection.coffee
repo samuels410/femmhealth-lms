@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -30,3 +30,11 @@ define [
     sideLoad:
       course: true
       user: true
+      copied_to:
+        collection: 'courses'
+      copied_from:
+        collection: 'courses'
+      reset_to:
+        collection: 'courses'
+      reset_from:
+        collection: 'courses'

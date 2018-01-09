@@ -16,16 +16,14 @@
  *	jquery.ui.position.js
  *	jquery.ui.resizable.js
  */
-define([
- 'jquery',
- 'jqueryui/core',
- 'jqueryui/widget',
- 'jqueryui/button',
- 'jqueryui/draggable',
- 'jqueryui/mouse',
- 'jqueryui/position',
- 'jqueryui/resizable'
-], function( $ ) {
+import $ from 'jquery'
+import 'jqueryui/core'
+import 'jqueryui/widget'
+import 'jqueryui/button'
+import 'jqueryui/draggable'
+import 'jqueryui/mouse'
+import 'jqueryui/position'
+import 'jqueryui/resizable'
 
 var uiDialogClasses = "ui-dialog ui-widget ui-widget-content ui-corner-all ",
 	sizeRelatedOptions = {
@@ -99,10 +97,6 @@ $.widget("ui.dialog", {
 
 			uiDialog = ( this.uiDialog = $( "<div>" ) )
 				.addClass( uiDialogClasses + options.dialogClass )
-				.attr({
-					role: "dialog",
-					"aria-hidden": true,
-				})
 				.css({
 					display: "none",
 					outline: 0, // TODO: move to stylesheet
@@ -133,10 +127,8 @@ $.widget("ui.dialog", {
 					"ui-corner-all  ui-helper-clearfix" )
 				.prependTo( uiDialog ),
 
-			uiDialogTitlebarClose = $( "<a href='#'></a>" )
+			uiDialogTitlebarClose = $( "<button></button>" )
 				.addClass( "ui-dialog-titlebar-close  ui-corner-all" )
-				.attr( "role", "button" )
-				.attr( "tabindex", 0)
 				.click(function( event ) {
 					event.preventDefault();
 					that.close( event );
@@ -234,6 +226,7 @@ $.widget("ui.dialog", {
 		}
 
 		this._isOpen = false;
+		this.uiDialog.attr('aria-hidden', true);
 
 		if ( this.overlay ) {
 			this.overlay.destroy();
@@ -249,7 +242,6 @@ $.widget("ui.dialog", {
 			this._trigger( "close", event );
 		}
 
-		this.uiDialog.attr('aria-hidden', true);
 		$.ui.dialog.overlay.resize();
 
 		// adjust the maxZ to allow other modal dialogs to continue to work (see #4309)
@@ -350,7 +342,24 @@ $.widget("ui.dialog", {
 				if ( index == -1 ) {return;}
 				var targetIndex = index + (event.shiftKey ? -1 : 1);
 				targetIndex = (targetIndex + tabbables.length) % tabbables.length;
-				tabbables.eq(targetIndex).focus();
+				var target = tabbables.eq(targetIndex)
+
+        if (target[0].nodeName.toUpperCase() !== 'IFRAME') {
+          target.focus();
+        } else {
+          return;
+        }
+
+				// when switching to a target for which the browser would select the
+				// full contents on default tab behavior, we still want to do the same.
+				var fullSelectTypes = [
+				  'input[type="text"]', 'input[type="password"]', 'input[type="number"]',
+				  'input[type="datetime"]', 'input[type="email"]',
+				  'input[type="search"]', 'input[type="tel"]', 'input[type="url"]'
+				];
+				if (target.is(fullSelectTypes.join(',')))
+				  target[0].select();
+
 				return false;
 			}});
 		}
@@ -367,7 +376,12 @@ $.widget("ui.dialog", {
 
 		this.uiDialog.attr('aria-hidden', false);
 		if ($.browser && $.browser.safari) {
-			hasFocus.eq( 0 ).focus();
+      var titleClose = this.uiDialog.find('.ui-dialog-titlebar-close');
+      if (titleClose.length) {
+        titleClose.focus();
+      } else {
+        hasFocus.eq( 0 ).focus();
+      }
 		}
 
 		this._isOpen = true;
@@ -879,4 +893,4 @@ $.extend( $.ui.dialog.overlay.prototype, {
 	}
 });
 
-});
+

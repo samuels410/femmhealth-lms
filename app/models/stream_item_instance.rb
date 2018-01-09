@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,11 +21,9 @@ class StreamItemInstance < ActiveRecord::Base
 
   belongs_to :user
   belongs_to :stream_item
-  belongs_to :context, :polymorphic => true
+  belongs_to :context, polymorphic: [:course, :account, :group, :assignment_override]
 
   validates_presence_of :stream_item_id, :user_id, :context_id, :context_type
-
-  attr_accessible :user, :stream_item, :context
 
   before_save :set_context_code
   def set_context_code

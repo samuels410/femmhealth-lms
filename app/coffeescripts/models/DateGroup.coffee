@@ -1,9 +1,27 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'Backbone'
   'underscore'
   'jquery'
   'i18n!assignments'
-], (Backbone, _, $, I18n) ->
+  'timezone'
+], (Backbone, _, $, I18n, tz) ->
 
   class DateGroup extends Backbone.Model
 
@@ -15,19 +33,19 @@ define [
 
     dueAt: ->
       dueAt = @get("due_at")
-      if dueAt then Date.parse(dueAt) else null
+      if dueAt then tz.parse(dueAt) else null
 
     unlockAt: ->
       unlockAt = @get("unlock_at")
-      if unlockAt then Date.parse(unlockAt) else null
+      if unlockAt then tz.parse(unlockAt) else null
 
     lockAt: ->
       lockAt = @get("lock_at")
-      if lockAt then Date.parse(lockAt) else null
+      if lockAt then tz.parse(lockAt) else null
 
     now: ->
       now = @get("now")
-      if now then Date.parse(now) else new Date()
+      if now then tz.parse(now) else new Date()
 
 
     # no lock/unlock dates

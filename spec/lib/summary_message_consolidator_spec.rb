@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -28,9 +28,9 @@ describe "SummaryMessageConsolidator" do
     expects_job_with_tag('Delayed::Batch.serial', 2) do
       SummaryMessageConsolidator.process
     end
-    messages.each { |m| m.reload.workflow_state.should == 'sent'; m.batched_at.should be_present }
+    messages.each { |m| expect(m.reload.workflow_state).to eq 'sent'; expect(m.batched_at).to be_present }
     queued = created_jobs.map { |j| j.payload_object.jobs.map { |j| j.payload_object.args } }.flatten
-    queued.map(&:to_i).sort.should == messages.map(&:id).sort
+    expect(queued.map(&:to_i).sort).to eq messages.map(&:id).sort
   end
 
   it "should send summaries from different accounts in separate messages" do
@@ -49,7 +49,7 @@ describe "SummaryMessageConsolidator" do
     end
 
     SummaryMessageConsolidator.process
-    dm_summarize_expectation = DelayedMessage.expects(:summarize)
+    dm_summarize_expectation = expect(DelayedMessage).to receive(:summarize)
     dms.each_slice(delayed_messages_per_account) do |dms|
       dm_summarize_expectation.with(dms.map(&:id))
     end

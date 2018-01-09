@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012-2013 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -59,6 +59,9 @@ define [
 
     pending: (role) ->
       _.any @get('enrollments'), (e) -> e.role == role && e.enrollment_state in ['creation_pending', 'invited']
+
+    inactive: ->
+      _.all @get('enrollments'), (e) -> e.enrollment_state == 'inactive'
 
     sectionEditableEnrollments: ->
       _.select @get('enrollments'), (e) -> not _.include(['DesignerEnrollment', 'ObserverEnrollment'], e.type)

@@ -1,3 +1,22 @@
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
+<% outcome_result ||= nil %>
 <% show_results_link = true if show_results_link.nil? %>
 <li class="outcome_result" id="result_<%= outcome_result ? outcome_result.id : "blank" %>" style="<%= hidden unless outcome_result %>">
   <% if show_results_link %>
@@ -17,7 +36,7 @@
           :possible_points => raw("<span class=\"possible\">#{outcome_result.try_rescue(:possible) || nbsp}</span>")
     %>
     <% if outcome_result && outcome_result.mastery? %>
-      <span class="mastery">(<%= image_tag "graded.16px.png" %> <%= t :outcome_mastered, 'mastered' %>)</span>
+      <span class="mastery">(<i class="icon-check" aria-hidden="true"></i><%= t :outcome_mastered, 'mastered' %>)</span>
     <% end %>
   </div>
   <div class="last_attempt">

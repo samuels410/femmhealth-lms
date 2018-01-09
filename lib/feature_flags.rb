@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -27,10 +27,10 @@ module FeatureFlags
     false
   end
 
-  def feature_allowed?(feature)
+  def feature_allowed?(feature, exclude_enabled: false)
     flag = lookup_feature_flag(feature)
-    return flag.allowed? if flag
-    false
+    return false unless flag
+    exclude_enabled ? flag.allowed? : flag.enabled? || flag.allowed?
   end
 
   def set_feature_flag!(feature, state)
@@ -38,6 +38,8 @@ module FeatureFlags
     flag = self.feature_flags.where(feature: feature).first
     flag ||= self.feature_flags.build(feature: feature)
     flag.state = state
+    @feature_flag_cache ||= {}
+    @feature_flag_cache[feature] = flag
     flag.save!
   end
 
@@ -58,17 +60,20 @@ module FeatureFlags
   end
 
   def feature_flag_cache_key(feature)
-    ['feature_flag', self.class.name, self.global_id, feature.to_s].cache_key
+    ['feature_flag3', self.class.name, self.global_id, feature.to_s].cache_key
+  end
+
+  def feature_flag_cache
+    Rails.cache
   end
 
   # return the feature flag for the given feature that is defined on this object, if any.
   # (helper method.  use lookup_feature_flag to test policy.)
   def feature_flag(feature)
     self.shard.activate do
-      result = Rails.cache.fetch(feature_flag_cache_key(feature)) do
-        self.feature_flags.where(feature: feature.to_s).first || :nil
+      result = feature_flag_cache.fetch(feature_flag_cache_key(feature)) do
+        self.feature_flags.where(feature: feature.to_s).first
       end
-      result = nil if result == :nil
       result
     end
   end
@@ -76,13 +81,14 @@ module FeatureFlags
   # each account that needs to be searched for a feature flag, in priority order,
   # starting with site admin
   def feature_flag_account_ids
-    Rails.cache.fetch(['feature_flag_account_ids', self].cache_key) do
-      parent = if self.is_a?(Course)
-                 self.account
-               elsif self.is_a?(Account)
-                 self.parent_account
-               end
-      (parent ? parent.account_chain(include_site_admin: true).reverse : [Account.site_admin]).map(&:global_id)
+    return [Account.site_admin.global_id] if is_a?(User)
+
+    RequestCache.cache('feature_flag_account_ids', self) do
+      Rails.cache.fetch(['feature_flag_account_ids', self].cache_key) do
+        chain = account_chain(include_site_admin: true)
+        chain.shift if is_a?(Account)
+        chain.reverse.map(&:global_id)
+      end
     end
   end
 
@@ -99,15 +105,20 @@ module FeatureFlags
     is_site_admin = self.is_a?(Account) && self.site_admin?
 
     # inherit the feature definition as a default unless it's a hidden feature
-    retval = feature_def unless feature_def.hidden? && !is_site_admin && !(is_root_account && override_hidden)
+    retval = feature_def.clone_for_cache unless feature_def.hidden? && !is_site_admin && !override_hidden
 
     @feature_flag_cache ||= {}
     return @feature_flag_cache[feature] if @feature_flag_cache.key?(feature)
 
     # find the highest flag that doesn't allow override,
     # or the most specific flag otherwise
-    account_ids = feature_flag_account_ids
-    accounts = Account.find_all_by_id(account_ids, :select => :id).sort_by{|a| account_ids.index(a.global_id)}
+    accounts = feature_flag_account_ids.map do |id|
+      account = Account.new
+      account.id = id
+      account.shard = Shard.shard_for(id, self.shard)
+      account.readonly!
+      account
+    end
     (accounts + [self]).each do |context|
       flag = context.feature_flag(feature)
       next unless flag
@@ -117,11 +128,11 @@ module FeatureFlags
 
     # if this feature requires root account opt-in, reject a default or site admin flag
     # if the context is beneath a root account
-    if retval && retval.allowed? && feature_def.root_opt_in && !is_site_admin &&
+    if retval && (retval.allowed? || retval.hidden?) && feature_def.root_opt_in && !is_site_admin &&
         (retval.default? || retval.context_type == 'Account' && retval.context_id == Account.site_admin.id)
       if is_root_account
         # create a virtual feature flag in "off" state
-        retval = self.feature_flags.build feature: feature, state: 'off'
+        retval = self.feature_flags.temp_record feature: feature, state: 'off' unless retval.hidden?
       else
         # the feature doesn't exist beneath the root account until the root account opts in
         return @feature_flag_cache[feature] = nil
@@ -130,5 +141,5 @@ module FeatureFlags
 
     @feature_flag_cache[feature] = retval
   end
-
 end
+

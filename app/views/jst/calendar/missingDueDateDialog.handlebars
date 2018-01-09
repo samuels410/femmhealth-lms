@@ -1,13 +1,16 @@
 <div>
   <p>
-    {{#toSentence sections}}<b>{{this}}</b>{{/toSentence}}
-    {{description}}
-  <p>
-  {{#t "modal.chooseDueDate"}}Do you want to go back and select a due date?{{/t}}
+    {{#t}}Not all sections will be assigned this item.{{/t}}
   </p>
+  {{#t}}Would you like to go back to include:{{/t}}
+  <ul aria-label="{{#toSentence sections}}{{this}}{{/toSentence}}">
+    {{#each sections}}<li><b>{{this}}</b></li>{{/each}}
+  </ul>
 
   <div class="button-container form-actions">
-    <button type="button" class="btn">{{#t "buttons.noDueDate"}}No Due Date{{/t}}</button>
-    <button type="button" class="btn btn-primary">{{#t "buttons.goBack"}}Go Back{{/t}}</button>
+    <button type="button" class="btn">{{#t}}Go Back{{/t}}</button>
+    <button type="button" class="btn btn-primary">
+      {{#t}}Continue{{/t}}
+    </button>
   </div>
 </div>

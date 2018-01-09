@@ -1,4 +1,22 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
   'underscore'
   'i18n!discussions'
   'compiled/discussions/MarkAsReadWatcher'
@@ -13,10 +31,10 @@ define [
   'compiled/discussions/EntryEditor'
   'str/htmlEscape'
   'vendor/jquery.ba-tinypubsub'
-  'compiled/str/convertApiUserContent'
+  'compiled/str/apiUserContent'
   'jst/_avatar'
   'jst/discussions/_reply_form'
-], (_, I18n, MarkAsReadWatcher, walk, Backbone, EntryCollection, entryContentPartial, deletedEntriesTemplate, entryWithRepliesTemplate, entryStats, Reply, EntryEditor, htmlEscape, {publish}, convertApiUserContent) ->
+], ($, _, I18n, MarkAsReadWatcher, walk, Backbone, EntryCollection, entryContentPartial, deletedEntriesTemplate, entryWithRepliesTemplate, entryStatsTemplate, Reply, EntryEditor, htmlEscape, {publish}, apiUserContent) ->
 
   class EntryView extends Backbone.View
 
@@ -39,6 +57,8 @@ define [
       '.replies:first': '$replies'
       '.headerBadges:first': '$headerBadges'
       '.discussion-read-state-btn:first': '$readStateToggle'
+      '.discussion-rate-action': '$rateLink'
+      '.discussion-rating': '$ratingSum'
 
     events:
       'click .loadDescendants': 'loadDescendants'
@@ -61,10 +81,21 @@ define [
       super
       @constructor.instances[@cid] = this
       @$el.attr 'id', "entry-#{@model.get 'id'}"
+      @$el.toggleClass 'no-replies', !@model.hasActiveReplies()
+      @$el.addClass 'deleted' if @model.get 'deleted'
       @model.on 'change:deleted', @toggleDeleted
       @model.on 'change:read_state', @toggleReadState
-      @model.on 'change:editor', @render
-      @model.on 'change:editor', (entry) -> entry.trigger('edited')
+      @model.on 'change:editor', (entry) =>
+        @render()
+        entry.trigger('edited')
+      @model.on 'change:replies', (model, value) =>
+        @$el.toggleClass 'no-replies', !@model.hasActiveReplies()
+        if _.isEmpty(value)
+          delete @treeView
+        else
+          @renderTree()
+      @model.on 'change:rating', @renderRating
+      @model.on 'change:rating_sum', @renderRatingSum
 
     toggleRead: (e) ->
       e.preventDefault()
@@ -94,10 +125,10 @@ define [
 
     toJSON: ->
       json = @model.attributes
-      json.edited_at = $.parseFromISO(json.updated_at).datetime_formatted
+      json.edited_at = $.datetimeString(json.updated_at)
       if json.editor
         json.editor_name = json.editor.display_name
-        json.editor_href = "href=\"#{json.editor.html_url}\""
+        json.editor_href = json.editor.html_url
       else
         json.editor_name = I18n.t 'unknown', 'Unknown'
         json.editor_href = ""
@@ -111,6 +142,10 @@ define [
     toggleCollapsed: (event, $el)->
       @addCountsToHeader() unless @addedCountsToHeader
       @$el.toggleClass 'collapsed'
+      if @$el.hasClass('collapsed')
+        $el.find('.screenreader-only').text(I18n.t('Expand Subdiscussion'))
+      else
+        $el.find('.screenreader-only').text(I18n.t('Collapse Subdiscussion'))
 
     expand: ->
       @$el.removeClass 'collapsed'
@@ -121,16 +156,11 @@ define [
 
     addCountsToHeader: ->
       stats = @countPosterity()
-      html = """
-        <div class='new-and-total-badge'>
-          <span class="new-items">#{stats.unread}</span>
-          <span class="total-items">#{stats.total}</span>
-        </div>
-        """
-      @$headerBadges.append entryStats({stats})
+      @$headerBadges.append entryStatsTemplate({stats})
       @addedCountsToHeader = true
 
     toggleDeleted: (model, deleted) =>
+      @$el.toggleClass 'deleted', deleted
       @$entryContent.toggleClass 'deleted-discussion-entry', deleted
       if deleted
         @model.set('updated_at', (new Date).toISOString())
@@ -149,6 +179,8 @@ define [
       super
       @collapse() if @options.collapsed
       @setToggleTooltip()
+      @renderRating()
+      @renderRatingSum()
       if @model.get('read_state') is 'unread' and !@model.get('forced_read_state') and !ENV.DISCUSSION.MANUAL_MARK_AS_READ
         @readMarker ?= new MarkAsReadWatcher this
         # this is throttled so calling it here is okay
@@ -164,8 +196,6 @@ define [
       descendants = (opts.descendants or @options.descendants) - 1
       children = opts.children or @options.children
       collection = new EntryCollection replies, perPage: children
-      boundReplies = collection.map (x) -> x.attributes
-      @model.set 'replies', boundReplies
 
       page = collection.getPageAsCollection 0
       @treeView = new @options.treeView
@@ -176,12 +206,15 @@ define [
         showMoreDescendants: @options.showMoreDescendants
       @treeView.render()
 
+      boundReplies = collection.map (x) -> x.attributes
+      @model.set 'replies', boundReplies
+
     renderDescendantsLink: ->
       stats = @countPosterity()
-      @descendantsLink = $ '<div/>'
-      @descendantsLink.html entryStats({stats, showMore: yes})
-      @descendantsLink.addClass 'showMore loadDescendants'
-      @$replies.append @descendantsLink
+      @$descendantsLink = $ '<div/>'
+      @$descendantsLink.html entryStatsTemplate({stats, showMore: yes})
+      @$descendantsLink.addClass 'showMore loadDescendants'
+      @$replies.append @$descendantsLink
 
     countPosterity: ->
       stats = unread: 0, total: 0
@@ -204,7 +237,7 @@ define [
         @model.set 'deleted', true
         @model.destroy()
         html = deletedEntriesTemplate @toJSON()
-        @$('.entry_content:first').html html
+        @$('.entry-content:first').html html
 
     edit: ->
       return unless @model.canModerate()
@@ -228,6 +261,17 @@ define [
         @trigger 'addReply'
         EntryView.trigger 'addReply', entry
 
+    toggleLike: (e) ->
+      e.preventDefault()
+      @model.toggleLike()
+
+    renderRating: =>
+      @$rateLink.toggleClass('discussion-rate-action--checked', !!@model.get('rating'))
+      @$rateLink.attr('aria-checked', if @model.get('rating') then 'true' else 'false')
+
+    renderRatingSum: =>
+      @$ratingSum.text(@model.ratingString())
+
     addReplyAttachment: (event, $el) ->
       event.preventDefault()
       @reply.addAttachment($el)
@@ -238,7 +282,7 @@ define [
 
     format: (attr, value) ->
       if attr is 'message'
-        value = convertApiUserContent(value)
+        value = apiUserContent.convert(value)
         @$el.find('.message').removeClass('enhanced')
         publish('userContent/change')
         value

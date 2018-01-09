@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,15 +12,13 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-  'i18n!quizzes.timing',
-  'jquery' /* $ */,
-  'vendor/date' /* Date.parse */
-], function(I18n, $) {
+import I18n from 'i18n!quizzes.timing'
+import $ from 'jquery'
+import './vendor/date' /* Date.parse */
 
 var timing = {
   initialTime: new Date(),
@@ -36,10 +34,10 @@ var timing = {
     var result = {};
     result.referenceDate = Date.parse(end_at);
     result.isDeadline = true;
-    $(".time_header").text(I18n.beforeLabel('time_remaining', "Time Remaining"));
+    $(".time_header").text(I18n.beforeLabel(I18n.t('labels.time_remaining', "Time Remaining")));
     if(!result.referenceDate) {
       result.isDeadline = false;
-      $(".time_header").text(I18n.beforeLabel('time_elapsed', "Time Elapsed"));
+      $(".time_header").text(I18n.beforeLabel(I18n.t('labels.time_elapsed', "Time Elapsed")));
       result.referenceDate = Date.parse(started_at);
     }
     result.clientServerDiff = timing.clientServerDiff;
@@ -47,5 +45,4 @@ var timing = {
   }
 };
 
-return timing;
-});
+export default timing;

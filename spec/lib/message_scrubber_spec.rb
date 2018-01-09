@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,17 +16,18 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
+require File.expand_path(File.dirname(__FILE__) + '/../sharding_spec_helper')
 
 describe MessageScrubber do
 
   # Helpers
-  def message(sent_at)
-    message = Message.new(notification: @notification, context: @context,
+  def message(updated_at)
+    Timecop.travel(updated_at) do
+      message = Message.new(notification: @notification, context: @context,
             communication_channel: @recipient.communication_channel)
-    message.sent_at = sent_at
-    message.save!
-    message
+      message.save!
+      message
+    end
   end
 
   def old_messages(count = 2)
@@ -44,9 +45,9 @@ describe MessageScrubber do
   describe '#scrub' do
 
     before(:each) do
-      @context      = course
+      @context      = course_factory
       @notification = Notification.create!(name: 'Test Notification', category: 'Test')
-      @recipient    = user
+      @recipient    = user_factory
 
       @recipient.communication_channels.create!(path_type: 'email', path: 'user@example.com')
     end
@@ -55,7 +56,7 @@ describe MessageScrubber do
       messages = old_messages(2)
       scrubber = MessageScrubber.new
       scrubber.scrub
-      Message.where(id: messages.map(&:id)).count.should == 0
+      expect(Message.where(id: messages.map(&:id)).count).to eq 0
     end
 
     it 'should not delete messages younger than 360 days' do
@@ -63,15 +64,15 @@ describe MessageScrubber do
 
       scrubber = MessageScrubber.new
       scrubber.scrub
-      Message.where(id: messages.map(&:id)).count.should == 1
+      expect(Message.where(id: messages.map(&:id)).count).to eq 1
     end
 
     it 'should log predicted results if passed dry_run=true' do
-      logger   = mock
+      logger   = double
       messages = old_messages(2)
       scrubber = MessageScrubber.new(logger: logger)
 
-      logger.expects(:info).with("MessageScrubber: 2 records would be deleted (older than #{scrubber.limit})")
+      expect(logger).to receive(:info).with("MessageScrubber: 2 records would be deleted (older than #{scrubber.limit})")
       scrubber.scrub(dry_run: true)
     end
   end
@@ -84,15 +85,15 @@ describe MessageScrubber do
       @notification = Notification.create!(name: 'Test Notification', category: 'Test')
 
       @shard1.activate do
-        @context      = course
-        @recipient    = user(name: 'User One')
+        @context      = course_factory
+        @recipient    = user_factory(name: 'User One')
         @recipient.communication_channels.create!(path_type: 'email', path: 'user1@example.com')
         @messages.concat(old_messages(1))
       end
 
       @shard2.activate do
-        @context      = course
-        @recipient    = user(name: 'User Two')
+        @context      = course_factory
+        @recipient    = user_factory(name: 'User Two')
         @recipient.communication_channels.create!(path_type: 'email', path: 'user2@example.com')
         @messages.concat(old_messages(1))
       end
@@ -104,16 +105,16 @@ describe MessageScrubber do
       scrubber.scrub_all
       [@shard1, @shard2].each do |shard|
         shard.activate do
-          Message.where(id: @messages.map(&:id)).count.should == 0
+          expect(Message.where(id: @messages.map(&:id)).count).to eq 0
         end
       end
     end
 
     it 'should log each shard separately' do
-      logger   = mock
+      logger   = double
       scrubber = MessageScrubber.new(logger: logger)
 
-      logger.expects(:info).times(Shard.all.count)
+      expect(logger).to receive(:info).exactly(Shard.all.count).times
       scrubber.scrub_all(dry_run: true)
     end
   end

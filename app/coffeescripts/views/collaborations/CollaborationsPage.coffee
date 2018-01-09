@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,22 +17,22 @@
 #
 
 define [
+  'jquery'
   'underscore'
   'Backbone'
   'compiled/views/collaborations/CollaborationView'
   'compiled/views/collaborations/CollaborationFormView'
-], ({each, reject}, {View}, CollaborationView, CollaborationFormView) ->
-
+], ($, {each, reject}, {View}, CollaborationView, CollaborationFormView) ->
   class CollaborationsPage extends View
     events:
       'click .add_collaboration_link': 'addCollaboration'
+      'keyclick .add_collaboration_link': 'addCollaboration'
 
     initialize: ->
       super
       @cacheElements()
       @createViews()
       @attachEvents()
-      $(document).on('ready', @initPageState)
 
     # Internal: Set up page state on load.
     #
@@ -43,7 +43,6 @@ define [
         @$addLink.hide()
 
     cacheElements: ->
-      @$header  = $('h1:first')
       @$addLink = $('.add_collaboration_link')
       @$addForm = $('#new_collaboration')
       @$noCollaborationsMessage = $('#no_collaborations_message')
@@ -74,8 +73,7 @@ define [
 
     onFormHide: =>
       @$addLink.show()
-      @$header.focus()
+      @$addLink.focus()
 
     onFormError: ($input, message) =>
       $input.focus().errorBox(message)
-

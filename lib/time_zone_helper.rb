@@ -1,6 +1,6 @@
 # encoding: UTF-8
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -24,10 +24,16 @@
 module TimeZoneHelper
   module ClassMethods
     def time_zone_attribute(attr, options = {})
-      class_eval <<-CODE
+      self.time_zone_attribute_defaults ||= {}
+      time_zone_attribute_defaults[attr] = options[:default]
+      unless @time_zone_attributes_module
+        @time_zone_attributes_module = Module.new
+        include(@time_zone_attributes_module)
+      end
+      @time_zone_attributes_module.class_eval <<-CODE, __FILE__, __LINE__ + 1
         def #{attr}
-          value = read_attribute(:#{attr})
-          #{options[:default] ? "value ||= #{options[:default].inspect}" : "return nil unless value"}
+          value = super
+          value ||= self.class.time_zone_attribute_defaults[#{attr.inspect}] or return
           TimeZoneHelper.rails_preferred_zone(ActiveSupport::TimeZone[value])
         end
 
@@ -35,8 +41,7 @@ module TimeZoneHelper
           if value.is_a?(String)
             value = ActiveSupport::TimeZone[value]
           end
-          write_attribute(:#{attr}, value.try(:name))
-          value
+          super(value.try(:name))
         end
       CODE
     end
@@ -62,6 +67,7 @@ module TimeZoneHelper
   end
 
   def self.included(klass)
-    klass.send(:extend, ClassMethods)
+    klass.singleton_class.include(ClassMethods)
+    klass.send(:class_attribute, :time_zone_attribute_defaults)
   end
 end

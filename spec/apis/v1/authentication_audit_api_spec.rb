@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - 2014 Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,12 +17,13 @@
 #
 
 require File.expand_path(File.dirname(__FILE__) + '/../api_spec_helper')
+require File.expand_path(File.dirname(__FILE__) + '/../../sharding_spec_helper')
 require File.expand_path(File.dirname(__FILE__) + '/../../cassandra_spec_helper')
 
 describe "AuthenticationAudit API", type: :request do
   context "not configured" do
     before do
-      Canvas::Cassandra::DatabaseBuilder.stubs(:configured?).with('auditors').returns(false)
+      allow(Canvas::Cassandra::DatabaseBuilder).to receive(:configured?).with('auditors').and_return(false)
       site_admin_user(user: user_with_pseudonym(account: Account.site_admin))
     end
 
@@ -37,14 +38,16 @@ describe "AuthenticationAudit API", type: :request do
 
     before do
       Setting.set('enable_page_views', 'cassandra')
-      @request_id = UUIDSingleton.instance.generate
-      RequestContextGenerator.stubs( :request_id => @request_id )
+      @request_id = SecureRandom.uuid
+      allow(RequestContextGenerator).to receive_messages( :request_id => @request_id )
 
       @viewing_user = site_admin_user(user: user_with_pseudonym(account: Account.site_admin))
       @account = Account.default
+      @custom_role = custom_account_role('CustomAdmin', :account => @account)
+      @custom_sa_role = custom_account_role('CustomAdmin', :account => Account.site_admin)
       user_with_pseudonym(active_all: true)
 
-      @page_view = PageView.new(options)
+      @page_view = PageView.new
       @page_view.user = @viewing_user
       @page_view.request_id = @request_id
       @page_view.remote_ip = '10.10.10.10'
@@ -85,16 +88,16 @@ describe "AuthenticationAudit API", type: :request do
     def expect_event_for_context(context, event, options={})
       json = options.delete(:json)
       json ||= fetch_for_context(context, options)
-      json['events'].map{ |e| [e['id'], e['event_type']] }
-                    .should include([event.id, event.event_type])
+      expect(json['events'].map{ |e| [e['id'], e['event_type']] })
+                    .to include([event.id, event.event_type])
       json
     end
 
     def forbid_event_for_context(context, event, options={})
       json = options.delete(:json)
       json ||= fetch_for_context(context, options)
-      json['events'].map{ |e| [e['id'], e['event_type']] }
-                    .should_not include([event.id, event.event_type])
+      expect(json['events'].map{ |e| [e['id'], e['event_type']] })
+                    .not_to include([event.id, event.event_type])
       json
     end
 
@@ -104,7 +107,7 @@ describe "AuthenticationAudit API", type: :request do
       end
 
       it "should have correct root keys" do
-        @json.keys.sort.should == %w{events linked links}
+        expect(@json.keys.sort).to eq %w{events linked links}
       end
 
       it "should have a formatted links key" do
@@ -114,15 +117,15 @@ describe "AuthenticationAudit API", type: :request do
           "events.user" => nil,
           "events.page_view" => nil
         }
-        @json['links'].should == links
+        expect(@json['links']).to eq links
       end
 
       it "should have a formatted linked key" do
-        @json['linked'].keys.sort.should == %w{accounts logins page_views users}
-        @json['linked']['accounts'].is_a?(Array).should be_true
-        @json['linked']['logins'].is_a?(Array).should be_true
-        @json['linked']['page_views'].is_a?(Array).should be_true
-        @json['linked']['users'].is_a?(Array).should be_true
+        expect(@json['linked'].keys.sort).to eq %w{accounts logins page_views users}
+        expect(@json['linked']['accounts'].is_a?(Array)).to be_truthy
+        expect(@json['linked']['logins'].is_a?(Array)).to be_truthy
+        expect(@json['linked']['page_views'].is_a?(Array)).to be_truthy
+        expect(@json['linked']['users'].is_a?(Array)).to be_truthy
       end
 
       describe "events collection" do
@@ -131,7 +134,7 @@ describe "AuthenticationAudit API", type: :request do
         end
 
         it "should be formatted as an array of AuthenticationEvent objects" do
-          @json.should == [{
+          expect(@json).to eq [{
             "id" => @event.id,
             "created_at" => @event.created_at.in_time_zone.iso8601,
             "event_type" => @event.event_type,
@@ -151,12 +154,14 @@ describe "AuthenticationAudit API", type: :request do
         end
 
         it "should be formatted as an array of Pseudonym objects" do
-          @json.should == [{
+          expect(@json).to eq [{
             "id" => @pseudonym.id,
             "account_id" => @account.id,
             "user_id" => @user.id,
             "unique_id" => @pseudonym.unique_id,
-            "sis_user_id" => nil
+            "sis_user_id" => nil,
+            "integration_id" => nil,
+            "authentication_provider_id" => nil
           }]
         end
       end
@@ -167,11 +172,13 @@ describe "AuthenticationAudit API", type: :request do
         end
 
         it "should be formatted as an array of Account objects" do
-          @json.should == [{
+          expect(@json).to eq [{
             "id" => @account.id,
+            "uuid" => @account.uuid,
             "name" => @account.name,
             "parent_account_id" => nil,
             "root_account_id" => nil,
+            "workflow_state" => 'active',
             "default_time_zone" => @account.default_time_zone.tzinfo.name,
             "default_storage_quota_mb" => @account.default_storage_quota_mb,
             "default_user_storage_quota_mb" => @account.default_user_storage_quota_mb,
@@ -186,11 +193,14 @@ describe "AuthenticationAudit API", type: :request do
         end
 
         it "should be formatted as an array of User objects" do
-          @json.should == [{
+          expect(@json).to eq [{
             "id" => @user.id,
             "name" => @user.name,
             "sortable_name" => @user.sortable_name,
             "short_name" => @user.short_name,
+            "sis_user_id"=>nil,
+            "integration_id"=>nil,
+            "sis_import_id"=>nil,
             "login_id" => @pseudonym.unique_id
           }]
         end
@@ -202,7 +212,7 @@ describe "AuthenticationAudit API", type: :request do
         end
 
         it "should be formatted as an array of page_view objects" do
-          @json.size.should eql(1)
+          expect(@json.size).to eql(1)
         end
       end
     end
@@ -262,7 +272,7 @@ describe "AuthenticationAudit API", type: :request do
       before do
         @event2 = @pseudonym.shard.activate do
           record = Auditors::Authentication::Record.new(
-            'id' => UUIDSingleton.instance.generate,
+            'id' => SecureRandom.uuid,
             'created_at' => 1.day.ago,
             'pseudonym' => @pseudonym,
             'event_type' => 'logout')
@@ -325,6 +335,16 @@ describe "AuthenticationAudit API", type: :request do
         @user, @viewing_user = @user, user_model
       end
 
+      it "should not allow other account models" do
+        new_root_account = Account.create!(name: 'New Account')
+        allow(LoadAccount).to receive(:default_domain_root_account).and_return(new_root_account)
+        @user, @pseudonym, @viewing_user = @user, @pseudonym, user_with_pseudonym(account: new_root_account)
+
+        fetch_for_context(@pseudonym, expected_status: 401, type: 'login')
+        fetch_for_context(@account, expected_status: 401)
+        fetch_for_context(@user, expected_status: 401)
+      end
+
       context "no permission on account" do
         it "should not authorize the login endpoint" do
           fetch_for_context(@pseudonym, expected_status: 401, type: 'login')
@@ -343,7 +363,7 @@ describe "AuthenticationAudit API", type: :request do
         before do
           @user, _ = @user, account_admin_user_with_role_changes(
             :account => @account, :user => @viewing_user,
-            :membership_type => 'CustomAdmin',
+            :role => @custom_role,
             :role_changes => {:view_statistics => true})
         end
 
@@ -364,7 +384,7 @@ describe "AuthenticationAudit API", type: :request do
         before do
           @user, _ = @user, account_admin_user_with_role_changes(
             :account => @account, :user => @viewing_user,
-            :membership_type => 'CustomAdmin',
+            :role => @custom_role,
             :role_changes => {:manage_user_logins => true})
         end
 
@@ -385,7 +405,7 @@ describe "AuthenticationAudit API", type: :request do
         before do
           @user, _ = @user, account_admin_user_with_role_changes(
             :account => Account.site_admin, :user => @viewing_user,
-            :membership_type => 'CustomAdmin',
+            :role => @custom_sa_role,
             :role_changes => {:view_statistics => true})
         end
 
@@ -406,7 +426,7 @@ describe "AuthenticationAudit API", type: :request do
         before do
           @user, _ = @user, account_admin_user_with_role_changes(
             :account => Account.site_admin, :user => @viewing_user,
-            :membership_type => 'CustomAdmin',
+            :role => @custom_sa_role,
             :role_changes => {:manage_user_logins => true})
         end
 
@@ -427,9 +447,10 @@ describe "AuthenticationAudit API", type: :request do
         before do
           @account = account_model
           user_with_pseudonym(user: @user, account: @account, active_all: true)
+          custom_role = custom_account_role('CustomAdmin', :account => @account)
           @user, _ = @user, account_admin_user_with_role_changes(
             :account => @account, :user => @viewing_user,
-            :membership_type => 'CustomAdmin',
+            :role => custom_role,
             :role_changes => {:manage_user_logins => true})
         end
 
@@ -443,7 +464,7 @@ describe "AuthenticationAudit API", type: :request do
           before do
             @user, _ = @user, account_admin_user_with_role_changes(
               :account => Account.site_admin, :user => @viewing_user,
-              :membership_type => 'CustomAdmin',
+              :role => @custom_sa_role,
               :role_changes => {:manage_user_logins => true})
           end
 
@@ -484,9 +505,10 @@ describe "AuthenticationAudit API", type: :request do
         before do
           @user, @viewing_user = @user, @shard2.activate{ user_model }
           @user, _ = @user, @shard2.activate do
+            custom_role = custom_account_role("CustomAdmin", :account => @account)
             account_admin_user_with_role_changes(
               :account => @account, :user => @viewing_user,
-              :membership_type => 'CustomAdmin',
+              :role => custom_role,
               :role_changes => {:manage_user_logins => true})
           end
         end
@@ -510,11 +532,11 @@ describe "AuthenticationAudit API", type: :request do
       end
 
       it "should only return one page of results" do
-        @json['events'].size.should == 2
+        expect(@json['events'].size).to eq 2
       end
 
       it "should have pagination headers" do
-        response.headers['Link'].should match(/rel="next"/)
+        expect(response.headers['Link']).to match(/rel="next"/)
       end
     end
   end

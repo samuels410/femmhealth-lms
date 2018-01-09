@@ -1,10 +1,29 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
-  'underscore'
+  'jquery'
   'Backbone'
   'jst/groups/manage/group'
   'compiled/views/groups/manage/GroupUsersView'
   'compiled/views/groups/manage/GroupDetailView'
-], (_, {View}, template, GroupUsersView, GroupDetailView) ->
+  'compiled/views/groups/manage/GroupCategoryCloneView'
+  'compiled/util/groupHasSubmissions'
+], ($, {View}, template, GroupUsersView, GroupDetailView, GroupCategoryCloneView, groupHasSubmissions) ->
 
   class GroupView extends View
 
@@ -41,6 +60,7 @@ define [
       @users = @model.users()
       @model.on 'destroy', @remove, this
       @model.on 'change:members_count', @updateFullState, this
+      @model.on 'change:max_membership', @updateFullState, this
 
     afterRender: ->
       @$el.toggleClass 'group-expanded', @expanded
@@ -56,7 +76,7 @@ define [
       else
         # enable droppable on the child GroupView (view)
         if !@$el.data('droppable')
-          @$el.droppable(_.extend({}, @dropOptions))
+          @$el.droppable(Object.assign({}, @dropOptions))
             .on('drop', @_onDrop)
         @$el.removeClass('slots-full')
 
@@ -71,7 +91,7 @@ define [
       e.preventDefault()
       e.stopPropagation()
       $target = $(e.currentTarget)
-      @addUnassignedMenu.groupId = @model.id
+      @addUnassignedMenu.group = @model
       @addUnassignedMenu.showBy $target, e.type is 'click'
 
     hideAddUser: (e) ->
@@ -81,6 +101,15 @@ define [
       @groupDetailView.closeMenu()
       @groupUsersView.closeMenus()
 
+    groupsAreDifferent: (user) =>
+      !user.has('group') || (user.get('group').get("id") != @model.get("id"))
+
+    eitherGroupHasSubmission: (user) =>
+      (user.has('group') && groupHasSubmissions user.get('group')) || groupHasSubmissions @model
+
+    isUnassignedUserWithSubmission: (user) =>
+      !user.has('group') && user.has('group_submissions') && user.get('group_submissions').length > 0
+
     ##
     # handle drop events on a GroupView
     # e - Event object.
@@ -89,6 +118,23 @@ define [
     #   ui.draggable - the user being dragged
     _onDrop: (e, ui) =>
       user = ui.draggable.data('model')
+      diffGroupsWithSubmission = @groupsAreDifferent(user) && @eitherGroupHasSubmission(user)
+      unassignedWithSubmission = @isUnassignedUserWithSubmission(user) && @model.usersCount() > 0
+
+      if diffGroupsWithSubmission || unassignedWithSubmission
+        @cloneCategoryView = new GroupCategoryCloneView
+          model: @model.collection.category,
+          openedFromCaution: true
+        @cloneCategoryView.open()
+        @cloneCategoryView.on "close", =>
+          if @cloneCategoryView.cloneSuccess
+            window.location.reload()
+          else if @cloneCategoryView.changeGroups
+            @moveUser(e, user)
+      else
+        @moveUser(e, user)
+
+    moveUser: (e, user) ->
       newGroupId = $(e.currentTarget).data('id')
       setTimeout =>
-        @model.collection.category.reassignUser(user, newGroupId)
+        @model.collection.category.reassignUser(user, @model.collection.get(newGroupId))

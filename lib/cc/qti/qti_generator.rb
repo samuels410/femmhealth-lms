@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,7 +20,7 @@ module CC
     class QTIGenerator
       include CC::CCHelper
       include QTIItems
-      delegate :add_error, :export_object?, :to => :@manifest
+      delegate :add_error, :export_object?, :add_exported_asset, :create_key, :to => :@manifest
 
       def initialize(manifest, resources_node, html_exporter)
         @manifest = manifest
@@ -35,7 +35,7 @@ module CC
         qti = QTI::QTIGenerator.new(*args)
         qti.generate
       end
-      
+
       # Common Cartridge QTI doesn't support many of the quiz features needed
       # for canvas so this will export a CC-friendly QTI file and one that supports
       # everything needed for Canvas quizzes. In addition to the canvas-specific
@@ -43,21 +43,30 @@ module CC
       def generate
         non_cc_folder = File.join(@export_dir, ASSESSMENT_NON_CC_FOLDER)
         FileUtils::mkdir_p non_cc_folder
-        
+
         @course.assessment_question_banks.active.each do |bank|
           next unless export_object?(bank)
           begin
             generate_question_bank(bank)
           rescue
-            title = bank.title rescue I18n.t('unknown_question_bank', "Unknown question bank")
+            title = if bank
+                      bank.title
+                    else
+                      I18n.t('unknown_question_bank', "Unknown question bank")
+                    end
+
             add_error(I18n.t('course_exports.errors.question_bank', "The question bank \"%{title}\" failed to export", :title => title), $!)
           end
         end
-        
-        @course.quizzes.active.each do |quiz|
+
+        Quizzes::ScopedToUser.new(@course, @user, @course.quizzes.active).scope.each do |quiz|
           next unless export_object?(quiz) || export_object?(quiz.assignment)
 
-          title = quiz.title rescue I18n.t('unknown_quiz', "Unknown quiz")
+          title = if quiz
+                    quiz.title
+                  else
+                    I18n.t('unknown_quiz', "Unknown quiz")
+                  end
 
           if quiz.assignment && !quiz.assignment.can_copy?(@user)
             add_error(I18n.t('course_exports.errors.quiz_is_locked', "The quiz \"%{title}\" could not be copied because it is locked.", :title => title))
@@ -72,25 +81,31 @@ module CC
         end
       end
 
-      def generate_quiz(quiz)
+      def generate_quiz(quiz, for_cc=true)
+        add_exported_asset(quiz)
+
         cc_qti_migration_id = create_key(quiz)
         resource_dir = File.join(@export_dir, cc_qti_migration_id)
         FileUtils::mkdir_p resource_dir
 
         # Create the CC-friendly QTI
-        cc_qti_rel_path = File.join(cc_qti_migration_id, ASSESSMENT_CC_QTI)
-        cc_qti_path = File.join(resource_dir, ASSESSMENT_CC_QTI)
+        file_name = for_cc ? ASSESSMENT_CC_QTI : "#{cc_qti_migration_id}.xml"
+        cc_qti_rel_path = File.join(cc_qti_migration_id, file_name)
+        cc_qti_path = File.join(@export_dir, cc_qti_rel_path)
+
         File.open(cc_qti_path, 'w') do |file|
           doc = Builder::XmlMarkup.new(:target=>file, :indent=>2)
-          generate_assessment(doc, quiz, cc_qti_migration_id)
+          generate_assessment(doc, quiz, cc_qti_migration_id, for_cc)
         end
 
-        # Create the Canvas-specific QTI data
-        canvas_qti_rel_path = File.join(ASSESSMENT_NON_CC_FOLDER, cc_qti_migration_id + QTI_EXTENSION)
-        canvas_qti_path = File.join(@export_dir, canvas_qti_rel_path)
-        File.open(canvas_qti_path, 'w') do |file|
-          doc = Builder::XmlMarkup.new(:target=>file, :indent=>2)
-          generate_assessment(doc, quiz, cc_qti_migration_id, false)
+        if for_cc
+          # Create the Canvas-specific QTI data
+          canvas_qti_rel_path = File.join(ASSESSMENT_NON_CC_FOLDER, cc_qti_migration_id + QTI_EXTENSION)
+          canvas_qti_path = File.join(@export_dir, canvas_qti_rel_path)
+          File.open(canvas_qti_path, 'w') do |file|
+            doc = Builder::XmlMarkup.new(:target=>file, :indent=>2)
+            generate_assessment(doc, quiz, cc_qti_migration_id, false)
+          end
         end
 
         # Create the canvas metadata
@@ -104,28 +119,32 @@ module CC
 
         @resources_node.resource(
                 :identifier => cc_qti_migration_id,
-                "type" => ASSESSMENT_TYPE
+                "type" => for_cc ? ASSESSMENT_TYPE : QTI_ASSESSMENT_TYPE
         ) do |res|
           res.file(:href=>cc_qti_rel_path)
           res.dependency(:identifierref=>alt_migration_id)
         end
+
         @resources_node.resource(
                 :identifier => alt_migration_id,
                 :type => LOR,
                 :href => meta_rel_path
         ) do |res|
           res.file(:href=>meta_rel_path)
-          res.file(:href=>canvas_qti_rel_path)
+          res.file(:href=>canvas_qti_rel_path) if for_cc
         end
       end
 
       def generate_qti_only
         FileUtils::mkdir_p @export_dir
 
+        non_cc_folder = File.join(@export_dir, ASSESSMENT_NON_CC_FOLDER)
+        FileUtils::mkdir_p non_cc_folder
+
         @course.quizzes.active.each do |quiz|
           next unless export_object?(quiz)
           begin
-            generate_qti_only_quiz(quiz)
+            generate_quiz(quiz, false)
           rescue
             title = quiz.title rescue I18n.t('unknown_quiz', "Unknown quiz")
             add_error(I18n.t('course_exports.errors.quiz', "The quiz \"%{title}\" failed to export", :title => title), $!)
@@ -133,27 +152,9 @@ module CC
         end
       end
 
-      def generate_qti_only_quiz(quiz)
-        mig_id = create_key(quiz)
-        resource_dir = File.join(@export_dir, mig_id)
-        FileUtils::mkdir_p resource_dir
-
-        canvas_qti_rel_path = File.join(mig_id, mig_id + ".xml")
-        canvas_qti_path = File.join(@export_dir, canvas_qti_rel_path)
-        File.open(canvas_qti_path, 'w') do |file|
-          doc = Builder::XmlMarkup.new(:target=>file, :indent=>2)
-          generate_assessment(doc, quiz, mig_id, false)
-        end
-
-        @resources_node.resource(
-                :identifier => mig_id,
-                "type" => QTI_ASSESSMENT_TYPE
-        ) do |res|
-          res.file(:href=>canvas_qti_rel_path)
-        end
-      end
-
       def generate_question_bank(bank)
+        add_exported_asset(bank)
+
         bank_mig_id = create_key(bank)
 
         rel_path = File.join(ASSESSMENT_NON_CC_FOLDER, bank_mig_id + QTI_EXTENSION)
@@ -181,12 +182,12 @@ module CC
         ) do |q_node|
           q_node.title quiz.title
           q_node.description @html_exporter.html_content(quiz.description || '')
-          q_node.lock_at ims_datetime(quiz.lock_at) if quiz.lock_at
-          q_node.unlock_at ims_datetime(quiz.unlock_at) if quiz.unlock_at
-          q_node.due_at ims_datetime(quiz.due_at) if quiz.due_at
+          q_node.lock_at ims_datetime(quiz.lock_at, nil) if quiz.lock_at
+          q_node.unlock_at ims_datetime(quiz.unlock_at, nil) if quiz.unlock_at
+          q_node.due_at ims_datetime(quiz.due_at, nil) if quiz.due_at
           q_node.shuffle_answers quiz.shuffle_answers unless quiz.shuffle_answers.nil?
           q_node.scoring_policy quiz.scoring_policy
-          q_node.hide_results quiz.hide_results unless quiz.hide_results.nil?
+          q_node.hide_results quiz.hide_results.to_s
           q_node.quiz_type quiz.quiz_type
           q_node.points_possible quiz.points_possible
           q_node.require_lockdown_browser quiz.require_lockdown_browser unless quiz.require_lockdown_browser.nil?
@@ -205,31 +206,45 @@ module CC
           q_node.one_question_at_a_time quiz.one_question_at_a_time?
           q_node.cant_go_back quiz.cant_go_back?
           q_node.available quiz.available?
+          q_node.one_time_results quiz.one_time_results?
+          q_node.show_correct_answers_last_attempt quiz.show_correct_answers_last_attempt?
+          q_node.only_visible_to_overrides quiz.only_visible_to_overrides?
+          q_node.module_locked quiz.locked_by_module_item?(@user, deep_check_if_needed: true).present?
           if quiz.assignment && !quiz.assignment.deleted?
-            assignment_migration_id = CCHelper.create_key(quiz.assignment)
+            assignment_migration_id = create_key(quiz.assignment)
             doc.assignment(:identifier=>assignment_migration_id) do |a|
-              AssignmentResources.create_assignment(a, quiz.assignment)
+              AssignmentResources.create_canvas_assignment(a, quiz.assignment, @manifest)
             end
           end
           if quiz.assignment_group_id
             ag = @course.assignment_groups.find(quiz.assignment_group_id)
             q_node.assignment_group_identifierref create_key(ag)
           end
+          q_node.assignment_overrides do |ao_node|
+            quiz.assignment_overrides.active.where(set_type: 'Noop').each do |o|
+              override_attrs = o.slice(:set_type, :set_id, :title)
+              AssignmentOverride.overridden_dates.each do |field|
+                next unless o.send("#{field}_overridden")
+                override_attrs[field] = o[field]
+              end
+              ao_node.override(override_attrs)
+            end
+          end
         end
       end
-      
+
       def generate_assessment(doc, quiz, migration_id, for_cc=true)
         doc.instruct!
-        
+
         xsd_uri = for_cc ? 'http://www.imsglobal.org/profile/cc/ccv1p1/ccv1p1_qtiasiv1p2p1_v1p0.xsd' : 'http://www.imsglobal.org/xsd/ims_qtiasiv1p2p1.xsd'
-  
+
         doc.questestinterop("xmlns" => "http://www.imsglobal.org/xsd/ims_qtiasiv1p2",
                         "xmlns:xsi"=>"http://www.w3.org/2001/XMLSchema-instance",
                         "xsi:schemaLocation"=> "http://www.imsglobal.org/xsd/ims_qtiasiv1p2 #{xsd_uri}"
         ) do |qti_node|
           qti_node.assessment(
                   :ident => migration_id,
-                  :title => quiz.title 
+                  :title => quiz.title
           ) do |asmnt_node|
             asmnt_node.qtimetadata do |meta_node|
               if for_cc
@@ -242,7 +257,7 @@ module CC
               allowed = quiz.allowed_attempts == -1 ? 'unlimited' : quiz.allowed_attempts
               meta_field(meta_node, 'cc_maxattempts', allowed)
             end # meta_node
-            
+
             asmnt_node.section(
                     :ident => "root_section"
             ) do |section_node|
@@ -253,7 +268,7 @@ module CC
                   else
                     add_quiz_question(section_node, item)
                   end
-                elsif item[:questions] # It's a QuizGroup
+                elsif item[:questions] # It's a Quizzes::QuizGroup
                   if for_cc
                     add_cc_group(section_node, item)
                   else
@@ -294,7 +309,7 @@ module CC
           meta_node.fieldentry entry
         end
       end
-      
+
       # Common Cartridge only allows for one section in an assessment
       # that means that you can't have any groups. So we just choose
       # however many (supported) questions there are supposed to be
@@ -303,7 +318,7 @@ module CC
         pick_count = group['pick_count'].to_i
         chosen = 0
         if group[:assessment_question_bank_id]
-          if bank = @course.assessment_question_banks.find_by_id(group[:assessment_question_bank_id])
+          if bank = @course.assessment_question_banks.where(id: group[:assessment_question_bank_id]).first
             bank.assessment_questions.each do |question|
               # try adding questions until the pick count is reached
               chosen += 1 if add_cc_question(node, question)
@@ -318,9 +333,9 @@ module CC
           end
         end
       end
-      
+
       def add_group(node, group)
-        id = create_key(group['id']) 
+        id = create_key("quizzes/quiz_group_#{group['id']}")
         node.section(
                 :ident => id,
                 :title => group['name']
@@ -331,9 +346,9 @@ module CC
               bank = nil
 
               if group[:assessment_question_bank_id]
-                if bank = @course.assessment_question_banks.find_by_id(group[:assessment_question_bank_id])
+                if bank = @course.assessment_question_banks.where(id: group[:assessment_question_bank_id]).first
                   sel_node.sourcebank_ref create_key(bank)
-                elsif bank = AssessmentQuestionBank.find_by_id(group[:assessment_question_bank_id])
+                elsif bank = AssessmentQuestionBank.where(id: group[:assessment_question_bank_id]).first
                   sel_node.sourcebank_ref bank.id
                   is_external = true
                 end
@@ -348,7 +363,7 @@ module CC
               end
             end
           end
-          
+
           unless group[:assessment_question_bank_id]
             group[:questions].each do |question|
               add_quiz_question(section_node, question)

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -24,14 +24,44 @@ describe "/shared/_wiki_sidebar" do
     course_with_student
     view_context
     render :partial => "shared/wiki_sidebar"
-    response.should_not be_nil
+    expect(response).not_to be_nil
   end
-  
+
   it "should render in user context" do
-    user
+    user_factory
     view_context(@user, @user)
     render :partial => "shared/wiki_sidebar"
-    response.should_not be_nil
+    expect(response).not_to be_nil
+  end
+
+  it "correctly checks wiki permissions" do
+    course_with_teacher
+    view_context
+    render :partial => "shared/wiki_sidebar"
+    expect(response).not_to be_nil
+    expect(response).to match(/new_page_link/)
+  end
+
+  it "should differenticate discussions/announcements" do
+    course_with_teacher
+    view_context
+    assign(:wiki_sidebar_data, {
+      active_assignments: [],
+      active_discussion_topics: [
+        @course.discussion_topics.create!(title: "please chat", message: "DD"),
+        @course.announcements.create!(title: "listen up", message: "HI")
+      ],
+      active_quizzes: [],
+      active_context_modules: [],
+      wiki_pages: [],
+      wiki: nil,
+      root_folders: []
+    })
+    render :partial => "shared/wiki_sidebar"
+    doc = Nokogiri::HTML.parse(response.body)
+    expect(doc.at_css("#announcements_panel").text).to match(/listen up/)
+    expect(doc.at_css("#announcements_panel").text).not_to match(/please chat/)
+    expect(doc.at_css("#discussions_panel").text).not_to match(/listen up/)
+    expect(doc.at_css("#discussions_panel").text).to match(/please chat/)
   end
 end
-

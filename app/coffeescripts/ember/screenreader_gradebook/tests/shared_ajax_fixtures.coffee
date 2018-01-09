@@ -1,10 +1,27 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'ic-ajax'
   'ember'
 ], (ajax, Ember) ->
 
   clone = (obj) ->
-    Em.copy obj, true
+    Ember.copy obj, true
 
   default_grade_response = [{
     "submission": {
@@ -247,69 +264,69 @@ define [
   students = [
         {
           user_id: '1'
-          user: { id: '1', name: 'Bob' }
+          user: { id: '1', name: 'Bob', group_ids: [], sections: [] }
           course_section_id: '1'
         }
         {
           user_id: '2'
-          user: { id: '2', name: 'Fred' }
+          user: { id: '2', name: 'Fred', group_ids: [], sections: [] }
           course_section_id: '1'
         }
         {
           user_id: '3'
-          user: { id: '3', name: 'Suzy' }
+          user: { id: '3', name: 'Suzy', group_ids: [], sections: [] }
           course_section_id: '1'
         }
         {
           user_id: '4'
-          user: { id: '4', name: 'Buffy' }
+          user: { id: '4', name: 'Buffy', group_ids: [], sections: [] }
           course_section_id: '2'
         }
         {
           user_id: '5'
-          user: { id: '5', name: 'Willow' }
+          user: { id: '5', name: 'Willow', group_ids: [], sections: [] }
           course_section_id: '2'
         }
         {
           user_id: '5'
-          user: { id: '5', name: 'Willow' }
+          user: { id: '5', name: 'Willow', group_ids: [], sections: [] }
           course_section_id: '1'
         }
         {
           user_id: '6'
-          user: { id: '6', name: 'Giles' }
+          user: { id: '6', name: 'Giles', group_ids: [], sections: [] }
           course_section_id: '2'
         }
         {
           user_id: '7'
-          user: { id: '7', name: 'Xander' }
+          user: { id: '7', name: 'Xander', group_ids: [], sections: [] }
           course_section_id: '2'
         }
         {
           user_id: '8'
-          user: { id: '8', name: 'Cordelia' }
+          user: { id: '8', name: 'Cordelia', group_ids: [], sections: [] }
           course_section_id: '2'
         }
         {
           user_id: '9'
-          user: { id: '9', name: 'Drusilla' }
+          user: { id: '9', name: 'Drusilla', group_ids: [], sections: [] }
           course_section_id: '1'
         }
         {
           user_id: '10'
-          user: { id: '10', name: 'Spike' }
+          user: { id: '10', name: 'Spike', group_ids: [], sections: [] }
           course_section_id: '2'
         }
         {
           user_id: '10'
-          user: { id: '10', name: 'Spike' }
+          user: { id: '10', name: 'Spike', group_ids: [], sections: [] }
           course_section_id: '1'
         }
       ]
 
   concludedStudents = [
         {
-          user: { id: '105', name: 'Lyra' }
+          user: { id: '105', name: 'Lyra', group_ids: [], sections: [] }
           course_section_id: '1'
           user_id: '105'
           workflow_state: 'completed'
@@ -322,6 +339,7 @@ define [
           id: '1'
           name: 'AG1'
           position: 1
+          group_weight: 0
           assignments: [
             {
               id: '1'
@@ -334,6 +352,8 @@ define [
               assignment_group_id:'1'
               published: true
               muted: false
+              only_visible_to_overrides: true
+              assignment_visibility: ["1"]
             }
             {
               id: '2'
@@ -342,10 +362,12 @@ define [
               points_possible: null
               due_at: null
               position: 10
-              submission_types: ["none"]
+              submission_types: ["online_url", "online_text_entry"]
               assignment_group_id:'1'
               published: true
               muted: true
+              only_visible_to_overrides: true
+              assignment_visibility: ["2"]
             }
             {
               id: '3'
@@ -358,6 +380,7 @@ define [
               assignment_group_id:'1'
               published: true
               muted: false
+              assignment_visibility: ["1","2","3"]
             }
           ]
         }
@@ -365,6 +388,7 @@ define [
           id: '2'
           name: 'AG2'
           position: 10
+          group_weight: 0
           assignments: [
             {
               id: '4'
@@ -406,6 +430,7 @@ define [
           id: '4'
           name: 'Silent Assignments'
           position: 2
+          group_weight: 0
           assignments: [
             {
               id: '20'
@@ -431,29 +456,48 @@ define [
             }
           ]
         }
+        {
+          id: '5'
+          name: 'Invalid AG'
+          position: 3
+          group_weight: 0
+          assignments: [
+            {
+              id: '24'
+              name: 'No Points Assignment'
+              points_possible: 0
+              grading_type: "percent"
+              submission_types: ["not_graded"]
+              due_at: "2013-09-01T10:00:00Z"
+              position: 1
+              assignment_group_id:'4'
+              published: true
+            }
+          ]
+        }
       ]
 
   submissions = [
         {
           user_id: '1'
           submissions: [
-            { id: '1', user_id: '1', assignment_id: '1', grade: '3' }
-            { id: '2', user_id: '1', assignment_id: '2', grade: null }
-            { id: '5', user_id: '1', assignment_id: '6', grade: 'incomplete' }
+            { id: '1', user_id: '1', assignment_id: '1', grade: '3', score: '3' }
+            { id: '2', user_id: '1', assignment_id: '2', grade: null, score: null  }
+            { id: '5', user_id: '1', assignment_id: '6', grade: 'incomplete', score: 'incomplete', entered_grade: 'incomplete', entered_score: 'incomplete' }
           ]
         }
         {
           user_id: '2'
           submissions: [
-            { id: '3', user_id: '2', assignment_id: '1', grade: '9' }
-            { id: '4', user_id: '2', assignment_id: '2', grade: null }
+            { id: '3', user_id: '2', assignment_id: '1', grade: '9', score: '9' }
+            { id: '4', user_id: '2', assignment_id: '2', grade: null, score: null }
           ]
         }
         {
           user_id: '3'
           submissions: [
-            { id: '5', user_id: '3', assignment_id: '1', grade: '10' }
-            { id: '6', user_id: '3', assignment_id: '2', grade: null }
+            { id: '5', user_id: '3', assignment_id: '1', grade: '10', score: '10' }
+            { id: '6', user_id: '3', assignment_id: '2', grade: null, score: null }
           ]
         }
         {
@@ -491,12 +535,51 @@ define [
         { id: '2', name: 'Slayers and Scoobies' }
       ]
 
+  customColumns = [
+    hidden: false
+    id: "1"
+    position: 1
+    teacher_notes: true
+    title: "Notes"
+  ]
+
+  outcomesRaw = [
+    { outcome: { id: '1', title: 'Eating' , mastery_points: 3} }
+    { outcome: { id: '2', title: 'Drinking', mastery_points: 5 } }
+  ]
+
+  outcomes = [
+    { id: '1', title: 'Eating', mastery_points: 3 }
+    { id: '2', title: 'Drinking', mastery_points: 5 }
+  ]
+
+  outcomeRollupsRaw = {
+    rollups: [
+      { links: { user: '1' }, scores: [
+        { links: {outcome: '1'}, score: 5 }
+        { links: {outcome: '2'}, score: 4 }
+      ]}
+      { links: { user: '2' }, scores: [
+        { links: {outcome: '2'}, score: 3 }
+      ]}
+    ]
+  }
+
+  outcomeRollups = [
+    { outcome_id: '1', user_id: '1', score: 5 }
+    { outcome_id: '2', user_id: '1', score: 4 }
+    { outcome_id: '2', user_id: '2', score: 3 }
+  ]
+
+  custom_columns: customColumns
   set_default_grade_response: default_grade_response
   students: students
   concluded_enrollments: concludedStudents
   assignment_groups: assignmentGroups
   submissions: submissions
   sections: sections
+  outcomes: outcomes
+  outcome_rollups: outcomeRollups
   create: (overrides) ->
 
     window.ENV =
@@ -504,42 +587,92 @@ define [
         current_user_id: 1
         context_asset_string: 'course_1'
         GRADEBOOK_OPTIONS: {
-          students_url: '/api/v1/enrollments'
-          students_url_with_concluded_enrollments: '/api/v1/concluded_enrollments'
+          effective_due_dates_url: '/api/v1/courses/1/effective_due_dates'
+          enrollments_url: '/api/v1/enrollments'
+          enrollments_with_concluded_url: '/api/v1/concluded_enrollments'
           assignment_groups_url: '/api/v1/assignment_groups'
           submissions_url: '/api/v1/submissions'
           sections_url: '/api/v1/sections'
           context_url: '/courses/1'
           context_id: 1
           group_weighting_scheme: "equal"
-          change_grade_url: 'http://localhost:3000/api/v1/courses/2/assignments/:assignment/submissions/:submission'
+          change_grade_url: '/api/v1/courses/1/assignments/:assignment/submissions/:submission'
+          custom_columns_url: 'api/v1/courses/1/custom_gradebook_columns'
+          custom_column_data_url: 'api/v1/courses/1/custom_gradebook_columns/:id'
+          setting_update_url: 'api/v1/courses/1/settings'
+          outcome_gradebook_enabled: true
+          outcome_links_url: 'api/v1/courses/1/outcome_group_links'
+          outcome_rollups_url: 'api/v1/courses/1/outcome_rollups'
+          active_grading_periods: [
+            {
+              id: '1'
+              title: 'Fall Period 1'
+              start_date: '2013-08-01T00:00:00Z'
+              end_date: '2013-09-01T00:00:00Z'
+              close_date: '2013-09-08T00:00:00Z'
+              is_closed: true
+            }
+            {
+              id: '2'
+              title: 'Fall Period 2'
+              start_date: '2013-09-01T00:00:00Z'
+              end_date: '2013-11-01T00:00:00Z'
+              close_date: '2013-11-08T00:00:00Z'
+              is_closed: true
+            }
+            {
+              id: '3'
+              title: 'Fall Period 3'
+              start_date: '2013-11-01T00:00:00Z'
+              end_date: '2014-01-01T00:00:00Z'
+              close_date: '2014-01-08T00:00:00Z'
+              is_closed: false
+            }
+          ]
         }
       }
 
-    ajax.defineFixture window.ENV.GRADEBOOK_OPTIONS.students_url,
+    ajax.defineFixture window.ENV.GRADEBOOK_OPTIONS.enrollments_url,
       response: clone students
       jqXHR: { getResponseHeader: -> {} }
-      textStatus: ''
+      textStatus: 'success'
 
-    ajax.defineFixture window.ENV.GRADEBOOK_OPTIONS.students_url_with_concluded_enrollments,
+    ajax.defineFixture window.ENV.GRADEBOOK_OPTIONS.enrollments_with_concluded_url,
       response: clone concludedStudents
       jqXHR: { getResponseHeader: -> {} }
-      textStatus: ''
+      textStatus: 'success'
 
     ajax.defineFixture window.ENV.GRADEBOOK_OPTIONS.assignment_groups_url,
       response: clone assignmentGroups
       jqXHR: { getResponseHeader: -> {} }
-      textStatus: ''
+      textStatus: 'success'
 
     ajax.defineFixture window.ENV.GRADEBOOK_OPTIONS.submissions_url,
       response: clone submissions
       jqXHR: { getResponseHeader: -> {} }
-      textStatus: ''
+      textStatus: 'success'
 
     ajax.defineFixture window.ENV.GRADEBOOK_OPTIONS.sections_url,
       response: clone sections
       jqXHR: { getResponseHeader: -> {} }
-      textStatus: ''
+      textStatus: 'success'
 
-      #ajax.defineFixture overide.url, override.options for override in overrides?
+    ajax.defineFixture window.ENV.GRADEBOOK_OPTIONS.custom_columns_url,
+      response: clone customColumns
+      jqXHR: { getResponseHeader: -> {} }
+      textStatus: 'success'
 
+    ajax.defineFixture window.ENV.GRADEBOOK_OPTIONS.setting_update_url,
+      response: true
+      jqXHR: { getResponseHeader: -> {} }
+      textStatus: 'success'
+
+    ajax.defineFixture window.ENV.GRADEBOOK_OPTIONS.outcome_links_url,
+      response: clone outcomesRaw
+      jqXHR: { getResponseHeader: -> {} }
+      textStatus: 'success'
+
+    ajax.defineFixture window.ENV.GRADEBOOK_OPTIONS.outcome_rollups_url,
+      response: clone outcomeRollupsRaw
+      jqXHR: { getResponseHeader: -> {} }
+      textStatus: 'success'

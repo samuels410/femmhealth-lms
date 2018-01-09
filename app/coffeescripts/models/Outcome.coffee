@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,13 +17,61 @@
 #
 
 define [
+  'i18n!outcomes'
+  'underscore'
   'Backbone'
-], (Backbone) ->
+  'compiled/models/grade_summary/CalculationMethodContent'
+], (I18n, _, Backbone, CalculationMethodContent) ->
 
   class Outcome extends Backbone.Model
+    defaults:
+      mastery_points: 3
+      points_possible: 5
+      ratings: [
+        description: I18n.t("criteria.exceeds_expectations", "Exceeds Expectations")
+        points: 5
+      ,
+        description: I18n.t("criteria.meets_expectations", "Meets Expectations")
+        points: 3
+      ,
+        description: I18n.t("criteria.does_not_meet_expectations", "Does Not Meet Expectations")
+        points: 0
+      ]
+
+    defaultCalculiationInt: -> {
+      n_mastery: 5
+      decaying_average: 65
+    }[@get('calculation_method')]
+
+    initialize: ->
+      @setDefaultCalcSettings() unless @get('calculation_method')
+      @on 'change:calculation_method', (model, changedTo) =>
+        model.set calculation_int: @defaultCalculiationInt()
+      super
+
+    setDefaultCalcSettings: ->
+      @set {
+        calculation_method: 'decaying_average'
+        calculation_int: '65'
+      }
+
+    calculationMethodContent: ->
+      new CalculationMethodContent(@)
+
+    calculationMethods: ->
+      @calculationMethodContent().toJSON()
 
     name: ->
       @get 'title'
+
+    canManage: ->
+      @get('can_edit') || @canManageInContext()
+
+    canManageInContext: ->
+      ENV.ROOT_OUTCOME_GROUP?.context_type == "Course" && ENV.PERMISSIONS?.manage_outcomes && ENV.current_user_roles?.includes('admin')
+
+    isNative: ->
+      @outcomeLink && (@get('context_id') == @outcomeLink.context_id && @get('context_type') == @outcomeLink.context_type)
 
     # The api returns abbreviated data by default
     # which in most cases means there's no description.
@@ -39,6 +87,9 @@ define [
         resp.outcome
       else
         resp
+
+    present: ->
+      _.extend({}, @toJSON(), @calculationMethodContent().present())
 
     setUrlTo: (action) ->
       @url =

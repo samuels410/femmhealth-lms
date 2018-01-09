@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,16 +16,18 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 define [
+  'jquery'
   'underscore'
   'Backbone'
   'compiled/views/SortableCollectionView'
   'compiled/views/assignments/AssignmentGroupListItemView'
   'jst/assignments/AssignmentGroupList'
   'jst/assignments/NoAssignmentsListItem'
-], (_, Backbone, SortableCollectionView, AssignmentGroupListItemView, template, NoAssignmentsListItem) ->
+], ($, _, Backbone, SortableCollectionView, AssignmentGroupListItemView, template, NoAssignmentsListItem) ->
 
   class AssignmentGroupListView extends SortableCollectionView
     @optionProperty 'course'
+    @optionProperty 'userIsAdmin'
 
     template: template
     itemView: AssignmentGroupListItemView
@@ -48,11 +50,11 @@ define [
         groupId: model.id
         reorderURL: @createReorderURL(model.id)
         noItemTemplate: NoAssignmentsListItem
+        userIsAdmin: @userIsAdmin
       new @itemView $.extend {}, (@itemViewOptions || {}), {model}, options
 
     createReorderURL: (id) ->
       @assignment_sort_base_url + "/" + id + "/reorder"
-
 
     # TODO: make menu a child view of listitem so that it can be rendered
     # by itself, and so it can manage all of the dialog stuff,
@@ -61,9 +63,13 @@ define [
       super
       @itemViewOptions = course: @course
       @collection.on 'render', @render
-      @collection.on 'add', @render
+      @collection.on 'add', @renderIfLoaded
       @collection.on 'remove', @render
       @collection.on 'change:groupWeights', @render
+
+    renderIfLoaded: =>
+      if @collection.loadedAll
+        @render()
 
     renderOnReset: =>
       @firstResetLanded = true
@@ -89,7 +95,8 @@ define [
       id = item.children(":first").attr('data-id')
       item.find("#assignment_group_#{id}_assignments").slideUp(100)
       ui.item.css("height", "auto")
-      arrow = item.find('i').first()
+      $toggler = item.find('.element_toggler').first()
+      arrow = $toggler.find('i').first()
       arrow.removeClass('icon-mini-arrow-down').addClass('icon-mini-arrow-right')
 
     expand: (e, ui) =>
@@ -107,5 +114,5 @@ define [
       ag = @collection.findWhere id: id
       if ag && ag.groupView.shouldBeExpanded()
         item.find("#assignment_group_#{id}_assignments").slideDown(100)
-        arrow = item.find('i').first()
+        arrow = $toggler.find('i').first()
         arrow.addClass('icon-mini-arrow-down').removeClass('icon-mini-arrow-right')

@@ -1,17 +1,36 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
   'underscore'
   'compiled/xhr/RemoteSelect'
-], (_, RemoteSelect) ->
-  module 'RemoteSelect',
+], ($, _, RemoteSelect) ->
+  QUnit.module 'RemoteSelect',
     setup: ->
       @response = [200, { 'Content-Type': 'application/json' }, '[{ "label": "one", "value": 1 }, {"label": "two", "value": 2 }]']
-      @el       = $('<select id="test-select"></select>').appendTo('body')
+      @el       = $('<select id="test-select"></select>').appendTo('#fixtures')
 
     teardown: ->
       @el.remove()
+      document.getElementById("fixtures").innerHTML = ""
 
   test 'should load results into a select', ->
-    server = @sandbox.useFakeServer()
+    server = sinon.fakeServer.create()
     server.respondWith(/.+/, @response)
 
     rs = new RemoteSelect(@el, url: '/test/url.json')
@@ -34,7 +53,7 @@ define [
       ]
     }
 
-    server = @sandbox.useFakeServer()
+    server = sinon.fakeServer.create()
     server.respondWith(/.+/, @response)
 
     rs = new RemoteSelect(@el, url: '/test/url.json')
@@ -44,7 +63,7 @@ define [
     server.restore()
 
   test 'should cache responses', ->
-    server = @sandbox.useFakeServer()
+    server = sinon.fakeServer.create()
     server.respondWith(/.+/, @response)
     @spy($, 'getJSON')
 
@@ -56,7 +75,7 @@ define [
     server.restore()
 
   test 'should accept a formatter', ->
-    server = @sandbox.useFakeServer()
+    server = sinon.fakeServer.create()
     @response.pop()
     @response.push JSON.stringify [
       { group: 'one', name: 'one', id: 1 }
@@ -83,7 +102,7 @@ define [
     server.restore()
 
   test 'should take params', ->
-    server = @sandbox.useFakeServer()
+    server = sinon.fakeServer.create()
     @spy($, 'getJSON')
 
     rs = new RemoteSelect(@el,
@@ -95,7 +114,7 @@ define [
     server.restore()
 
   test 'should include original options in select', ->
-    server = @sandbox.useFakeServer()
+    server = sinon.fakeServer.create()
     server.respondWith(/.+/, @response)
     @el.append '<option value="">Default</option>'
 

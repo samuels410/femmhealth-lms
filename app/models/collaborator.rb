@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,8 +17,6 @@
 #
 
 class Collaborator < ActiveRecord::Base
-  attr_accessible :authorized_service_user_id, :collaboration, :group, :user
-
   belongs_to :collaboration
   belongs_to :group
   belongs_to :user

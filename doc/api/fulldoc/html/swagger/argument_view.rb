@@ -15,50 +15,26 @@ class ArgumentView < HashView
   end
 
   def parse_line(line)
-    clean_line = line.gsub(/\s+/m, " ")
-    name, remaining = clean_line.scan(/^([^\s]+)(.*)$/).first
-    name.strip! if @name
-    if remaining
-      type, desc = split_type_desc(remaining)
-      # type = format(type.strip.gsub('[', '').gsub(']', '')) if type
-      type.strip! if type
-      desc.strip! if desc
-    end
-    [clean_line, name, type, desc]
+    name, remaining = (line || "").split(/\s/, 2)
+    raise(ArgumentError, "param name missing:\n#{line}") unless name
+    name.strip!
+    type, desc = split_type_desc(remaining || "")
+    type.strip!
+    desc.strip!
+    [line, name, type, desc]
   end
 
-  # Atrocious use of regex to parse out type signatures such as:
-  # "[[Integer], Optional] The IDs of the override's target students."
   def split_type_desc(str)
-    type_desc_parts_to_pair(
-      str.strip.
-      # turn "] ," into "],"
-      gsub(/\]\s+,/, '],').
-      # put "|||" between type and desc
-      sub(/[^,] /){ |s| s[0] == ']' ? s[0] + '|||' : s }.
-      # split on "|||"
-      split('|||')
-    )
+    # This regex is impossible to read, basically we're splitting the string up
+    # into the first [bracketed] section, which might contain internal brackets,
+    # and then the rest of the string.
+    md = str.strip.match(%r{\A(\[[\w ,\[\]\|"]+\])?\s*(.+)?}m)
+    [md[1] || DEFAULT_TYPE, md[2] || DEFAULT_DESC]
   end
 
-  def type_desc_parts_to_pair(parts)
-    case parts.size
-    when 0 then [DEFAULT_TYPE, DEFAULT_DESC]
-    when 1 then
-      if parts.first.include?('[') and parts.first.include?(']')
-        [parts.first, DEFAULT_DESC]
-      else
-        [DEFAULT_TYPE, parts.first]
-      end
-    when 2 then
-      parts
-    else
-      raise "Too many parts while splitting type and description: #{parts.inspect}"
-    end
-  end
-
-  def name
-    format(@name.gsub('[]', ''))
+  def name(json: true)
+    name = json ? @name.gsub('[]', '') : @name
+    format(name)
   end
 
   def desc
@@ -68,6 +44,7 @@ class ArgumentView < HashView
   def remove_outer_square_brackets(str)
     str.sub(/^\[/, '').sub(/\]$/, '')
   end
+
   def metadata_parts
     remove_outer_square_brackets(@type).
       split(/\s*[,\|]\s*/).map{ |t| t.force_encoding('UTF-8') }
@@ -93,34 +70,46 @@ class ArgumentView < HashView
     else
       case @http_verb.downcase
       when 'get', 'delete' then 'query'
-      when 'put', 'post' then   'form'
+      when 'put', 'post', 'patch' then 'form'
       else
-        raise "Unknown HTTP verb: #{@verb}"
+        raise "Unknown HTTP verb: #{@http_verb}"
       end
     end
   end
 
   def swagger_type
-    (types.first || 'string').downcase
+    type = (types.first || 'string')
+    type = "number" if type.downcase == "float"
+    builtin?(type) ? type.downcase : type
   end
 
   def swagger_format
-    case swagger_type
-    when 'integer' then 'int64'
-    else nil
-    end
+    type = (types.first || 'string')
+    return "int64" if swagger_type == "integer"
+    return "float" if type.downcase == "float"
   end
 
   def optional?
-    enum_and_types.last.map{ |t| t.downcase }.include?('optional')
+    not required?
   end
 
   def required?
-    not optional?
+    types = enum_and_types.last.map{ |t| t.downcase }
+    if swagger_param_type == 'path'
+      true
+    elsif types.include?('required')
+      true
+    else
+      false
+    end
   end
 
   def array?
     @name.include?('[]')
+  end
+
+  def builtin?(type)
+    ["string", "integer", "boolean", "number"].include?(type.downcase)
   end
 
   def to_swagger
@@ -133,7 +122,16 @@ class ArgumentView < HashView
       "required" => required?,
     }
     swagger['enum'] = enums unless enums.empty?
-    swagger['tags'] = {"type" => "array"} if array?
+    if array?
+      swagger["type"] = "array"
+      items = {}
+      if builtin?(swagger_type)
+        items["type"] = swagger_type
+      else
+        items["$ref"] = swagger_type
+      end
+      swagger["items"] = items
+    end
     swagger
   end
 
@@ -144,5 +142,5 @@ class ArgumentView < HashView
       "types"    => types,
       "optional" => optional?,
     }
-  end    
+  end
 end

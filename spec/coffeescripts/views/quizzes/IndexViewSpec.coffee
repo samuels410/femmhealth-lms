@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'Backbone'
   'compiled/models/Quiz'
@@ -10,7 +27,7 @@ define [
   'helpers/jquery.simulate'
 ], (Backbone, Quiz, QuizCollection, IndexView, QuizItemGroupView, NoQuizzesView, $, fakeENV) ->
 
-  fixtures = $('#fixtures')
+  fixtures = null
 
   indexView = (assignments, open, surveys) ->
     $('<div id="content"></div>').appendTo fixtures
@@ -53,12 +70,16 @@ define [
       permissions:     permissions
       flags:           flags
       urls:            urls
-    view.$el.appendTo $('#fixtures')
+    view.$el.appendTo fixtures
     view.render()
 
-  module 'IndexView',
-    setup: -> fakeENV.setup()
-    teardown: -> fakeENV.teardown()
+  QUnit.module 'IndexView',
+    setup: ->
+      fixtures = $("#fixtures")
+      fakeENV.setup()
+    teardown: ->
+      fakeENV.teardown()
+      fixtures.empty()
 
   # hasNoQuizzes
   test '#hasNoQuizzes if assignment and open quizzes are empty', ->
@@ -125,23 +146,3 @@ define [
     view.filterResults()
     equal view.$el.find('.collectionViewItems li').length, 2
 
-  test 'should filter models with title that doesnt match term', ->
-    view = indexView()
-    model = new Quiz(title: "Foo Name")
-
-    ok  view.filter(model, "name")
-    ok !view.filter(model, "zzz")
-
-  test 'should not use regexp to filter models', ->
-    view = indexView()
-    model = new Quiz(title: "Foo Name")
-
-    ok !view.filter(model, ".*name")
-    ok !view.filter(model, "zzz")
-
-  test 'should filter models with multiple terms', ->
-    view = indexView()
-    model = new Quiz(title: "Foo Name bar")
-
-    ok  view.filter(model, "name bar")
-    ok !view.filter(model, "zzz")

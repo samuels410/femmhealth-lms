@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'compiled/collections/GroupUserCollection'
   'compiled/models/GroupUser'
@@ -25,7 +42,7 @@ define [
       'Content-Type': 'application/json'
     }, JSON.stringify(json)]
 
-  module 'AddUnassignedMenu',
+  QUnit.module 'AddUnassignedMenu',
     setup: ->
       fakeENV.setup()
       clock = sinon.useFakeTimers()
@@ -38,29 +55,30 @@ define [
       users.loaded = true
       view = new AddUnassignedMenu
         collection: users
-      view.groupId = 777
+      view.group = new Group(id: 777)
       users.reset([
         new GroupUser(id: 1, name: "Frank Herbert", sortable_name: "Herbert, Frank"),
         new GroupUser(id: 2, name: "Neal Stephenson", sortable_name: "Stephenson, Neal"),
         new GroupUser(id: 3, name: "John Scalzi", sortable_name: "Scalzi, John"),
         waldo
       ])
-      view.$el.appendTo($(document.body))
+      view.$el.appendTo($("#fixtures"))
 
     teardown: ->
       fakeENV.teardown()
       clock.restore()
       server.restore()
       view.remove()
+      document.getElementById("fixtures").innerHTML = ""
 
-  test "updates the user's groupId and removes from unassigned collection", ->
-    equal waldo.get('groupId'), null
+  test "updates the user's group and removes from unassigned collection", ->
+    equal waldo.get('group'), null
     $links = view.$('.assign-user-to-group')
     equal $links.length, 4
 
     $waldoLink = $links.last()
     $waldoLink.click()
     sendResponse 'POST',"/api/v1/groups/777/memberships", {}
-    equal waldo.get('groupId'), 777
+    equal waldo.get('group'), view.group
 
     ok not users.contains(waldo)

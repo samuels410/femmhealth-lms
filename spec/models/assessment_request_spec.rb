@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,9 +20,9 @@ require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 
 describe AssessmentRequest do
   describe "workflow" do
-    let(:request) do
-      user
-      course
+    let_once(:request) do
+      user_factory
+      course_factory
       assignment = @course.assignments.create!
       submission = assignment.find_or_create_submission(@user)
 
@@ -30,16 +30,17 @@ describe AssessmentRequest do
     end
 
     it "defaults to assigned" do
-      request.should be_assigned
+      expect(request).to be_assigned
     end
 
     it "can be completed" do
       request.complete!
-      request.should be_completed
+      expect(request).to be_completed
     end
   end
 
   describe "notifications" do
+
     let(:notification_name) { 'Rubric Assessment Submission Reminder' }
     let(:notification)      { Notification.create!(:name => notification_name, :category => 'Invitation') }
 
@@ -51,10 +52,45 @@ describe AssessmentRequest do
 
       assignment = @course.assignments.create!
       submission = assignment.find_or_create_submission(@student)
-      request = AssessmentRequest.new(:user => @user, :asset => submission, :assessor_asset => @student, :assessor => @user)
+      rubric_model
+      @association = @rubric.associate_with(@assignment, @course, :purpose => 'grading', :use_for_grading => true)
+      assignment.update_attribute(:title, 'new assmt title')
+
+      request = AssessmentRequest.new(:user => @user, :asset => submission, :assessor_asset => @student, :assessor => @user, :rubric_association => @association)
       request.send_reminder!
 
-      request.messages_sent.keys.should include(notification_name)
+      expect(request.messages_sent.keys).to include(notification_name)
+      message = request.messages_sent[notification_name].first
+      expect(message.body).to include(assignment.title)
     end
   end
+
+  describe 'policies' do
+
+    before :once do
+      assignment_model
+      @teacher = user_factory(active_all: true)
+      @course.enroll_teacher(@teacher).accept
+      @student = user_factory(active_all: true)
+      @course.enroll_student(@student).accept
+      rubric_model
+      @association = @rubric.associate_with(@assignment, @course, :purpose => 'grading', :use_for_grading => true)
+      @assignment.update_attribute(:anonymous_peer_reviews, true)
+      @reviewed = @student
+      @reviewer = student_in_course(:active_all => true).user
+      @assessment_request = @assignment.assign_peer_review(@reviewer, @reviewed)
+    end
+    it "should prevent reviewer from seeing reviewed name" do
+      expect(@assessment_request.grants_right?(@reviewer, :read_assessment_user)).to be_falsey
+    end
+
+    it "should allow reviewed to see own name" do
+      expect(@assessment_request.grants_right?(@reviewed, :read_assessment_user)).to be_truthy
+    end
+
+    it "should allow teacher to see reviewed users name" do
+      expect(@assessment_request.grants_right?(@teacher, :read_assessment_user)).to be_truthy
+    end
+  end
+
 end

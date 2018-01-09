@@ -1,10 +1,26 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require File.expand_path(File.dirname(__FILE__) + '/../common')
 
+module ManageGroupsCommon
   def add_category(course, name, opts={})
-    keep_trying_until do
-      f(".add_category_link").click
-      wait_for_ajaximations
-    end
+    f(".add_category_link").click
+    wait_for_ajaximations
     form = f("#add_category_form")
     input = form.find_element(:css, "input[type=text]")
     replace_content input, name
@@ -29,38 +45,12 @@ require File.expand_path(File.dirname(__FILE__) + '/../common')
     else
       form.find_element(:css, "#category_no_groups").click
     end
-    submit_form(form)
-    keep_trying_until { find_with_jquery("#add_category_form:visible").should be_nil }
-    category = course.group_categories.find_by_name(name)
-    category.should_not be_nil
-    keep_trying_until { fj("#category_#{category.id} .student_links:visible") }
+    submit_dialog_form(form)
+    expect(f("#add_category_form")).not_to be_displayed
+    category = course.group_categories.where(name: name).first
+    expect(category).not_to be_nil
+    expect(fj("#category_#{category.id} .student_links:visible")).to be_displayed
     category
-  end
-
-  def edit_category(opts={})
-    keep_trying_until do
-      fj(".edit_category_link:visible").click
-      wait_for_ajaximations
-    end
-    form = f("#edit_category_form")
-    input_box = form.find_element(:css, "input[type=text]")
-    if opts[:new_name]
-      replace_content input_bopts[:new_name]
-    end
-
-    # click only if we're requesting a different state than current; if we're not
-    # specifying a state, leave as is
-    if opts.has_key?(:enable_self_signup)
-      enable_self_signup = form.find_element(:css, "#category_enable_self_signup")
-      enable_self_signup.click unless !!enable_self_signup.attribute('checked') == !!opts[:enable_self_signup]
-    end
-
-    if opts.has_key?(:restrict_self_signup)
-      restrict_self_signup = form.find_element(:css, "#category_restrict_self_signup")
-      restrict_self_signup.click unless !!restrict_self_signup.attribute('checked') == !!opts[:restrict_self_signup]
-    end
-    submit_form(form)
-    wait_for_ajaximations
   end
 
   def groups_student_enrollment(student_count=3, opts={})
@@ -95,7 +85,7 @@ require File.expand_path(File.dirname(__FILE__) + '/../common')
     wait_for_ajaximations
     submit_form("#edit_group_form")
     wait_for_ajaximations
-    context.groups.find_by_name(name)
+    context.groups.where(name: name).first
   end
 
   def add_groups_in_category (category, i=3)
@@ -121,3 +111,4 @@ require File.expand_path(File.dirname(__FILE__) + '/../common')
     fj("#{group_selector} .toggle-group").click
     wait_for_ajax_requests
   end
+end

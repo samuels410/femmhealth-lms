@@ -1,16 +1,41 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!publish_btn_module'
   'jquery'
   'compiled/fn/preventDefault'
   'Backbone'
+  'str/htmlEscape'
   'jquery.instructure_forms'
-], (I18n, $, preventDefault, Backbone) ->
+], (I18n, $, preventDefault, Backbone, htmlEscape) ->
 
   class PublishButton extends Backbone.View
     disabledClass: 'disabled'
     publishClass: 'btn-publish'
     publishedClass: 'btn-published'
     unpublishClass: 'btn-unpublish'
+
+    # This value allows the text to include the item title
+    @optionProperty 'title'
+
+    # These values allow the default text to be overridden if necessary
+    @optionProperty 'publishText'
+    @optionProperty 'unpublishText'
 
     tagName:   'button'
     className: 'btn'
@@ -28,6 +53,7 @@ define [
 
     setElement: ->
       super
+      @$el.attr 'data-tooltip', ''
       @disable() if !@model.get('unpublishable')
 
     # events
@@ -52,7 +78,14 @@ define [
         @unpublish()
 
     addAriaLabel: (label) ->
+      $label = @$el.find('span.screenreader-only.accessible_label')
+      $label = $('<span class="screenreader-only accessible_label"></span>').appendTo(@$el) unless $label.length
+
+      $label.text label
       @$el.attr 'aria-label', label
+
+    setFocusToElement: ->
+      @$el.focus()
 
     # calling publish/unpublish on the model expects a deferred object
 
@@ -62,6 +95,7 @@ define [
         @trigger("publish")
         @enable()
         @render()
+        @setFocusToElement()
 
     unpublish: (event) ->
       @renderUnpublishing()
@@ -70,12 +104,14 @@ define [
         @trigger("unpublish")
         @disable()
         @render()
+        @setFocusToElement()
       .fail (error) =>
         errors = JSON.parse(error.responseText)['errors']
         $.flashError errors.published[0].message
         @model.set 'unpublishable', true
         @disable()
         @renderPublished()
+        @setFocusToElement()
 
     # state
 
@@ -102,6 +138,16 @@ define [
       @$icon.removeClass 'icon-publish icon-unpublish icon-unpublished'
       @$el.removeAttr 'aria-label'
 
+    publishLabel: ->
+      return @publishText if @publishText
+      return I18n.t('Unpublished.  Click to publish %{title}.', title: @title) if @title
+      I18n.t('Unpublished.  Click to publish.')
+
+    unpublishLabel: ->
+      return @unpublishText if @unpublishText
+      return I18n.t('Published.  Click to unpublish %{title}.', title: @title) if @title
+      I18n.t('Published.  Click to unpublish.')
+
     # render
 
     render: ->
@@ -122,16 +168,16 @@ define [
     renderPublish: ->
       @renderState
         text:        I18n.t 'buttons.publish', 'Publish'
-        label:       I18n.t 'buttons.publish_desc', 'Unpublished. Click to publish.'
+        label:       @publishLabel()
         buttonClass: @publishClass
-        iconClass:   'icon-unpublished'
+        iconClass:   'icon-unpublish'
 
     renderPublished: ->
       @renderState
         text:        I18n.t 'buttons.published', 'Published'
-        label:       I18n.t 'buttons.published_desc', 'Published. Click to unpublish.'
+        label:       @unpublishLabel()
         buttonClass: @publishedClass
-        iconClass:   'icon-publish'
+        iconClass:   'icon-publish icon-Solid'
 
     renderUnpublish: ->
       text = I18n.t 'buttons.unpublish', 'Unpublish'
@@ -146,7 +192,7 @@ define [
       @renderState
         text:        text
         buttonClass: @publishClass
-        iconClass:   'icon-publish'
+        iconClass:   'icon-publish icon-Solid'
 
     renderUnpublishing: ->
       @disable()
@@ -162,7 +208,7 @@ define [
       @$el.attr 'aria-pressed', options.buttonClass is @publishedClass
       @$icon.addClass options.iconClass
 
-      @$text.html "&nbsp;#{options.text}"
+      @$text.html "&nbsp;#{htmlEscape(options.text)}"
 
       # unpublishable
       if !@model.get('unpublishable')? or @model.get('unpublishable')

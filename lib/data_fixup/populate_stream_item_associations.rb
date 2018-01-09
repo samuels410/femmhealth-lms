@@ -1,9 +1,26 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 module DataFixup::PopulateStreamItemAssociations
   def self.run
     while true
       batch = StreamItem.connection.select_all(<<-SQL)
         SELECT id, context_type, context_id, context_code, asset_type, asset_id, item_asset_string
-        FROM stream_items
+        FROM #{StreamItem.quoted_table_name}
         WHERE (context_type IS NULL AND context_code IS NOT NULL) OR
               (asset_type IS NULL AND item_asset_string IS NOT NULL)
         LIMIT 1000
@@ -23,7 +40,7 @@ SQL
         end
         begin
           StreamItem.update_all(updates, :id => si['id']) unless updates.empty?
-        rescue ActiveRecord::Base::UniqueConstraintViolation
+        rescue ActiveRecord::RecordNotUnique
           # duplicate!
           # we have no way of knowing which one (or both) has stream item instances,
           # so just let the first one win
@@ -35,7 +52,7 @@ SQL
     while true
       batch = StreamItemInstance.connection.select_all(<<-SQL)
         SELECT id, context_type, context_id, context_code
-        FROM stream_items
+        FROM #{StreamItem.quoted_table_name}
         WHERE context_type IS NULL AND context_code IS NOT NULL
         LIMIT 1000
 SQL

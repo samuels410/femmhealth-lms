@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -59,7 +59,13 @@ module CC::Importer::Standard
           end
         else
           if !item_node['identifierref']
-            add_children(item_node, mod, indent + 1)
+            if item_node['identifier']
+              sub_mod = {:items => [], :migration_id => item_node['identifier'], :type => 'submodule'}
+              add_children(item_node, sub_mod, indent)
+              mod[:items] << sub_mod
+            else
+              add_children(item_node, mod, indent + 1)
+            end
           elsif item = process_item(item_node, indent)
             mod[:items] << item
           end
@@ -75,6 +81,13 @@ module CC::Importer::Standard
             item = {
                     :indent =>indent,
                     :linked_resource_type => 'ASSESSMENT',
+                    :linked_resource_id => resource[:migration_id],
+                    :linked_resource_title => get_node_val(item_node, 'title'),
+            }
+          when /\Aassignment/
+            item = {
+                    :indent =>indent,
+                    :linked_resource_type => 'ASSIGNMENT',
                     :linked_resource_id => resource[:migration_id],
                     :linked_resource_title => get_node_val(item_node, 'title'),
             }
@@ -109,13 +122,27 @@ module CC::Importer::Standard
                     :linked_resource_title => get_node_val(item_node, 'title')
             }
           when /webcontent|learning-application-resource\z/
-            # todo check intended use
-            item = {:indent => indent, :linked_resource_type => 'FILE_TYPE'}
+            item = {:indent => indent}
             item[:linked_resource_id] = item_node['identifierref']
             item[:linked_resource_title] = get_node_val(item_node, 'title')
+
+            if resource[:intended_use] == "assignment" &&
+                (assignments = @course[:assignments].select{|a| a[:migration_id] == item[:linked_resource_id]}.presence)
+              assignments.each do |a|
+                # because of course the title isn't anywhere else
+                a[:title] ||= item[:linked_resource_title]
+              end
+              item[:linked_resource_type] = "ASSIGNMENT"
+            else
+              item[:linked_resource_type] = "FILE_TYPE"
+            end
+          end
+
+        if item && resource[:intended_user_role] == 'Instructor'
+          item[:workflow_state] = 'unpublished'
         end
       end
-      
+
       item
     end
 

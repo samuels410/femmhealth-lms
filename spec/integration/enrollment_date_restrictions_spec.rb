@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,38 +18,37 @@
 
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper')
 
+require 'nokogiri'
+
 describe "enrollment_date_restrictions" do
-  it "should not list inactive enrollments in the menu" do
+  before do
+    Account.default.tap{|a| a.settings[:restrict_student_future_view] = {:value => true}}.save!
+  end
+
+  it "should not list inactive enrollments in the course list" do
     @student = user_with_pseudonym
-    @enrollment1 = course(:course_name => "Course 1", :active_all => 1)
+    @enrollment1 = course_factory(:course_name => "Course 1", :active_all => 1)
     e1 = student_in_course(:user => @student, :active_all => 1)
 
-    @enrollment2 = course(:course_name => "Course 2", :active_all => 1)
+    @enrollment2 = course_factory(:course_name => "Course 2", :active_all => 1)
 
     @course.update_attributes(:start_at => 2.days.from_now, :conclude_at => 4.days.from_now, :restrict_enrollments_to_course_dates => true)
     e2 = student_in_course(:user => @student, :active_all => 1)
-    e1.state.should == :active
-    e1.state_based_on_date.should == :active
-    e2.state.should == :active
-    e2.state_based_on_date.should == :inactive
+    expect(e1.state).to eq :active
+    expect(e1.state_based_on_date).to eq :active
+    expect(e2.state).to eq :active
+    expect(e2.state_based_on_date).to eq :inactive
 
     user_session(@student, @pseudonym)
 
-    get "/"
-    page = Nokogiri::HTML(response.body)
-    list = page.css(".menu-item-drop-column-list li")
-    list.length.should == 2 # view all courses should always show up
-    list[0].text.should match /Course 1/
-    list[1].text.should match /View all courses/
-    page.css(".menu-item-drop-padded").should be_empty
-
     get "/courses"
     page = Nokogiri::HTML(response.body)
-    active_enrollments = page.css(".current_enrollments li")
-    active_enrollments.length.should == 1
-    active_enrollments[0]['class'].should match /active/
+    active_enrollments = page.css("#my_courses_table tbody tr")
+    expect(active_enrollments.length).to eq 1
+    # Make sure that the active courses have the star column.
+    expect(active_enrollments[0].css('td')[0]['class']).to match /star-column/
 
-    page.css(".past_enrollments li").should be_empty
+    expect(page.css(".past_enrollments tr")).to be_empty
   end
 
   it "should not show deleted enrollments in past enrollments when course is completed" do
@@ -57,51 +56,24 @@ describe "enrollment_date_restrictions" do
     e1 = student_in_course(:user => @student, :active_all => 1)
 
     e1.destroy
-    e1.workflow_state.should == 'deleted'
+    expect(e1.workflow_state).to eq 'deleted'
 
     @course.complete
-    @course.workflow_state.should == 'completed'
+    expect(@course.workflow_state).to eq 'completed'
 
     user_session(@student, @pseudonym)
 
     get "/courses"
     page = Nokogiri::HTML(response.body)
-    page.css(".past_enrollments li").should be_empty
-  end
-
-  it "should not list groups from inactive enrollments in the menu" do
-    @student = user_with_pseudonym
-    @course1 = course(:course_name => "Course 1", :active_all => 1)
-    e1 = student_in_course(:user => @student, :active_all => 1)
-    @group1 = @course1.groups.create(:name => "Group 1")
-    @group1.add_user(@student)
-
-    @course2 = course(:course_name => "Course 2", :active_all => 1)
-
-    @course.update_attributes(:start_at => 2.days.from_now, :conclude_at => 4.days.from_now, :restrict_enrollments_to_course_dates => true)
-    e2 = student_in_course(:user => @student, :active_all => 1)
-    @group2 = @course2.groups.create(:name => "Group 1")
-    @group2.add_user(@student)
-
-    user_session(@student, @pseudonym)
-
-    get "/"
-    page = Nokogiri::HTML(response.body)
-    list = page.css(".menu-item-drop-column-list li").to_a
-    # course lis are still there and view all groups should always show up when
-    # there's at least one 'visible' group
-    list.size.should == 4
-    list.select{ |li| li.text =~ /Group 1/ }.should_not be_empty
-    list.select{ |li| li.text =~ /View all groups/ }.should_not be_empty
-    list.select{ |li| li.text =~ /Group 2/ }.should be_empty
+    expect(page.css(".past_enrollments tr")).to be_empty
   end
 
   it "should not show date inactive/completed courses in grades" do
-    @course1 = course(:active_all => 1)
-    @course2 = course(:active_all => 1)
-    @course3 = course(:active_all => 1)
-    @course4 = course(:active_all => 1)
-    user(:active_all => 1)
+    @course1 = course_factory(active_all: true)
+    @course2 = course_factory(active_all: true)
+    @course3 = course_factory(active_all: true)
+    @course4 = course_factory(active_all: true)
+    user_factory(active_all: true)
 
     @course1.start_at = 4.days.ago
     @course1.conclude_at = 2.days.ago
@@ -121,13 +93,13 @@ describe "enrollment_date_restrictions" do
 
     get '/grades'
     html = Nokogiri::HTML(response.body)
-    html.css('.course').length.should == 2
+    expect(html.css('.course').length).to eq 2
 
-    Account.default.add_user(@user)
+    Account.default.account_users.create!(user: @user)
+    @user.reload
     get "/users/#{@user.id}"
-    response.body.should match /Inactive/
-    response.body.should match /Completed/
-    response.body.should match /Active/
+    expect(response.body).to match /Completed/
+    expect(response.body).to match /Active/
   end
 
   it "should not included date-inactive courses when searching for pertinent contexts" do
@@ -139,10 +111,10 @@ describe "enrollment_date_restrictions" do
     @course.conclude_at = 4.days.from_now
     @course.restrict_enrollments_to_course_dates = true
     @course.save!
-    @enrollment.reload.state_based_on_date.should == :inactive
+    expect(@enrollment.reload.state_based_on_date).to eq :inactive
 
-    get '/calendar'
+    get '/calendar2'
     html = Nokogiri::HTML(response.body)
-    html.css("#group_course_#{@course.id}").length.should == 0
+    expect(html.css(".group_course_#{@course.id}").length).to eq 0
   end
 end

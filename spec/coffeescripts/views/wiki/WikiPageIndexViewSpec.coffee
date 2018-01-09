@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'compiled/collections/WikiPageCollection'
   'compiled/views/wiki/WikiPageIndexView'
@@ -5,7 +22,7 @@ define [
   'jquery.disableWhileLoading'
 ], (WikiPageCollection,WikiPageIndexView,$) ->
 
-  module 'WikiPageIndexView:sort',
+  QUnit.module 'WikiPageIndexView:sort',
     setup: ->
       @collection = new WikiPageCollection
       @view = new WikiPageIndexView
@@ -18,15 +35,15 @@ define [
       @ev.currentTarget = @$a.get(0)
 
   test 'sort delegates to the collection sortByField', ->
-    sortByFieldStub = sinon.stub(@collection, 'sortByField')
+    sortByFieldStub = @stub(@collection, 'sortByField')
 
     @view.sort(@ev)
     ok sortByFieldStub.calledOnce, 'collection sortByField called once'
 
   test 'view disabled while sorting', ->
     dfd = $.Deferred()
-    fetchStub = sinon.stub(@collection, 'fetch').returns(dfd)
-    disableWhileLoadingStub = sinon.stub(@view.$el, 'disableWhileLoading')
+    @stub(@collection, 'fetch').returns(dfd)
+    disableWhileLoadingStub = @stub(@view.$el, 'disableWhileLoading')
 
     @view.sort(@ev)
     ok disableWhileLoadingStub.calledOnce, 'disableWhileLoading called once'
@@ -34,22 +51,22 @@ define [
 
   test 'view disabled while sorting again', ->
     dfd = $.Deferred()
-    fetchStub = sinon.stub(@collection, 'fetch').returns(dfd)
-    disableWhileLoadingStub = sinon.stub(@view.$el, 'disableWhileLoading')
+    @stub(@collection, 'fetch').returns(dfd)
+    disableWhileLoadingStub = @stub(@view.$el, 'disableWhileLoading')
 
     @view.sort(@ev)
     ok disableWhileLoadingStub.calledOnce, 'disableWhileLoading called once'
     ok disableWhileLoadingStub.calledWith(dfd), 'disableWhileLoading called with correct deferred object'
 
   test 'renderSortHeaders called when sorting changes', ->
-    renderSortHeadersStub = sinon.stub(@view, 'renderSortHeaders')
+    renderSortHeadersStub = @stub(@view, 'renderSortHeaders')
 
     @collection.trigger('sortChanged', 'created_at')
     ok renderSortHeadersStub.calledOnce, 'renderSortHeaders called once'
     equal @view.currentSortField, 'created_at', 'currentSortField set correctly'
 
 
-  module 'WikiPageIndexView:JSON'
+  QUnit.module 'WikiPageIndexView:JSON'
 
   testRights = (subject, options) ->
     test "#{subject}", ->

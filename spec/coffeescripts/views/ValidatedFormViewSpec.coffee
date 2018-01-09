@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'Backbone'
@@ -5,7 +22,7 @@ define [
   'helpers/simulateClick'
 ], ($, {Model}, ValidatedFormView, click) ->
 
-  module 'ValidatedFormView',
+  QUnit.module 'ValidatedFormView',
     setup: ->
       @server = sinon.fakeServer.create()
       @clock = sinon.useFakeTimers()
@@ -127,40 +144,41 @@ define [
       @clock.tick 20 # disableWhileLoading does its thing in a setTimeout
       equal @form.$(':disabled').length, 3
     @form.submit()
+    sendSuccess(@server)
 
   test 'submit delegates to saveFormData', 1, ->
-    sinon.spy(@form, 'saveFormData')
+    @spy(@form, 'saveFormData')
 
     @form.submit()
     ok @form.saveFormData.called, 'saveFormData called'
 
   test 'submit calls validateBeforeSave', 1, ->
-    sinon.spy(@form, 'validateBeforeSave')
+    @spy(@form, 'validateBeforeSave')
 
     @form.submit()
     ok @form.validateBeforeSave.called, 'validateBeforeSave called'
 
   test 'submit always calls hideErrors', 1, ->
-    sinon.spy(@form, 'hideErrors')
+    @spy(@form, 'hideErrors')
 
     @form.submit()
     ok @form.hideErrors.called, 'hideErrors called'
 
   test 'validateBeforeSave delegates to validateFormData, by default', 1, ->
-    sinon.spy(@form, 'validateFormData')
+    @spy(@form, 'validateFormData')
 
     @form.validateBeforeSave({})
     ok @form.validateFormData.called, 'validateFormData called'
 
   test 'validate delegates to validateFormData', 1, ->
-    sinon.spy(@form, 'validateFormData')
+    @spy(@form, 'validateFormData')
 
     @form.validate()
     ok @form.validateFormData.called, 'validateFormData called'
 
   test 'validate always calls hideErrors', 2, ->
-    sinon.stub(@form, 'validateFormData')
-    sinon.spy(@form, 'hideErrors')
+    @stub(@form, 'validateFormData')
+    @spy(@form, 'hideErrors')
 
     @form.validateFormData.returns({})
     @form.validate()
@@ -176,8 +194,8 @@ define [
     ok @form.hideErrors.called, 'hideErrors called with errors'
 
   test 'validate always calls showErrors', 2, ->
-    sinon.stub(@form, 'validateFormData')
-    sinon.spy(@form, 'showErrors')
+    @stub(@form, 'validateFormData')
+    @spy(@form, 'showErrors')
 
     @form.validateFormData.returns({})
     @form.validate()

@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 module DataFixup::EscapeS3Filenames
   def self.run
     return unless Attachment.s3_storage?
@@ -10,7 +27,7 @@ module DataFixup::EscapeS3Filenames
         Rails.logger.info "copying #{self.id} #{old_filename} to #{new_filename}"
         begin
           # Copy, not rename. For several reasons. We can clean up later.
-          Attachment.bucket.objects[File.join(base_path, old_filename)].copy_to(File.join(base_path, new_filename),
+          Attachment.bucket.object(File.join(base_path, old_filename)).copy_to(File.join(base_path, new_filename),
           :acl => attachment_options[:s3_access])
 
           # We're not going to call filename= here, because it will escape it again. That's right - calling

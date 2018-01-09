@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,11 +21,13 @@ define [
   'jquery'
   'underscore'
   'compiled/views/ValidatedFormView'
-  'tinymce.editor_box'
+  'compiled/views/editor/KeyboardShortcuts'
+  'jsx/shared/rce/RichContentEditor'
   'compiled/jquery.rails_flash_notifications'
   'jquery.disableWhileLoading'
-  'compiled/tinymce',
-], (I18n, $, _, ValidatedFormView) ->
+], (I18n, $, _, ValidatedFormView, RCEKeyboardShortcuts, RichContentEditor) ->
+
+  RichContentEditor.preloadRemoteModule()
 
   # Superclass for OutcomeView and OutcomeGroupView.
   # This view is used to show, add, edit, and delete outcomes and groups.
@@ -39,6 +41,7 @@ define [
       'click .edit_button': 'edit'
       'click .cancel_button': 'cancel'
       'click .delete_button': 'delete'
+      'click .move_button' : 'move'
       'keyup input.outcome_title': 'updateTitle'
     , ValidatedFormView::events
 
@@ -78,7 +81,8 @@ define [
           @render()
       super
 
-    _cleanUpTiny: => @$el.find('[name="description"]').editorBox 'destroy'
+    _cleanUpTiny: =>
+      RichContentEditor.destroyRCE(@$el.find('[name="description"]'))
 
     submit: (e) =>
       e.preventDefault()
@@ -107,12 +111,13 @@ define [
 
     getTinyMceCode: ->
       textarea = @$('textarea')
-      textarea.val textarea.editorBox 'get_code'
+      textarea.val(RichContentEditor.callOnRCE(textarea, 'get_code'))
 
     setModelUrl: ->
       @model.setUrlTo switch @state
         when 'add' then 'add'
         when 'delete' then 'delete'
+        when 'move' then 'move'
         else 'edit'
 
     # overriding superclass
@@ -120,6 +125,7 @@ define [
       @$('form').toJSON()
 
     remove: ->
+      @_cleanUpTiny() if @tinymceExists()
       @$el.hideErrors()
       @model.destroy() if @state is 'add' and @model.isNew()
       super arguments...
@@ -160,17 +166,43 @@ define [
           $('.add_outcome_link').focus()
         error: => $.flashError I18n.t('flash.deleteError', 'Something went wrong. Unable to delete at this time.')
 
+    move: (e) =>
+      e.preventDefault()
+      @trigger 'move', @model
+
     resetModel: ->
       @model.set @_modelAttributes
+
+    setupTinyMCEViewSwitcher: =>
+      $('.rte_switch_views_link').click (e) =>
+        e.preventDefault()
+        RichContentEditor.callOnRCE(@$('textarea'), 'toggle')
+        # hide the clicked link, and show the other toggle link.
+        $(e.currentTarget).siblings('.rte_switch_views_link').andSelf().toggle()
+
+    addTinyMCEKeyboardShortcuts: =>
+      keyboardShortcutsView = new RCEKeyboardShortcuts()
+      keyboardShortcutsView.render().$el.insertBefore($('.rte_switch_views_link:first'))
 
     # Called from subclasses in render.
     readyForm: ->
       setTimeout =>
-        @$('textarea').editorBox() # tinymce
+        RichContentEditor.loadNewEditor(@$('textarea'), {
+          getRenderingTarget: (t) ->
+            wrappedTextarea = $(t).wrap( "<div id='parent-of-#{t.id}'></div>").get( 0 )
+            wrappedTextarea.parentNode
+        }) # tinymce initializer
+        @setupTinyMCEViewSwitcher()
+        @addTinyMCEKeyboardShortcuts()
         @$('input:first').focus()
 
     readOnly: ->
-      @_readOnly || ! @model.get 'can_edit'
+      @_readOnly
 
     updateTitle: (e) =>
       @model.set 'title', e.currentTarget.value
+
+    tinymceExists: =>
+      localElExists = @$el.find('[name="description"]').length > 0
+      editorElExists = RichContentEditor.callOnRCE(@$el.find('[name="description"]'), 'exists?')
+      return (localElExists and editorElExists)

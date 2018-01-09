@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,21 +18,37 @@
 
 define [
   'i18n!collaborations'
+  'jquery'
   'underscore'
   'Backbone'
   'compiled/views/collaborations/CollaboratorPickerView'
   'jst/collaborations/edit'
-], (I18n, {extend}, {View}, CollaboratorPickerView, editForm) ->
+  'jst/collaborations/EditIframe'
+], (I18n, $, {extend}, {View}, CollaboratorPickerView, editForm, editIframe) ->
 
   class CollaborationView extends View
     events:
       'click .edit_collaboration_link': 'onEdit'
+      'keyclick .edit_collaboration_link': 'onEdit'
       'click .delete_collaboration_link': 'onDelete'
+      'keyclick .delete_collaboration_link': 'onDelete'
       'click .cancel_button': 'onCloseForm'
+      'focus .before_external_content_info_alert': 'handleAlertFocus'
+      'focus .after_external_content_info_alert': 'handleAlertFocus'
+      'blur .before_external_content_info_alert': 'handleAlertBlur'
+      'blur .after_external_content_info_alert': 'handleAlertBlur'
 
     initialize: ->
       super
       @id = @$el.data('id')
+
+    handleAlertFocus: (e) ->
+      $(e.target).removeClass('screenreader-only')
+      @$el.find('iframe').addClass('info_alert_outline')
+
+    handleAlertBlur: (e) =>
+      $(e.target).addClass('screenreader-only')
+      @$el.find('iframe').removeClass('info_alert_outline')
 
     # Internal: Create collaboration edit form HTML.
     #
@@ -43,8 +59,19 @@ define [
     #
     # Returns a jQuery object form.
     formTemplate: ({action, className, data}) ->
-      $form = $(editForm(extend(data, action: action, id: @id, token: ENV.AUTHENTICITY_TOKEN)))
+      $form = $(editForm(extend(data, action: action, id: @id)))
       #$form.attr('class', className)
+      $form.on 'keydown', (e) =>
+        if e.which == 27
+          e.preventDefault()
+          @onCloseForm(e)
+
+    iframeTemplate: ({url}) ->
+      $iframe = $(editIframe({id: @id, url: url}))
+      $iframe.on 'keydown', (e) =>
+        if e.which == 27
+          e.preventDefault()
+          @onCloseForm(e)
 
     # Internal: Confirm deleting of a Google Docs collaboration.
     #
@@ -68,8 +95,16 @@ define [
         url: url
 
     delete: =>
+      $.screenReaderFlashMessage(I18n.t('Collaboration was deleted'));
       @$el.slideUp(=> @$el.remove())
       @trigger('delete', this)
+      otherDeleteLinks = $('.delete_collaboration_link').toArray()
+      curDeleteLink = @$el.find('.delete_collaboration_link')[0]
+      newIndex = otherDeleteLinks.indexOf(curDeleteLink)
+      if (newIndex > 0)
+        otherDeleteLinks[newIndex - 1].focus()
+      else
+        $('.add_collaboration_link').focus()
 
     # Internal: Hide collaboration and display an edit form.
     #
@@ -78,13 +113,20 @@ define [
     # Returns nothing.
     onEdit: (e) ->
       e.preventDefault()
-      $form = @formTemplate
-        action: $(e.currentTarget).attr('href')
-        className: @$el.attr('class')
-        data: @$el.getTemplateData(textValues: ['title', 'description'])
-      @$el.children().hide()
-      @$el.append($form)
-      @addCollaboratorPicker($form)
+      if this.$el.attr('data-update-launch-url')
+        $iframe = @iframeTemplate
+          url: this.$el.attr('data-update-launch-url')
+        @$el.children().hide()
+        @$el.append($iframe)
+      else
+        $form = @formTemplate
+          action: $(e.currentTarget).attr('href')
+          className: @$el.attr('class')
+          data: @$el.getTemplateData(textValues: ['title', 'description'])
+        @$el.children().hide()
+        @$el.append($form)
+        @addCollaboratorPicker($form)
+        $form.find('[name="collaboration[title]"]').focus()
 
     # Internal: Delete the collaboration.
     #
@@ -107,6 +149,7 @@ define [
     onCloseForm: (e) ->
       @$el.find('form').remove()
       @$el.children().show()
+      @$el.find('.edit_collaboration_link').focus()
 
     addCollaboratorPicker: ($form) ->
       view = new CollaboratorPickerView

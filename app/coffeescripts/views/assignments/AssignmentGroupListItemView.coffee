@@ -1,21 +1,43 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!assignments'
-  'underscore'
+  'jquery'
+  'jsx/move_item'
   'compiled/class/cache'
+  'compiled/util/hasLocalStorage'
   'compiled/views/DraggableCollectionView'
   'compiled/views/assignments/AssignmentListItemView'
   'compiled/views/assignments/CreateAssignmentView'
   'compiled/views/assignments/CreateGroupView'
   'compiled/views/assignments/DeleteGroupView'
-  'compiled/views/MoveDialogView'
   'compiled/fn/preventDefault'
   'jst/assignments/AssignmentGroupListItem'
   'compiled/views/assignments/AssignmentKeyBindingsMixin'
-], (I18n, _, Cache, DraggableCollectionView, AssignmentListItemView, CreateAssignmentView,CreateGroupView, DeleteGroupView, MoveDialogView, preventDefault, template, AssignmentKeyBindingsMixin) ->
+], (
+  I18n, $, MoveItem, Cache, hasLocalStorage, DraggableCollectionView, AssignmentListItemView, CreateAssignmentView,
+  CreateGroupView, DeleteGroupView, preventDefault, template, AssignmentKeyBindingsMixin
+) ->
 
   class AssignmentGroupListItemView extends DraggableCollectionView
     @mixin AssignmentKeyBindingsMixin
     @optionProperty 'course'
+    @optionProperty 'userIsAdmin'
 
     tagName: "li"
     className: "item-group-condensed"
@@ -25,9 +47,8 @@ define [
     @child 'createAssignmentView', '[data-view=createAssignment]'
     @child 'editGroupView', '[data-view=editAssignmentGroup]'
     @child 'deleteGroupView', '[data-view=deleteAssignmentGroup]'
-    @child 'moveGroupView', '[data-view=moveAssignmentGroup]'
 
-    els: _.extend({}, @::els, {
+    els: Object.assign({}, @::els, {
       '.add_assignment': '$addAssignmentButton'
       '.delete_group': '$deleteGroupButton'
       '.edit_group': '$editGroupButton'
@@ -36,8 +57,11 @@ define [
 
     events:
       'click .element_toggler': 'toggleArrow'
+      'keyclick .element_toggler': 'toggleArrowWithKeyboard'
       'click .tooltip_link': preventDefault ->
       'keydown .assignment_group': 'handleKeys'
+      'click .move_contents':  'onMoveContents'
+      'click .move_group':  'onMoveGroup'
 
     messages:
       toggleMessage: I18n.t('toggle_message', "toggle assignment visibility")
@@ -50,7 +74,6 @@ define [
       @createAssignmentView.remove() if @createAssignmentView
       @editGroupView.remove() if @editGroupView
       @deleteGroupView.remove() if @deleteGroupView
-      @moveGroupView.remove() if @moveGroupView
       super(@canManage())
 
       # reset the model's view property; it got overwritten by child views
@@ -70,12 +93,13 @@ define [
         @deleteGroupView.hide()
         @deleteGroupView.setTrigger @$deleteGroupButton
 
-      if @moveGroupView
-        @moveGroupView.hide()
-        @moveGroupView.setTrigger @$moveGroupButton
-
       if @model.hasRules()
         @createRulesToolTip()
+
+    createItemView: (model) ->
+      options =
+        userIsAdmin: @userIsAdmin
+      new @itemView $.extend {}, {model}, options
 
     createRulesToolTip: =>
       link = @$el.find('.tooltip_link')
@@ -108,22 +132,20 @@ define [
       @editGroupView = false
       @createAssignmentView = false
       @deleteGroupView = false
-      @moveGroupView = false
 
       if @canManage()
         @editGroupView = new CreateGroupView
           assignmentGroup: @model
+          userIsAdmin: @userIsAdmin
         @createAssignmentView = new CreateAssignmentView
           assignmentGroup: @model
-        @deleteGroupView = new DeleteGroupView
-          model: @model
-        @moveGroupView = new MoveDialogView
-          model: @model
-          saveURL: -> ENV.URLS.sort_url
+        if @canDelete()
+          @deleteGroupView = new DeleteGroupView
+            model: @model
 
     initCache: ->
       $.extend true, @, Cache
-      @cache.use('localStorage')
+      @cache.use('localStorage') if hasLocalStorage
       key = @cacheKey()
       if !@cache.get(key)?
         @cache.set(key, true)
@@ -150,8 +172,10 @@ define [
       showWeight = @course?.get('apply_assignment_group_weights') and data.group_weight?
       canMove = @model.collection.length > 1
 
-      attributes = _.extend(data, {
+      attributes = Object.assign(data, {
+        course_home: ENV.COURSE_HOME
         canMove: canMove
+        canDelete: @canDelete()
         showRules: @model.hasRules()
         rulesText: I18n.t('rules_text', "Rule", { count: @model.countRules() })
         displayableRules: @displayableRules()
@@ -159,6 +183,8 @@ define [
         groupWeight: data.group_weight
         toggleMessage: @messages.toggleMessage
         hasFrozenAssignments: @model.hasFrozenAssignments? and @model.hasFrozenAssignments()
+        hasIntegrationData: @model.hasIntegrationData? and @model.hasIntegrationData()
+        postToSISName: ENV.SIS_NAME
         ENV: ENV
       })
 
@@ -183,7 +209,7 @@ define [
         }))
 
       if rules.never_drop? and rules.never_drop.length > 0
-        _.each rules.never_drop, (never_drop_assignment_id) =>
+        rules.never_drop.forEach (never_drop_assignment_id) =>
           assign = @model.get('assignments').findWhere(id: never_drop_assignment_id)
 
           # TODO: students won't see never drop rules for unpublished
@@ -197,19 +223,21 @@ define [
 
       results
 
-    search: (regex) ->
+    search: (regex, gradingPeriod) ->
       @resetBorders()
+      assignmentCount = @collection.reduce( (count, as) =>
+        count++ if as.search(regex, gradingPeriod)
+        count
+      , 0)
 
-      atleastone = false
-      @collection.each (as) =>
-        atleastone = true if as.search(regex)
+      atleastone = assignmentCount > 0
       if atleastone
         @show()
         @expand(false)
         @borderFix()
       else
         @hide()
-      atleastone
+      assignmentCount
 
     endSearch: ->
       @resetBorders()
@@ -227,7 +255,6 @@ define [
     borderFix: ->
       @$('.search_show').first().addClass("first_visible")
       @$('.search_show').last().addClass("last_visible")
-
 
     shouldBeExpanded: ->
       @cache.get(@cacheKey())
@@ -267,6 +294,10 @@ define [
       #reset noToggleCache because it is a one-time-use-only flag
       @resetNoToggleCache(ev.currentTarget)
 
+    toggleArrowWithKeyboard: (ev) =>
+      $(ev.target).click()
+      false
+
     resetNoToggleCache: (selector=null) ->
       if selector?
         obj = $(selector)
@@ -278,6 +309,52 @@ define [
       key = @cacheKey()
       expanded = !@cache.get(key)
       @cache.set(key, expanded)
+
+    onMoveGroup: () =>
+      @moveTrayProps =
+        title: I18n.t('Move Group')
+        items: [
+          id: @model.get('id')
+          title: @model.get('name')
+        ]
+        moveOptions:
+          siblings: MoveItem.backbone.collectionToItems(@model.collection)
+        onMoveSuccess: (res) =>
+          MoveItem.backbone.reorderInCollection(res.data.order, @model)
+        focusOnExit: =>
+          document.querySelector("#assignment_group_#{@model.id} a[id*=manage_link]")
+        formatSaveUrl: => ENV.URLS.sort_url
+
+      MoveItem.renderTray(@moveTrayProps, document.getElementById('not_right_side'))
+
+    onMoveContents: () =>
+      groupItems = MoveItem.backbone.collectionToItems(@model, (col) => col.get('assignments'))
+      groupItems[0].groupId = @model.get('id')
+      @moveTrayProps =
+        title: I18n.t('Move Contents Into')
+        items: groupItems
+        moveOptions:
+          groupsLabel: I18n.t('Assignment Group')
+          groups: MoveItem.backbone.collectionToGroups(@model.collection, (col) => col.get('assignments'))
+          excludeCurrent: true
+        onMoveSuccess: (res) =>
+          keys =
+            model: 'assignments'
+            parent: 'assignment_group_id'
+          MoveItem.backbone.reorderAllItemsIntoNewCollection(res.data.order, res.groupId, @model, keys)
+        focusOnExit: =>
+          document.querySelector("#assignment_group_#{@model.id} a[id*=manage_link]")
+        formatSaveUrl: ({ groupId }) ->
+          "#{ENV.URLS.assignment_sort_base_url}/#{groupId}/reorder"
+
+      MoveItem.renderTray(@moveTrayProps, document.getElementById('not_right_side'))
+
+    hasMasterCourseRestrictedAssignments: ->
+      @model.get('assignments').any (m) ->
+        m.isRestrictedByMasterCourse()
+
+    canDelete: ->
+      (@userIsAdmin or @model.canDelete()) && !@hasMasterCourseRestrictedAssignments()
 
     canManage: ->
       ENV.PERMISSIONS.manage

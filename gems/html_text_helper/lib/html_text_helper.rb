@@ -1,5 +1,21 @@
 # encoding: UTF-8
 #
+# Copyright (C) 2014 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+#
 # By Henrik Nyh <http://henrik.nyh.se> 2008-01-30.
 # Free to modify and redistribute with credit.
 
@@ -18,13 +34,16 @@
 require 'nokogiri'
 require 'cgi'
 require 'iconv'
-require 'active_support/all'
+require 'active_support/core_ext/module/remove_method' # https://github.com/rails/rails/issues/28918
+require 'active_support'
+require 'active_support/core_ext'
 require 'sanitize'
+require 'canvas_text_helper'
 
 module HtmlTextHelper
   def self.strip_tags(text)
     text ||= ""
-    text.gsub(/<\/?[^>\n]*>/, "").gsub(/&#\d+;/) { |m| puts m; m[2..-1].to_i.chr(text.encoding) rescue '' }.gsub(/&\w+;/, "")
+    text.gsub(/<\/?[^<>\n]*>?/, "").gsub(/&#\d+;/) { |m| puts m; m[2..-1].to_i.chr(text.encoding) rescue '' }.gsub(/&\w+;/, "")
   end
 
   def strip_tags(text)
@@ -36,23 +55,108 @@ module HtmlTextHelper
   #
   # This is still a pretty basic implementation, I'm sure we'll find ways to
   # tweak and improve it as time goes on.
-  def html_to_text(html_str)
-    html_str ||= ''
-    doc = Nokogiri::HTML::DocumentFragment.parse(html_str.squeeze(" ").squeeze("\n"))
-    # translate anchor tags into a markdown-style name/link combo
-    doc.css('a').each { |node| next if node.text.strip == node['href']; node.replace("[#{node.text}](#{node['href']})") }
-    # translate img tags into just a url to the image
-    doc.css('img').each { |node| node.replace(node['src'] || '') }
-    # append a line break to br and p tags, so they retain a line break after stripping tags
-    doc.css('br, p').each { |node| node.after("\n\n") }
-    doc.text.strip
+  def html_to_text(html_str, opts = {})
+    return '' if html_str.blank?
+    doc = Nokogiri::HTML::DocumentFragment.parse(html_str)
+    text = html_node_to_text(doc, opts)
+    text.squeeze!(' ')
+    text.gsub!(/\r\n?/, "\n")
+    text.gsub!(/\n +/, "\n")
+    text.gsub!(/ +\n/, "\n")
+    text.gsub!(/\n\n\n+/, "\n\n")
+    text.strip!
+    text = word_wrap(text, line_width: opts[:line_width]) if opts[:line_width]
+    text
   end
 
-  # Converts a string of html to plain text using the Premailer gem.
-  def html_to_simple_text(html_str, opts={})
-    return "" if html_str.blank?
-    pm = Premailer.new(html_str, {:with_html_string => true, :input_encoding => 'UTF-8', :adapter => :nokogiri}.merge(opts))
-    pm.to_plain_text
+  # turns a nokogiri element, node, or fragment into text (recursively!)
+  def html_node_to_text(node, opts={})
+    if node.text?
+      text = node.text
+      text.gsub!(/\s+/, ' ') unless opts[:pre]
+      return text
+    end
+
+    text = case node.name
+           when 'link', 'script'
+             ''
+           when 'pre'
+             node.children.map{|c| html_node_to_text(c, opts.merge(pre: true))}.join
+           when 'img'
+             src = node['src']
+             if src
+               if opts[:preserve_links]
+                 node.to_html
+               else
+                 begin
+                   src = URI.join(opts[:base_url], src) if opts[:base_url]
+                 rescue URI::Error
+                   # do nothing, let src pass through as is
+                 end
+                 node['alt'] ? "[#{node['alt']}](#{src})" : src
+               end
+             else
+               ''
+             end
+           when 'br'
+             "\n"
+           else
+             subtext = node.children.map{|c| html_node_to_text(c, opts)}.join
+             case node.name
+             when 'a'
+               href = node['href']
+               if href
+                 if opts[:preserve_links]
+                   node.to_html
+                 else
+                   begin
+                     href = URI.join(opts[:base_url], href) if opts[:base_url]
+                   rescue URI::Error
+                     # do nothing, let href pass through as is
+                   end
+                   href == subtext ? subtext : "[#{subtext}](#{href})"
+                 end
+               else
+                 subtext
+               end
+             when 'h1'
+               banner(subtext, char: '*', line_width: opts[:line_width])
+             when 'h2'
+               banner(subtext, char: '-', line_width: opts[:line_width])
+             when /h[3-6]/
+               banner(subtext, char: '-', underline: true, line_width: opts[:line_width])
+             when 'li'
+               "* #{subtext}"
+             else
+               subtext
+             end
+           end
+    return "\n\n#{text}\n\n" if node.description.try(:block?)
+    text
+  end
+
+  # Adds a string of characters above and below some text
+  # *******
+  # like so
+  # *******
+  def banner(text, opts={})
+    return text if text.empty?
+
+    char = opts.fetch(:char, '*')
+    text_width = text.lines.map{|l| l.strip.length}.max
+    text_width = [text_width, opts[:line_width]].min if opts[:line_width]
+    line = char * text_width
+
+    (opts[:underline] ? '' : line + "\n") + text + "\n" + line
+  end
+
+  # as seen in ActionView::Helpers::TextHelper
+  def word_wrap(text, options = {})
+    line_width = options.fetch(:line_width, 80)
+
+    text.split("\n").collect do |line|
+      line.length > line_width ? line.gsub(/(.{1,#{line_width}})(\s+|$)/, "\\1\n").strip : line
+    end * "\n"
   end
 
   # Public: Strip (most) HTML from an HTML string.
@@ -60,13 +164,31 @@ module HtmlTextHelper
   # html - The original HTML string to format.
   # options - Formatting options.
   #   - base_url: The protocol and domain to prepend to relative links (e.g. "https://instructure.com").
-  #
+  #   - elements: elements (in addition to those allowed by BASIC) to be permitted
+  #   - attributes: a { element: attributes } hash of which attributes should be
+  #                 allowed for which elements.  This is in addition to whatever BASIC
+  #                 permits.
   # Returns an HTML string.
   def html_to_simple_html(html, options = {})
     return '' if html.blank?
     base_url = options.fetch(:base_url, '')
-    output = Sanitize.clean(html, Sanitize::Config::BASIC)
-
+    config = Sanitize::Config::BASIC
+    if options[:tags] || options[:attributes]
+      elements = config[:elements] + (options[:tags] || [])
+      final_attributes = {}
+      # Make sure if the basic config allows attriutes for a given element, and
+      # we pass in other attributes for that same element, that we permit both.
+      elements_with_attributes =
+        (config[:attributes]&.keys || []) | (options[:attributes]&.keys || [])
+      elements_with_attributes.each do |element|
+        basic_attributes = config[:attributes][element] || []
+        given_attributes = options[:attributes][element] || []
+        final_attributes[element] = basic_attributes | given_attributes
+      end
+      output = Sanitize.clean(html, :elements => elements, :attributes => final_attributes)
+    else
+      output = Sanitize.clean(html, config)
+    end
     append_base_url(output, base_url).html_safe
   end
 
@@ -81,8 +203,11 @@ module HtmlTextHelper
     tags = output.css('*[href]')
 
     tags.each do |tag|
-      next if tag.attributes['href'].value.match(/^https?|mailto|ftp/)
-      tag.attributes['href'].value = "#{base}#{tag.attributes['href']}"
+      url = tag.attributes['href'].value
+      next if url.match(/^https?|mailto|ftp/)
+
+      url.sub!("/", "") if url.start_with?("/") && base.end_with?("/")
+      tag.attributes['href'].value = "#{base}#{url}"
     end
 
     output.to_s
@@ -139,7 +264,7 @@ module HtmlTextHelper
                               link = s
                               link = "http://#{link}" if link[0, 3] == 'www'
                               link = add_notification_to_link(link, opts[:notification_id]) if opts[:notification_id]
-                              link = URI.escape(link).gsub("'", "%27")
+                              link = link.gsub("'", "%27")
                               links << link
                               "<a href='#{ERB::Util.h(link)}'>#{ERB::Util.h(s)}</a>"
                             end
@@ -193,5 +318,9 @@ module HtmlTextHelper
 
   def self.unescape_html(text)
     CGI::unescapeHTML text
+  end
+
+  def self.strip_and_truncate(text, options={})
+    CanvasTextHelper::truncate_text(strip_tags(text), options)
   end
 end

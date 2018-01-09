@@ -23,17 +23,21 @@ class TestUserApi
   include Api::V1::UserProfile
   attr_accessor :services_enabled, :context, :current_user
   def service_enabled?(service); @services_enabled.include? service; end
+
   def avatar_image_url(user_id); "avatar_image_url(#{user_id})"; end
+
   def initialize
     @domain_root_account = Account.default
   end
 end
 
 describe "User Profile API", type: :request do
-  before do
+  before :once do
     @admin = account_admin_user
+    @admin_lti_user_id = Lti::Asset.opaque_identifier_for(@admin)
     course_with_student(:user => user_with_pseudonym(:name => 'Student', :username => 'pvuser@example.com'))
     @student.pseudonym.update_attribute(:sis_user_id, 'sis-user-id')
+    @student_lti_user_id = Lti::Asset.opaque_identifier_for(@student)
     @user = @admin
     Account.default.tap { |a| a.enable_service(:avatars) }.save
     user_with_pseudonym(:user => @user)
@@ -42,29 +46,32 @@ describe "User Profile API", type: :request do
   it "should return another user's avatars, if allowed" do
     json = api_call(:get, "/api/v1/users/#{@student.id}/avatars",
                     :controller => "profile", :action => "profile_pics", :user_id => @student.to_param, :format => 'json')
-    json.map{ |j| j['type'] }.sort.should eql ['gravatar', 'no_pic']
+    expect(json.map{ |j| j['type'] }.sort).to eql ['gravatar', 'no_pic']
   end
 
   it "should return user info for users with no pseudonym" do
     @me = @user
-    new_user = user(:name => 'new guy')
+    new_user = user_factory(:name => 'new guy')
     @user = @me
     @course.enroll_user(new_user, 'ObserverEnrollment')
-    Account.site_admin.add_user(@user)
+    Account.site_admin.account_users.create!(user: @user)
     json = api_call(:get, "/api/v1/users/#{new_user.id}/profile",
              :controller => "profile", :action => "settings", :user_id => new_user.to_param, :format => 'json')
-    json.should == {
+    expect(json).to eq({
       'id' => new_user.id,
       'name' => 'new guy',
       'sortable_name' => 'guy, new',
       'short_name' => 'new guy',
+      'sis_user_id' => nil,
       'login_id' => nil,
+      'integration_id' => nil,
       'primary_email' => nil,
       'title' => nil,
       'bio' => nil,
-      'avatar_url' => "https://secure.gravatar.com/avatar/000?s=50&d=http%3A%2F%2Fwww.example.com%2Fimages%2Fmessages%2Favatar-50.png",
+      'avatar_url' => new_user.gravatar_url(50, nil, request),
       'time_zone' => 'Etc/UTC',
-    }
+      'locale' => nil
+    })
 
     get("/courses/#{@course.id}/students")
   end
@@ -72,38 +79,69 @@ describe "User Profile API", type: :request do
   it "should return this user's profile" do
     json = api_call(:get, "/api/v1/users/self/profile",
              :controller => "profile", :action => "settings", :user_id => 'self', :format => 'json')
-    json.should == {
+    expect(json).to eq({
       'id' => @admin.id,
       'name' => 'User',
       'sortable_name' => 'User',
       'short_name' => 'User',
+      'sis_user_id' => nil,
+      'integration_id' => nil,
       'primary_email' => 'nobody@example.com',
       'login_id' => 'nobody@example.com',
-      'avatar_url' => "https://secure.gravatar.com/avatar/8c5548eb0b2b80924f237953392df5e7?s=50&d=http%3A%2F%2Fwww.example.com%2Fimages%2Fmessages%2Favatar-50.png",
+      'avatar_url' => @admin.gravatar_url(50, nil, request),
       'calendar' => { 'ics' => "http://www.example.com/feeds/calendars/user_#{@admin.uuid}.ics" },
+      'lti_user_id' => @admin_lti_user_id,
       'title' => nil,
       'bio' => nil,
       'time_zone' => 'Etc/UTC',
-    }
+      'locale' => nil
+    })
+  end
+
+  it 'should return the correct locale if not using the system default' do
+    @user = @student
+    @student.locale = 'es'
+    @student.save!
+    json = api_call(:get, "/api/v1/users/#{@student.id}/profile",
+             :controller => "profile", :action => "settings", :user_id => @student.to_param, :format => 'json')
+    expect(json).to eq({
+      'id' => @student.id,
+      'name' => 'Student',
+      'sortable_name' => 'Student',
+      'short_name' => 'Student',
+      'integration_id' => nil,
+      'primary_email' => 'pvuser@example.com',
+      'login_id' => 'pvuser@example.com',
+      'avatar_url' => @student.gravatar_url(50, nil, request),
+      'calendar' => { 'ics' => "http://www.example.com/feeds/calendars/user_#{@student.uuid}.ics" },
+      'lti_user_id' => @student_lti_user_id,
+      'title' => nil,
+      'bio' => nil,
+      'time_zone' => 'Etc/UTC',
+      'locale' => 'es'
+    })
   end
 
   it "should return this user's profile (non-admin)" do
     @user = @student
     json = api_call(:get, "/api/v1/users/#{@student.id}/profile",
              :controller => "profile", :action => "settings", :user_id => @student.to_param, :format => 'json')
-    json.should == {
+    expect(json).to eq({
       'id' => @student.id,
       'name' => 'Student',
       'sortable_name' => 'Student',
       'short_name' => 'Student',
+      'integration_id' => nil,
       'primary_email' => 'pvuser@example.com',
       'login_id' => 'pvuser@example.com',
-      'avatar_url' => "https://secure.gravatar.com/avatar/7f2ba69d483b221f7bea6145425a19c1?s=50&d=http%3A%2F%2Fwww.example.com%2Fimages%2Fmessages%2Favatar-50.png",
+      'avatar_url' => @student.gravatar_url(50, nil, request),
       'calendar' => { 'ics' => "http://www.example.com/feeds/calendars/user_#{@student.uuid}.ics" },
+      'lti_user_id' => @student_lti_user_id,
       'title' => nil,
       'bio' => nil,
       'time_zone' => 'Etc/UTC',
-    }
+      'locale' => nil
+    })
   end
 
   it "should return this user's avatars, if allowed" do
@@ -111,7 +149,7 @@ describe "User Profile API", type: :request do
     @student.register
     json = api_call(:get, "/api/v1/users/#{@student.id}/avatars",
                     :controller => "profile", :action => "profile_pics", :user_id => @student.to_param, :format => 'json')
-    json.map{ |j| j['type'] }.sort.should eql ['gravatar', 'no_pic']
+    expect(json.map{ |j| j['type'] }.sort).to eql ['gravatar', 'no_pic']
   end
 
   it "shouldn't return disallowed profiles" do
@@ -122,7 +160,7 @@ describe "User Profile API", type: :request do
   end
 
   context "user_services" do
-    before do
+    before :once do
       @student.user_services.create! :service => 'skype', :service_user_name => 'user', :service_user_id => 'user', :visible => false
       @student.user_services.create! :service => 'twitter', :service_user_name => 'user', :service_user_id => 'user', :visible => true
     end
@@ -133,7 +171,7 @@ describe "User Profile API", type: :request do
                       :controller => "profile", :action => "settings",
                       :user_id => @student.to_param, :format => "json",
                       :include => ["user_services"])
-      json["user_services"].should == [
+      expect(json["user_services"]).to eq [
         {"service" => "skype", "visible" => false, "service_user_link" => "skype:user?add"},
         {"service" => "twitter", "visible" => true, "service_user_link" => "http://www.twitter.com/user"},
       ]
@@ -145,7 +183,7 @@ describe "User Profile API", type: :request do
                       :controller => "profile", :action => "settings",
                       :user_id => @student.to_param, :format => "json",
                       :include => %w(user_services))
-      json["user_services"].should == [
+      expect(json["user_services"]).to eq [
         {"service" => "twitter", "visible" => true, "service_user_link" => "http://www.twitter.com/user"},
       ]
     end
@@ -159,7 +197,7 @@ describe "User Profile API", type: :request do
                       :controller => "profile", :action => "settings",
                       :user_id => @student.to_param, :format => "json",
                       :include => %w(links))
-      json["links"].should == [
+      expect(json["links"]).to eq [
         {"url" => "http://instructure.com", "title" => "Instructure"}
       ]
     end

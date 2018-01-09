@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -31,7 +31,7 @@ class HostUrl
 
     def domain_config
       if !@@domain_config
-        @@domain_config = Setting.from_config("domain")
+        @@domain_config = ConfigFile.load("domain")
         @@domain_config ||= {}
       end
       @@domain_config
@@ -92,10 +92,6 @@ class HostUrl
       host
     end
 
-    def short_host(context)
-      context_host(context)
-    end
-    
     def outgoing_email_address(preferred_user="notifications")
       @outgoing_email_address.presence || "#{preferred_user}@#{outgoing_email_domain}"
     end
@@ -107,6 +103,7 @@ class HostUrl
     def file_host=(val)
       @@file_host = val
     end
+
     def default_host=(val)
       @@default_host = val
     end

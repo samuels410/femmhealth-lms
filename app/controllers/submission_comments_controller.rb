@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,15 +17,32 @@
 #
 
 class SubmissionCommentsController < ApplicationController
-  
-  def destroy
-    @submission_comment = SubmissionComment.find(params[:id])
-    if authorized_action(@submission_comment, @current_user, :delete)
-      @submission_comment.destroy
+  before_action :require_user
+
+  def update
+    submission_comment = SubmissionComment.find(params[:id])
+    if authorized_action(submission_comment, @current_user, :update)
+      submission_comment.reload unless submission_comment.update(submission_comment_params)
+
       respond_to do |format|
-        format.json { render :json => @submission_comment }
+        format.json { render json: submission_comment.as_json }
       end
     end
   end
-  
+
+  def destroy
+    submission_comment = SubmissionComment.find(params[:id])
+    if authorized_action(submission_comment, @current_user, :delete)
+      submission_comment.destroy
+      respond_to do |format|
+        format.json { render json: submission_comment }
+      end
+    end
+  end
+
+  private
+
+  def submission_comment_params
+    params.require(:submission_comment).permit(:draft, :comment)
+  end
 end

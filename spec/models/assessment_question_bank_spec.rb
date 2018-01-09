@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,66 +19,97 @@
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 
 describe AssessmentQuestionBank do
-  before(:each) do
-    course
+  before :once do
+    course_factory
+    assessment_question_bank_model
     @bank = @course.assessment_question_banks.create!(:title=>'Test Bank')
   end
 
   describe "#select_for_submission" do
-    before do
-      # create a bunch of questions to make it more likely that they'll shuffle randomly
-      @q1  = @bank.assessment_questions.create!(:question_data => {'name' => 'test question 1',  'answers' => [{'id' => 1}, {'id' => 2}]})
-      @q2  = @bank.assessment_questions.create!(:question_data => {'name' => 'test question 2',  'answers' => [{'id' => 3}, {'id' => 4}]})
-      @q3  = @bank.assessment_questions.create!(:question_data => {'name' => 'test question 3',  'answers' => [{'id' => 3}, {'id' => 4}]})
-      @q4  = @bank.assessment_questions.create!(:question_data => {'name' => 'test question 4',  'answers' => [{'id' => 3}, {'id' => 4}]})
-      @q5  = @bank.assessment_questions.create!(:question_data => {'name' => 'test question 5',  'answers' => [{'id' => 3}, {'id' => 4}]})
-      @q6  = @bank.assessment_questions.create!(:question_data => {'name' => 'test question 6',  'answers' => [{'id' => 3}, {'id' => 4}]})
-      @q7  = @bank.assessment_questions.create!(:question_data => {'name' => 'test question 7',  'answers' => [{'id' => 3}, {'id' => 4}]})
-      @q8  = @bank.assessment_questions.create!(:question_data => {'name' => 'test question 8',  'answers' => [{'id' => 3}, {'id' => 4}]})
-      @q9  = @bank.assessment_questions.create!(:question_data => {'name' => 'test question 9',  'answers' => [{'id' => 3}, {'id' => 4}]})
-      @q10 = @bank.assessment_questions.create!(:question_data => {'name' => 'test question 10', 'answers' => [{'id' => 3}, {'id' => 4}]})
+    before :once do
+      assessment_question_bank_with_questions
       @quiz = @course.quizzes.create!(:title => "some quiz")
       @group = @quiz.quiz_groups.create!(:name => "question group", :pick_count => 3, :question_points => 5.0)
       @group.assessment_question_bank = @bank
       @group.save
     end
 
+    after(:each) do
+      Timecop.return
+    end
+
     it "should return the desired count of questions" do
-      @bank.select_for_submission(0).length.should == 0
-      @bank.select_for_submission(2).length.should == 2
-      @bank.select_for_submission(4).length.should == 4
-      @bank.select_for_submission(11).length.should == 10
+      expect(@bank.select_for_submission(@quiz.id, nil, 0).length).to eq 0
+      expect(@bank.select_for_submission(@quiz.id, nil, 2).length).to eq 2
+      expect(@bank.select_for_submission(@quiz.id, nil, 4).length).to eq 4
+      expect(@bank.select_for_submission(@quiz.id, nil, 11).length).to eq 10
     end
 
     it "should exclude specified questions" do
-      original = [@q1.id, @q2.id, @q3.id, @q4.id, @q5.id, @q6.id, @q7.id, @q8.id, @q9.id, @q10.id]
-      selected_ids = @bank.select_for_submission(10, [@q1.id, @q10.id]).map {|q| q.id }
+      selected_ids = @bank.select_for_submission(@quiz.id, nil, 10, [@q1.id, @q10.id]).map(&:assessment_question_id)
 
-      selected_ids.include?(@q1.id).should be_false
-      selected_ids.include?(@q10.id).should be_false
-      selected_ids.include?(@q2.id).should be_true
-      selected_ids.include?(@q9.id).should be_true
+      expect(selected_ids.include?(@q1.id)).to be_falsey
+      expect(selected_ids.include?(@q10.id)).to be_falsey
+      expect(selected_ids.include?(@q2.id)).to be_truthy
+      expect(selected_ids.include?(@q9.id)).to be_truthy
     end
 
     it "should return the questions in a random order" do
       original = [@q1.id, @q2.id, @q3.id, @q4.id, @q5.id, @q6.id, @q7.id, @q8.id, @q9.id, @q10.id]
 
-      selected1 = @bank.select_for_submission(10).map {|q| q.id }
-      selected2 = @bank.select_for_submission(10).map {|q| q.id }
+      selected1 = @bank.select_for_submission(@quiz.id, nil, 10).map(&:id)
+      selected2 = @bank.select_for_submission(@quiz.id, nil, 10).map(&:id)
 
       # make sure at least one is shuffled
       is_shuffled1 = (original != selected1)
       is_shuffled2 = (original != selected2)
 
       # it's possible but unlikely that shuffled version is same as original
-      (is_shuffled1 || is_shuffled2).should be_true
+      expect(is_shuffled1 || is_shuffled2).to be_truthy
+    end
+
+    it "should pick randomly quiz group questions in the db" do
+      aq_ids = []
+      20.times do
+        aq_ids << @bank.select_for_submission(@quiz.id, nil, 1).first.assessment_question_id
+      end
+      # shouldn't pick the same one over and over again
+      # yes, technically there's a 0.000000000000000001% chance this will fail spontaneously - sue me
+      expect(aq_ids.uniq.count > 1).to be_truthy
+    end
+
+    it "processes questions in :id sorted order" do
+      expect(AssessmentQuestion).to receive(:find_or_create_quiz_questions) do |aqs, _, _, _|
+        expect(aqs).to eq aqs.sort_by(&:id)
+        []
+      end
+      @bank.select_for_submission(@quiz.id, nil, 10)
     end
   end
 
   it "should allow user read access through question bank users" do
-    user
-    @bank.assessment_question_bank_users.create!(:user => user)
-    @course.grants_right?(@user, :manage_assignments).should be_false
-    @bank.grants_right?(@user, :read).should be_true
+    user_factory
+    @bank.assessment_question_bank_users.create!(:user => user_factory)
+    expect(@course.grants_right?(@user, :manage_assignments)).to be_falsey
+    expect(@bank.grants_right?(@user, :read)).to be_truthy
+  end
+
+  it "should remove outcome alignments when deleted" do
+    outcome_model(:context => @course)
+    @bank.alignments = { @outcome.id => 0.5 }
+
+    @bank.reload
+    expect(@bank.learning_outcome_alignments).to be_present
+    expect(@bank.learning_outcome_alignments.first.learning_outcome_id).to eq @outcome.id
+
+    # regular save shouldn't mess with alignments
+    @bank.save!
+    @bank.reload
+    expect(@bank.learning_outcome_alignments).to be_present
+    expect(@bank.learning_outcome_alignments.first.learning_outcome_id).to eq @outcome.id
+
+    @bank.destroy
+    @bank.reload
+    expect(@bank.learning_outcome_alignments).to be_empty
   end
 end

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,182 +19,217 @@
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper')
 
 describe ConferencesController do
-  before do
+  before :once do
     # these specs need an enabled web conference plugin
-    @plugin = PluginSetting.find_or_create_by_name('wimba')
+    @plugin = PluginSetting.create!(name: 'wimba')
     @plugin.update_attribute(:settings, { :domain => 'wimba.test' })
+    course_with_teacher(active_all: true, user: user_with_pseudonym(active_all: true))
+    @inactive_student = course_with_user('StudentEnrollment', course: @course, enrollment_state: 'invited').user
+    student_in_course(active_all: true, user: user_with_pseudonym(active_all: true))
+  end
+
+  before :each do
+    allow_any_instance_of(WimbaConference).to receive(:send_request).and_return('')
+    allow_any_instance_of(WimbaConference).to receive(:get_auth_token).and_return('abc123')
   end
 
   describe "GET 'index'" do
     it "should require authorization" do
-      course_with_student(:active_all => true)
-      get 'index', :course_id => @course.id
+      get 'index', params: {:course_id => @course.id}
       assert_unauthorized
     end
-    
+
     it "should redirect 'disabled', if disabled by the teacher" do
-      course_with_student_logged_in(:active_all => true)
+      user_session(@student)
       @course.update_attribute(:tab_configuration, [{'id'=>12,'hidden'=>true}])
-      get 'index', :course_id => @course.id
-      response.should be_redirect
-      flash[:notice].should match(/That page has been disabled/)
+      get 'index', params: {:course_id => @course.id}
+      expect(response).to be_redirect
+      expect(flash[:notice]).to match(/That page has been disabled/)
     end
-    
+
     it "should assign variables" do
-      course_with_student_logged_in(:active_all => true)
-      get 'index', :course_id => @course.id
-      response.should be_success
+      user_session(@student)
+      get 'index', params: {:course_id => @course.id}
+      expect(response).to be_success
     end
 
     it "should not redirect from group context" do
-      course_with_student_logged_in(:active_all => true)
+      user_session(@student)
       @group = @course.groups.create!(:name => "some group")
-      @group.add_user(@user)
-      get 'index', :group_id => @group.id
-      response.should be_success
+      @group.add_user(@student)
+      get 'index', params: {:group_id => @group.id}
+      expect(response).to be_success
     end
-    
+
     it "should not include the student view student" do
-      course_with_teacher_logged_in(:active_all => true)
-      student_in_course(:active_user => true)
+      user_session(@teacher)
       @student_view_student = @course.student_view_student
-      get 'index', :course_id => @course.id
-      assigns[:users].include?(@student).should be_true
-      assigns[:users].include?(@student_view_student).should be_false
+      get 'index', params: {:course_id => @course.id}
+      expect(assigns[:users].include?(@student)).to be_truthy
+      expect(assigns[:users].include?(@student_view_student)).to be_falsey
+    end
+
+    it "doesn't include inactive users" do
+      user_session(@teacher)
+      get 'index', params: {:course_id => @course.id}
+      expect(assigns[:users].include?(@student)).to be_truthy
+      expect(assigns[:users].include?(@inactive_student)).to be_falsey
     end
 
     it "should not allow the student view student to access collaborations" do
       course_with_teacher_logged_in(:active_user => true)
-      @course.should_not be_available
+      expect(@course).not_to be_available
       @fake_student = @course.student_view_student
       session[:become_user_id] = @fake_student.id
-      
-      get 'index', :course_id => @course.id
+
+      get 'index', params: {:course_id => @course.id}
       assert_unauthorized
     end
 
     it "should not list conferences that use a disabled plugin" do
-      course_with_teacher_logged_in(:active_all => true)
-      plugin = PluginSetting.find_or_create_by_name('adobe_connect')
+      user_session(@teacher)
+      plugin = PluginSetting.create!(name: 'adobe_connect')
       plugin.update_attribute(:settings, { :domain => 'adobe_connect.test' })
 
       @conference = @course.web_conferences.create!(:conference_type => 'AdobeConnect', :duration => 60, :user => @teacher)
       plugin.disabled = true
       plugin.save!
-      get 'index', :course_id => @course.id
-      assigns[:new_conferences].should be_empty
+      get 'index', params: {:course_id => @course.id}
+      expect(assigns[:new_conferences]).to be_empty
     end
   end
 
   describe "POST 'create'" do
     it "should require authorization" do
-      course_with_teacher(:active_all => true)
-      post 'create', :course_id => @course.id, :web_conference => {:title => "My Conference", :conference_type => 'Wimba'}
+      post 'create', params: {:course_id => @course.id, :web_conference => {:title => "My Conference", :conference_type => 'Wimba'}}
       assert_unauthorized
     end
-    
+
     it "should create a conference" do
-      course_with_teacher_logged_in(:active_all => true)
-      post 'create', :course_id => @course.id, :web_conference => {:title => "My Conference", :conference_type => 'Wimba'}, :format => 'json'
-      response.should be_success
+      user_session(@teacher)
+      post 'create', params: {:course_id => @course.id, :web_conference => {:title => "My Conference", :conference_type => 'Wimba'}}, :format => 'json'
+      expect(response).to be_success
+    end
+
+    context 'with concluded students in context' do
+      context "with a course context" do
+        it 'should not invite students with a concluded enrollment' do
+          user_session(@teacher)
+          enrollment = student_in_course(active_all: true, user: user_with_pseudonym(active_all: true))
+          enrollment.conclude
+          post 'create', params: {:course_id => @course.id, :web_conference => {:title => "My Conference", :conference_type => 'Wimba'}}, :format => 'json'
+          conference = WebConference.last
+          expect(conference.invitees).not_to include(enrollment.user)
+        end
+      end
+
+      context 'with a group context' do
+        it 'should not invite students with a concluded enrollment' do
+          user_session(@teacher)
+          concluded_enrollment = student_in_course(active_all: true, user: user_with_pseudonym(active_all: true))
+          concluded_enrollment.conclude
+
+          enrollment = student_in_course(active_all: true, user: user_with_pseudonym(active_all: true))
+          group_category = @course.group_categories.create(:name => "category 1")
+          group = @course.groups.create(:name => "some group", :group_category => group_category)
+          group.add_user enrollment.user, 'accepted'
+          group.add_user concluded_enrollment.user, 'accepted'
+
+          post 'create', params: {:group_id => group.id, :web_conference => {:title => "My Conference", :conference_type => 'Wimba'}}, :format => 'json'
+          conference = WebConference.last
+          expect(conference.invitees).not_to include(concluded_enrollment.user)
+          expect(conference.invitees).to include(enrollment.user)
+        end
+      end
     end
   end
 
   describe "POST 'update'" do
     it "should require authorization" do
-      course_with_teacher(:active_all => true)
-      post 'create', :course_id => @course.id, :web_conference => {:title => "My Conference", :conference_type => 'Wimba'}
+      post 'create', params: {:course_id => @course.id, :web_conference => {:title => "My Conference", :conference_type => 'Wimba'}}
       assert_unauthorized
     end
-    
+
     it "should update a conference" do
-      course_with_teacher_logged_in(:active_all => true)
+      user_session(@teacher)
       @conference = @course.web_conferences.create!(:conference_type => 'Wimba', :user => @teacher)
-      post 'update', :course_id => @course.id, :id => @conference, :web_conference => {:title => "Something else"}, :format => 'json'
-      response.should be_success
+      post 'update', params: {:course_id => @course.id, :id => @conference, :web_conference => {:title => "Something else"}}, :format => 'json'
+      expect(response).to be_success
     end
   end
 
   describe "POST 'join'" do
     it "should require authorization" do
-      course_with_teacher(:active_all => true)
       @conference = @course.web_conferences.create!(:conference_type => 'Wimba', :duration => 60, :user => @teacher)
-      post 'join', :course_id => @course.id, :conference_id => @conference.id
+      post 'join', params: {:course_id => @course.id, :conference_id => @conference.id}
       assert_unauthorized
     end
 
     it "should let admins join a conference" do
-      WimbaConference.any_instance.stubs(:send_request).returns('')
-      WimbaConference.any_instance.stubs(:get_auth_token).returns('abc123')
-      course_with_teacher_logged_in(:active_all => true, :user => user_with_pseudonym(:active_all => true))
+      user_session(@teacher)
       @conference = @course.web_conferences.create!(:conference_type => 'Wimba', :duration => 60, :user => @teacher)
-      post 'join', :course_id => @course.id, :conference_id => @conference.id
-      response.should be_redirect
-      response['Location'].should =~ /wimba\.test/
+      post 'join', params: {:course_id => @course.id, :conference_id => @conference.id}
+      expect(response).to be_redirect
+      expect(response['Location']).to match /wimba\.test/
     end
 
     it "should let students join an inactive long running conference" do
-      WimbaConference.any_instance.stubs(:send_request).returns('')
-      WimbaConference.any_instance.stubs(:get_auth_token).returns('abc123')
-      course_with_student_logged_in(:active_all => true, :user => user_with_pseudonym(:active_all => true))
+      user_session(@student)
       @conference = @course.web_conferences.create!(:conference_type => 'Wimba', :user => @teacher)
       @conference.update_attribute :start_at, 1.month.ago
-      @conference.users << @user
-      WimbaConference.any_instance.stubs(:conference_status).returns(:closed)
-      post 'join', :course_id => @course.id, :conference_id => @conference.id
-      response.should be_redirect
-      response['Location'].should =~ /wimba\.test/
+      @conference.users << @student
+      allow_any_instance_of(WimbaConference).to receive(:conference_status).and_return(:closed)
+      post 'join', params: {:course_id => @course.id, :conference_id => @conference.id}
+      expect(response).to be_redirect
+      expect(response['Location']).to match /wimba\.test/
     end
 
     describe 'when student is part of the conference' do
 
-      before do
-        course_with_student_logged_in(:active_all => true, :user => user_with_pseudonym(:active_all => true))
+      before :once do
         @conference = @course.web_conferences.create!(:conference_type => 'Wimba', :duration => 60, :user => @teacher)
-        @conference.users << @user
+        @conference.users << @student
+      end
+
+      before :each do
+        user_session(@student)
       end
 
       it "should not let students join an inactive conference" do
-        WimbaConference.any_instance.expects(:active?).returns(false)
-        post 'join', :course_id => @course.id, :conference_id => @conference.id
-        response.should be_redirect
-        response['Location'].should_not =~ /wimba\.test/
-        flash[:notice].should match(/That conference is not currently active/)
+        expect_any_instance_of(WimbaConference).to receive(:active?).and_return(false)
+        post 'join', params: {:course_id => @course.id, :conference_id => @conference.id}
+        expect(response).to be_redirect
+        expect(response['Location']).not_to match /wimba\.test/
+        expect(flash[:notice]).to match(/That conference is not currently active/)
       end
 
       describe 'when the conference is active' do
         before do
           Setting.set('enable_page_views', 'db')
-          WimbaConference.any_instance.stubs(:send_request).returns('')
-          WimbaConference.any_instance.stubs(:get_auth_token).returns('abc123')
-          WimbaConference.any_instance.expects(:active?).returns(true)
-          post 'join', :course_id => @course.id, :conference_id => @conference.id
+          expect_any_instance_of(WimbaConference).to receive(:active?).and_return(true)
+          post 'join', params: {:course_id => @course.id, :conference_id => @conference.id}
         end
 
-        after { Setting.set 'enable_page_views', 'false' }
-
         it "should let students join an active conference" do
-          response.should be_redirect
-          response['Location'].should =~ /wimba\.test/
+          expect(response).to be_redirect
+          expect(response['Location']).to match /wimba\.test/
         end
 
         it 'logs an asset access record for the discussion topic' do
           accessed_asset = assigns[:accessed_asset]
-          accessed_asset[:code].should == @conference.asset_string
-          accessed_asset[:category].should == 'conferences'
-          accessed_asset[:level].should == 'participate'
+          expect(accessed_asset[:code]).to eq @conference.asset_string
+          expect(accessed_asset[:category]).to eq 'conferences'
+          expect(accessed_asset[:level]).to eq 'participate'
         end
 
         it 'registers a page view' do
           page_view = assigns[:page_view]
-          page_view.should_not be_nil
-          page_view.http_method.should == 'post'
-          page_view.url.should =~ %r{^http://test\.host/courses/\d+/conferences/\d+/join}
-          page_view.participated.should be_true
+          expect(page_view).not_to be_nil
+          expect(page_view.http_method).to eq 'post'
+          expect(page_view.url).to match %r{^http://test\.host/courses/\d+/conferences/\d+/join}
+          expect(page_view.participated).to be_truthy
         end
-
       end
     end
-
   end
 end

@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'Backbone'
@@ -41,6 +58,13 @@ define [
         @progress?.poll()
         @render()
 
+      # Render the progress bar if workflow_state changes to running
+      @progress.on 'change:workflow_state', (event) => 
+        @renderProgressBar() if @progress.get('workflow_state') == "running"
+
+      # When progress is complete, update
+      @progress.on 'complete', (event) => @updateMigrationModel()
+
     toJSON: -> 
       json = super
       json.display_name = @displayName()
@@ -60,7 +84,7 @@ define [
       json
 
     displayName: ->          @model.get('migration_type_title')  ||  I18n.t('content_migration', 'Content Migration')
-    createdAt:   ->          @model.get('created_at')            ||  $.dateToISO8601UTC(new Date()) 
+    createdAt:   ->          @model.get('created_at')            ||  (new Date()).toISOString()
 
     # Render a collection view that represents issues for this migration. 
     #
@@ -88,20 +112,14 @@ define [
 
       this
 
-    # A complete event is triggered after a migration is completed. The migration model needs
-    # to be updated so you have the number of issues and it know's what to do next. 
+    # Render the initial progress bar after it renders, if its in a running state
     #
     # @expects void
     # @api backbone override
 
     afterRender: -> 
-      # This is ugly :( a refector would be nice someday
       if @model.get('workflow_state') == "running"
         @renderProgressBar() if @progress.get('workflow_state') == "running"
-        @progress.on 'change:workflow_state', (event) => 
-          @renderProgressBar() if @progress.get('workflow_state') == "running"
-
-      @progress.on 'complete', (event) => @updateMigrationModel()
 
     # Create a new progress bar with the @progress model. Replace the changable html 
     # with this progress information. 

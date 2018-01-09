@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require 'net/http'
 require 'net/https'
 require 'uri'
@@ -14,22 +31,21 @@ module AppCenter
       @app_center && @app_center.enabled? && !@app_center.settings['base_url'].empty?
     end
 
-    def fetch_app_center_response(endpoint, expires, page, per_page, force_refresh=false)
+    def fetch_app_center_response(endpoint, expires, page, per_page)
       return {} unless valid_app_center?
 
       base_url = @app_center.settings['base_url']
       page = page.to_i
       per_page = per_page.to_i
       offset = ( page - 1 ) * per_page
+      access_token = @app_center.settings['token']
 
       begin
-        cache_key = ['app_center', base_url, endpoint, offset].cache_key
-        Rails.cache.delete(cache_key) if force_refresh
-
+        cache_key = ['app_center', base_url, endpoint, offset, access_token].cache_key
         response = Rails.cache.fetch(cache_key, :expires_in => expires) do
           uri = URI.parse("#{base_url}#{endpoint}")
           uri.query = [uri.query, "offset=#{offset}"].compact.join('&')
-          Canvas::HTTP.get(uri.to_s).body
+          CanvasHttp.get(uri.to_s).body
         end
 
         json = JSON.parse(response)
@@ -43,14 +59,14 @@ module AppCenter
       return json
     end
 
-    def get_apps(page = 1, per_page = 72)
+    def get_apps(page = 1, per_page = 72, app_center_access_token=nil)
       return {} unless valid_app_center?
 
       uri = URI.parse(@app_center.settings['apps_index_endpoint'])
-      params = URI.decode_www_form(uri.query || [])
-      params << ['access_token', @app_center.settings['token']]
+      params = URI.decode_www_form(uri.query || '')
+      access_token = app_center_access_token ? app_center_access_token : @app_center.settings['token']
+      params << ['access_token', access_token]
       uri.query = URI.encode_www_form(params)
-
       json = fetch_app_center_response(uri.to_s, 5.minutes, page, per_page)
       if json['lti_apps']
         json['lti_apps'].each do |app|
@@ -91,84 +107,27 @@ module AppCenter
       json
     end
 
-    def get_app_reviews(id, page = 1, per_page = 15, force_refresh=false)
-      return {} unless valid_app_center?
+    def get_app_config_url(app_center_id, config_settings)
+      access_token = @app_center.settings['token']
+      endpoint = "/api/v1/lti_apps/#{app_center_id}?access_token=#{access_token}"
 
-      json = fetch_app_center_response(@app_center.settings['app_reviews_endpoint'].gsub(':id', id.to_s), 60.minutes, page, per_page, force_refresh)
-      #mapping for backwards compatibility with edu-apps v1
-      if !json['reviews'] && json['objects']
-        reviews = json.delete('objects')
-        reviews.each do |review|
-          review['user'] = {
-              'name' => review['user_name'],
-              'url' => review['user_url'],
-              'avatar_url' => review['user_avatar_url'],
-          }
-          review['created_at'] = review['created']
-        end
-        json['reviews'] = reviews
-      end
-      json
-    end
+      app_details = fetch_app_center_response(endpoint, 5.minutes, 1, 1)
 
-    def get_app_user_review(id, user_id)
-      return {} unless valid_app_center?
-      
-      begin
-        base_url = @app_center.settings['base_url']
-        app_reviews_endpoint = @app_center.settings['app_reviews_endpoint'].gsub(':id', id.to_s)
-        token = @app_center.settings['token']
-        #uri = URI.parse("#{base_url}#{app_reviews_endpoint}/#{token}/#{user_id}")
+      if app_details['config_xml_url']
+        user_query_string = ''
+        user_query_string = config_settings.map {|k, v| "#{k}=#{v}"}.join('&') if config_settings
 
-        uri = URI.parse("#{base_url}#{app_reviews_endpoint}")
-        params = URI.decode_www_form(uri.query || [])
-        params << ['organization[access_token]', @app_center.settings['token']]
-        params << ['membership[remote_uid]', user_id]
-        uri.query = URI.encode_www_form(params)
-        uri.to_s
+        response_config_url = app_details['config_xml_url']
 
-        response = Canvas::HTTP.get(uri.to_s).body
-        json = JSON.parse(response)
-        json = json['reviews'].first if json['reviews']
-      rescue
-        json = {}
-      end
-      return json
-    end
+        uri = URI(response_config_url)
+        response_config_url += (uri.query.present? ? '&' : '?') + user_query_string if user_query_string.present?
 
-    def add_app_review(id, user, rating, comments)
-      return {} unless valid_app_center?
-
-      base_url = @app_center.settings['base_url']
-      app_reviews_endpoint = @app_center.settings['app_reviews_endpoint'].gsub(':id', id.to_s)
-      token = @app_center.settings['token']
-      uri = URI.parse("#{base_url}#{app_reviews_endpoint}")
-      http = Net::HTTP.new(uri.host, uri.port)
-      if uri.scheme == 'https'
-        http.use_ssl=true
-        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+        config_url = response_config_url
+      else
+        config_url = nil
       end
 
-      begin
-        #review = app_api.add_app_review(params[:app_id], @current_user.try(:uuid), @current_user.try(:name), params[:rating], params[:comments], @current_user.try(:avatar_url))
-        request = Net::HTTP::Post.new(uri.request_uri)
-        form_data = {
-            :access_token    => token,
-            :rating          => rating,
-            :comments        => comments,
-            :user_id         => user.uuid,
-            :user_name       => user.name,
-            :user_avatar_url => user.avatar_url
-        }
-        form_data[:user_email] = user.email if user.email && user.email[/.+@.+\..+/]
-        request.set_form_data(form_data)
-        response = http.request(request)
-
-        json = JSON.parse(response.body)
-      rescue
-        json = {}
-      end
-      return json
+      config_url
     end
   end
 end

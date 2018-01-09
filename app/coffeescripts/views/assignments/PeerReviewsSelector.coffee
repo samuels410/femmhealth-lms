@@ -1,10 +1,28 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'Backbone'
   'underscore'
   'jquery'
+  'jsx/shared/helpers/numberHelper'
   'jst/assignments/PeerReviewsSelector'
   'compiled/jquery/toggleAccessibly'
-], (Backbone, _, $, template, toggleAccessibly) ->
+], (Backbone, _, $, numberHelper, template, toggleAccessibly) ->
 
   class PeerReviewsSelector extends Backbone.View
 
@@ -16,6 +34,7 @@ define [
     AUTO_PEER_REVIEWS         = '#assignment_automatic_peer_reviews'
     PEER_REVIEWS_DETAILS      = '#peer_reviews_details'
     AUTO_PEER_REVIEWS_OPTIONS = '#automatic_peer_reviews_options'
+    ANONYMOUS_PEER_REVIEWS    = '#anonymous_peer_reviews'
 
     events: do ->
       events = {}
@@ -35,6 +54,7 @@ define [
 
     @optionProperty 'parentModel'
     @optionProperty 'nested'
+    @optionProperty 'hideAnonymousPeerReview'
 
     handlePeerReviewsChange: =>
       @$peerReviewsDetails.toggleAccessibly @$peerReviews.prop('checked')
@@ -48,6 +68,7 @@ define [
     toJSON: =>
       frozenAttributes = @parentModel.frozenAttributes()
 
+      anonymousPeerReviews: @parentModel.anonymousPeerReviews()
       peerReviews: @parentModel.peerReviews()
       automaticPeerReviews: @parentModel.automaticPeerReviews()
       peerReviewCount: @parentModel.peerReviewCount()
@@ -56,3 +77,11 @@ define [
       peerReviewsFrozen: _.include(frozenAttributes, 'peer_reviews')
       nested: @nested
       prefix: 'assignment' if @nested
+      hideAnonymousPeerReview: @hideAnonymousPeerReview
+      hasGroupCategory: @parentModel.groupCategoryId()
+      intraGroupPeerReviews: @parentModel.intraGroupPeerReviews()
+
+    getFormData: =>
+      data = super
+      data.peerReviewCount = numberHelper.parse(data.peerReviewCount)
+      data

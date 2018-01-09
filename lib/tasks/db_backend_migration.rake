@@ -7,7 +7,7 @@ namespace :db do
     end
 
     shard.activate do
-      logger = ActiveSupport::BufferedLogger.new(STDERR)
+      logger = ActiveSupport::Logger.new(STDERR)
       migrator = PageView::CassandraMigrator.new
       migrator.logger = logger
       migrator.run()

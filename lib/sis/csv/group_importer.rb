@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,8 +20,12 @@ module SIS
   module CSV
     # note these are account-level groups, not course groups
     class GroupImporter < CSVBaseImporter
-      def self.is_group_csv?(row)
+      def self.group_csv?(row)
         row.include?('group_id') && row.include?('name')
+      end
+
+      def self.identifying_fields
+        %w[group_id].freeze
       end
 
       # expected columns

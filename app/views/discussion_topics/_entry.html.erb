@@ -1,4 +1,24 @@
-<% entry_exists = entry && entry ? true : false
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
+<%
+  entry ||= nil
+  entry_exists = entry && entry ? true : false
   out_of_context ||= false
   entry_context ||= entry && entry.context ? entry.context : @context
   entry_id = entry ? entry.id : "{{ id }}"
@@ -10,7 +30,8 @@
   skip_sub_entries ||= false
   read_state = entry ? entry.read_state(@current_user) : "read"
   link_to_headless ||= false
-  headless_param = {:headless => 1} if link_to_headless
+  headless_param = {:headless => 1, :hide_student_names => hide_student_names, :student_id => user_id} if link_to_headless
+  hide_student_names = hide_student_names
  %>
 <% cache([
     'entry_message_render_2_',
@@ -30,7 +51,11 @@
       <div class="header_title">
         <% if out_of_context %>
           <span style="font-size: 0.8em; padding-left: 20px;">from
-            <a href="<%= context_url(entry_context, :context_discussion_topic_url, (entry ? entry.discussion_topic_id : '{{ topic_id }}'), headless_param) %>" style="font-size: 1.2em; font-weight: bold;"><%= entry.discussion_topic.title %></a>
+            <% if assignment_visible_to_user %>
+              <a href="<%= context_url(entry_context, :context_discussion_topic_url, (entry ? entry.discussion_topic_id : '{{ topic_id }}'), headless_param) %>" style="font-size: 1.2em; font-weight: bold;"><%= entry.discussion_topic.title %></a>
+            <% else %>
+              <b> <%= entry.discussion_topic.title %> </b>
+            <% end %>
           </span>
         <% else %>
           <% if @topic_agglomerated && entry %>
@@ -51,12 +76,14 @@
         </span>
       </div>
       <% end %>
-      <div class="post_date time_ago_date"><%= entry.try_rescue(:created_at).tap{|time| time && datetime_string(time)} %></div>
+      <div class="post_date time_ago_date" data-timestamp="<%= entry.try_rescue(:created_at).try_rescue(:iso8601) %>"><%= datetime_string(entry.try_rescue(:created_at)) || nbsp %></div>
       <div class="clear"></div>
     <% end %>
   </div>
   <div class="content">
-    <div style="float: left; margin: 0 5px 0 -10px;"><%= avatar((entry.try_rescue(:user_id)), entry_context.asset_string) %></div>
+    <% unless hide_student_names %>
+      <div style="float: left; margin: 0 5px 0 -10px;"><%= avatar((entry.try_rescue(:user_id)), context_code: entry_context.asset_string) %></div>
+    <% end %>
     <div class="course_id" style="display: none;"><%= entry_context.id if entry_context && entry_context.is_a?(Course) %></div>
     <div class="message user_content"><%= user_content(entry.try_rescue(:message)) || nbsp %></div>
     <textarea class="message_html" style="display: none;"><%= h(entry.try_rescue(:message)) %></textarea>
@@ -81,7 +108,7 @@
           </div>
         <% end %>
         <% entries.each_with_index do |entry, idx| %>
-          <%= render :partial => "discussion_topics/sub_entry", :object => entry, :locals => {:hide_entry => entries.length > 3 && idx < entries.length - 2 && !@context.try_rescue(:show_all_discussion_entries)} %>
+          <%= render :partial => "discussion_topics/sub_entry", :locals => {:entry => entry, :hide_entry => entries.length > 3 && idx < entries.length - 2} %>
         <% end %>
       <% end %>
       <% if entry && entry.editor_id && entry.editor_id != entry.user_id %>
@@ -94,7 +121,7 @@
           <a href="#" class="add_entry_link textarea"><%= t :make_side_comment, "Make a Side Comment..." %></a>
         </div>
       </div>
-      <%= render :partial => 'discussion_topics/sub_entry', :object => nil, :locals => {:parent_entry => entry || topic} %>
+      <%= render :partial => 'discussion_topics/sub_entry', :locals => {:entry => nil, :parent_entry => entry || topic} %>
     </div>
   </div>
   <div style="display: none;">

@@ -1,8 +1,8 @@
-<div class="group-category-summary">
-  <div data-view="groupCategoryDetail"></div>
+<span class="accessibility-warning" tabindex="0"> Warning: for improved accessibility assigning students to groups, please use the Move To Dialog option found in the menu.</span>
 
+<div class="group-category-summary">
   {{#if groupsAreSearchable}}
-    <p>
+    <div class="group-category-summary__search">
       <input
         type="text"
         class="filterable search-query"
@@ -10,8 +10,9 @@
         aria-label="{{#t "search_groups"}}Search groups{{/t}}"
         role="search"
       >
-    </p>
+    </div>
   {{/if}}
+  <div class="group-category-summary__detail" data-view="groupCategoryDetail"></div>
 </div>
 
 <div class="group-category-contents {{#if ENV.IS_LARGE_ROSTER}}group-category-contents-condensed{{/if}}">
@@ -30,13 +31,12 @@
 
       <div class="row-fluid">
         <div class="span3 unassigned-students">
-          <h3 class="unassigned-users-heading group-heading"></h3>
+          <h2 class="unassigned-users-heading group-heading"></h2>
           <input
-            type="text"
-            class="filterable-unassigned-users search-query"
+            type="search"
+            class="ic-Input filterable-unassigned-users search-query"
             placeholder="{{#t "search_users"}}Search users{{/t}}"
             aria-label="{{#t "search_users"}}Search users{{/t}}"
-            role="search"
           >
           <div data-view="unassignedUsers"></div>
         </div>
@@ -48,5 +48,3 @@
     {{/if}}
   {{/if}}
 </div>
-
-

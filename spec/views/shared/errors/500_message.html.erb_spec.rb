@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -26,10 +26,10 @@ describe "/shared/errors/500_message" do
     begin
       nil.bad_method
     rescue => e
-      assigns[:exception] = e
+      assign(:exception, e)
     end
-    render "shared/errors/500_message", :locals => {:exception => assigns[:exception], :status => ""}
-    response.should_not be_nil
+    render "shared/errors/500_message"
+    expect(response).not_to be_nil
   end
 end
 

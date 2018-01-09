@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 module DataFixup::MoveAccountMembershipTypesToRoles
   def self.run
     # Step 1.
@@ -6,11 +23,11 @@ module DataFixup::MoveAccountMembershipTypesToRoles
 
   Account.where("membership_types IS NOT NULL").select([:id, :membership_types]).
     find_in_batches do |accounts|
-      roles = Role.where(:account_id => accounts).select([:account_id, :name]).all
-      account_users = AccountUser.where(:account_id => accounts).select([:account_id, :membership_type]).uniq.all
+      roles = Role.where(:account_id => accounts).select([:account_id, :name]).to_a
+      account_users = AccountUser.where(:account_id => accounts).select([:account_id, :membership_type]).distinct.to_a
 
       accounts.each do |account|
-        names = roles.select{|r| r.account_id == account.id}.collect(&:name) + RoleOverride::KNOWN_ROLE_TYPES
+        names = roles.select{|r| r.account_id == account.id}.collect(&:name) + Role::KNOWN_TYPES
 
         types_to_add = account.membership_types.split(",").select{|t| !t.empty? && !names.include?(t)}
         types_to_add.each do |type|
@@ -41,10 +58,10 @@ module DataFixup::MoveAccountMembershipTypesToRoles
     # Step 2.
     #   then look for the role overrides that are referencing to a (presumably) deleted membership type
     #   and make 'inactive' roles for each of them, if they don't exist already
-    RoleOverride.where("context_type='Account' AND enrollment_type NOT IN (?)", RoleOverride::KNOWN_ROLE_TYPES).
-                 uniq.
+    RoleOverride.where("context_type='Account' AND enrollment_type NOT IN (?)", Role::KNOWN_TYPES).
+                 distinct.
                  select([:context_id, :enrollment_type]).each_slice(500) do |role_overrides|
-      roles = Role.where(:account_id => role_overrides.collect(&:context_id).uniq).select([:account_id, :name]).all
+      roles = Role.where(:account_id => role_overrides.collect(&:context_id).uniq).select([:account_id, :name]).to_a
 
       role_overrides_to_add_for = role_overrides.select{|ro| roles.find{|r| r.account_id == ro.context_id && r.name == ro.enrollment_type}.nil?}
       role_overrides_to_add_for.each do |ro|

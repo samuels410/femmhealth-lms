@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,17 +17,17 @@
 #
 
 class EportfolioCategory < ActiveRecord::Base
-  attr_accessible :name
   attr_readonly :eportfolio_id
 
-  has_many :eportfolio_entries, :order => :position, :dependent => :destroy
+  has_many :eportfolio_entries, -> { order(:position) }, dependent: :destroy
   belongs_to :eportfolio
+
   before_save :infer_unique_slug
   validates_presence_of :eportfolio_id
   validates_length_of :name, :maximum => maximum_string_length, :allow_blank => true
 
   acts_as_list :scope => :eportfolio
-  
+
   def infer_unique_slug
     categories = self.eportfolio.eportfolio_categories
     self.name ||= t(:default_section, "Section Name")

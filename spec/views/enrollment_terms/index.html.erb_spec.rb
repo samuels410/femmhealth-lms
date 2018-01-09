@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -25,28 +25,28 @@ describe "terms/_term.html.erb" do
       @account = Account.default
       @term = @account.enrollment_terms.create(:name=>"test term")
       @term.sis_source_id = "sis_this_fool"
-      
-      assigns[:context] = @account
-      assigns[:account] = @account
-      assigns[:root_account] = @account
-      
+
+      assign(:context, @account)
+      assign(:account, @account)
+      assign(:root_account, @account)
+      assign(:course_counts_by_term, EnrollmentTerm.course_counts([@term]))
     end
 
     it "should show to sis admin" do
       admin = account_admin_user
       view_context(@account, admin)
-      assigns[:current_user] = admin
+      assign(:current_user, admin)
       render :partial => "terms/term.html.erb", :locals => {:term => @term}
-      response.should have_tag("input#enrollment_term_sis_source_id")
+      expect(response).to have_tag("input#enrollment_term_sis_source_id")
     end
 
     it "should not show to non-sis admin" do
       admin = account_admin_user_with_role_changes(:role_changes => {'manage_sis' => false})
       view_context(@account, admin)
-      assigns[:current_user] = admin
+      assign(:current_user, admin)
       render :partial => "terms/term.html.erb", :locals => {:term => @term}
-      response.should_not have_tag("input#enrollment_term_sis_source_id")
-      response.should have_tag("span.sis_source_id", @term.sis_source_id)
+      expect(response).not_to have_tag("input#enrollment_term_sis_source_id")
+      expect(response).to have_tag("span.sis_source_id", @term.sis_source_id)
     end
   end
 end

@@ -2,27 +2,26 @@ namespace :css do
   desc "Generate styleguide"
   task :styleguide do
     puts "--> creating styleguide"
-    puts `dress_code config/styleguide.yml`
+    system('bin/dress_code config/styleguide.yml')
+    raise "error running dress_code" unless $?.success?
   end
 
-  desc "Compile css assets."
-  task :generate do
+  task :compile do
+    # try to get a conection to the database so we can do the brand_configs:write below
+    require 'config/environment' rescue nil
     require 'config/initializers/plugin_symlinks'
-    require 'action_controller'
-    require 'compass-rails'
-    require 'compass/commands'
-
-    # build the list of files ourselves so that we get it to follow symlinks
-    sass_path = File.expand_path(Compass.configuration.sass_path)
-    sass_files = Dir.glob("#{sass_path}/{,plugins/*/}**/[^_]*.s[ac]ss")
-
-    # build and execute the compass command
-    compass = Compass::Commands::UpdateProject.new(Rails.root.to_s,
-      :environment => :production,
-      :sass_files => sass_files,
-      :quiet => true,
-      :force => true)
-    compass.perform
-    raise "Error running compass\nABORTING" unless compass.successful?
+    require 'config/initializers/revved_asset_urls'
+    require 'lib/brandable_css'
+    puts "--> Starting: 'css:compile'"
+    time = Benchmark.realtime do
+      if (BrandConfig.table_exists? rescue false)
+        Rake::Task['brand_configs:write'].invoke
+      else
+        puts "--> no DB connection, skipping generation of brand_config files"
+      end
+      BrandableCSS.save_default_files!
+      raise "error running brandable_css" unless system('yarn run build:css')
+    end
+    puts "--> Finished: 'css:compile' in #{time}"
   end
 end

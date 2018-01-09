@@ -1,10 +1,27 @@
-define([
-  'i18n!accounts' /* I18n.t */,
-  'jquery' /* $ */,
-  'str/htmlEscape',
-  'jquery.ajaxJSON' /* getJSON */,
-  'jqueryui/dialog'
-], function(I18n, $, h) {
+/*
+ * Copyright (C) 2013 - present Instructure, Inc.
+ *
+ * This file is part of Canvas.
+ *
+ * Canvas is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License.
+ *
+ * Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+ * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+import I18n from 'i18n!accounts'
+import $ from 'jquery'
+import h from './str/htmlEscape'
+import authenticity_token from 'compiled/behaviors/authenticity_token'
+import './jquery.ajaxJSON'
+import 'jqueryui/dialog'
 
   function testLDAP() {
     clearTestLDAP();
@@ -49,7 +66,7 @@ define([
         } else {
           $("#ldap_" + test.test_type + "_result").html("<h4 style='color:red'>" + h(I18n.t('test_ldap_result_failed', 'Failed')) + "</h4>");
           $("#ldap_" + test.test_type + "_help").show();
-          $server_error = $('<p></p>').addClass("server_error").css("color", "red").text(server_error);
+          var $server_error = $('<p></p>').addClass("server_error").css("color", "red").text(server_error);
           $("#ldap_" + test.test_type + "_help").append($server_error);
 
           $.each(ENV.LDAP_TESTS.slice(i + 1), function(i, next_test) {
@@ -65,7 +82,7 @@ define([
     $("#ldap_login_result").html("<img src='/images/ajax-loader.gif'/>");
     var username = $("#ldap_test_login_user").val();
     var password = $("#ldap_test_login_pass").val();
-    $.post(ENV.LOGIN_TEST_URL, {'username': username, 'password': password, authenticity_token: ENV.AUTHENTICITY_TOKEN}, function(data) {
+    $.post(ENV.LOGIN_TEST_URL, {'username': username, 'password': password, authenticity_token: authenticity_token()}, function(data) {
       var success = true;
       var message = "";
       $.each(data, function(i, config) {
@@ -108,5 +125,3 @@ define([
       testLDAPLogin();
     });
   });
-});
-

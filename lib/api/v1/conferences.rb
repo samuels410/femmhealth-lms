@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 - 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,7 +21,7 @@ module Api::V1::Conferences
   API_CONFERENCE_JSON_OPTS = {
     :only => %w(id title conference_type description
       duration ended_at started_at user_ids long_running
-      recordings join_url had_advanced_settings)
+      recordings join_url has_advanced_settings conference_key)
   }
 
   def api_conferences_json(conferences, user, session)
@@ -38,18 +38,26 @@ module Api::V1::Conferences
   end
 
   def ui_conferences_json(conferences, context, user, session)
-    conferences.map do |c|
-      c.as_json(
-        permissions: {
-          user: user,
-          session: session,
-        },
-        url: named_context_url(context, :context_conference_url, c)
-      )
+    cs = conferences.map do |c|
+      begin
+        c.as_json(
+          permissions: {
+            user: user,
+            session: session,
+          },
+          url: named_context_url(context, :context_conference_url, c)
+        )
+      rescue => e
+        Canvas::Errors.capture_exception(:web_conferences, e)
+        @errors ||= []
+        @errors << e
+        nil
+      end
     end
+    cs.compact
   end
 
-  def default_conference_json(context, user, sesssion)
+  def default_conference_json(context, user, session)
     conference = context.web_conferences.build(
       :title => I18n.t(:default_conference_title, "%{course_name} Conference", :course_name => context.name),
       :duration => WebConference::DEFAULT_DURATION,
@@ -96,4 +104,15 @@ module Api::V1::Conferences
     end
   end
 
+  def signed_id_invalid_json
+    { status: I18n.t(:unprocessable_entity, 'unprocessable entity'),
+      errors: [{message: I18n.t(:unprocessable_entity_message, 'Signed meeting id invalid')}]
+    }.to_json
+  end
+
+  def invalid_jwt_token_json
+    {status: I18n.t(:unauthorized, 'unauthorized'),
+     errors: [{message: I18n.t(:unauthorized_message, 'JWT signature invalid')}]
+    }.to_json
+  end
 end

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -289,7 +289,7 @@ define [
         else
           null
       else
-        @list.first()
+        @list?.first()
       , preserveMode)
       @selectNext(preserveMode) if @selection?.hasClass('message')
 
@@ -302,7 +302,7 @@ define [
         else
           null
       else
-        @list.last()
+        @list?.last()
       )
       @selectPrev() if @selection?.hasClass('message')
 

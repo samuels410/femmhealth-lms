@@ -1,15 +1,38 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 class GradeSummaryAssignmentPresenter
-  attr_reader :assignment, :submission
+  include TextHelper
+  attr_reader :assignment, :submission, :originality_reports
 
   def initialize(summary, current_user, assignment, submission)
     @summary = summary
     @current_user = current_user
     @assignment = assignment
     @submission = submission
+    @originality_reports = OriginalityReport.where(attachment_id: @submission.attachment_ids) if @submission
+  end
+
+  def originality_report?
+    @originality_reports.present?
   end
 
   def hide_distribution_graphs?
-    submission_count = @summary.submission_counts[assignment.id] || 0
+    submission_count = @summary.assignment_stats[assignment.id]&.count || 0
     submission_count < 5 || assignment.context.hide_distribution_graphs?
   end
 
@@ -18,11 +41,21 @@ class GradeSummaryAssignmentPresenter
   end
 
   def graded?
-    submission && submission.grade && !assignment.muted?
+    submission &&
+      (submission.grade || submission.excused?) &&
+      !assignment.muted?
   end
 
   def is_letter_graded?
     assignment.grading_type == 'letter_grade'
+  end
+
+  def is_gpa_scaled?
+    assignment.grading_type == 'gpa_scale'
+  end
+
+  def is_letter_graded_or_gpa_scaled?
+    is_letter_graded? || is_gpa_scaled?
   end
 
   def is_assignment?
@@ -35,6 +68,10 @@ class GradeSummaryAssignmentPresenter
 
   def has_no_score_display?
     assignment.muted? || submission.nil?
+  end
+
+  def original_points
+    has_no_score_display? ? '' : submission.published_score
   end
 
   def unchangeable?
@@ -73,35 +110,89 @@ class GradeSummaryAssignmentPresenter
     assignment.special_class ? ("hard_coded " + assignment.special_class) : "editable"
   end
 
+  def classes
+    classes = ["student_assignment"]
+    classes << "assignment_graded" if graded?
+    classes << special_class
+    classes << "excused" if excused?
+    classes.join(" ")
+  end
+
+  def missing?
+    submission.try(:missing?)
+  end
+
+  def late?
+    submission.try(:late?)
+  end
+
+  def excused?
+    submission.try(:excused?)
+  end
+
+  def deduction_present?
+    !!(submission&.points_deducted&.> 0)
+  end
+
+  def entered_grade
+    if is_letter_graded_or_gpa_scaled? && submission.entered_grade.present?
+      "(#{submission.entered_grade})"
+    else
+      ''
+    end
+  end
+
+  def display_entered_score
+    "#{I18n.n round_if_whole(submission.entered_score)} #{entered_grade}"
+  end
+
+  def display_points_deducted
+    I18n.n round_if_whole(-submission.points_deducted)
+  end
+
   def published_grade
-    is_letter_graded? ? "(#{submission.published_grade})" : ''
+    if is_letter_graded_or_gpa_scaled? && !submission.published_grade.nil?
+      "(#{submission.published_grade})"
+    else
+      ''
+    end
   end
 
   def display_score
     if has_no_score_display?
       ''
     else
-      "#{submission.published_score} #{published_grade}"
+      "#{I18n.n round_if_whole(submission.published_score)} #{published_grade}"
     end
   end
 
   def turnitin
-    t = if is_text_entry?
-      submission.turnitin_data && submission.turnitin_data[submission.asset_string]
-    elsif is_online_upload? && file
-      submission.turnitin_data[file.asset_string]
+    plagiarism('turnitin')
+  end
+
+  def vericite
+    plagiarism('vericite')
+  end
+
+  def plagiarism(type)
+    if type == 'vericite'
+      plag_data = submission.vericite_data(true)
     else
-      nil
+      plag_data = submission.originality_data
     end
+    t = if is_text_entry?
+          plag_data[submission.asset_string]
+        elsif is_online_upload? && file
+          plag_data[file.asset_string]
+        end
     t.try(:[], :state) ? t : nil
   end
 
   def grade_distribution
     @grade_distribution ||= begin
-      stats = @summary.assignment_stats[assignment.id]
-      [stats.max.to_f.round(1),
-       stats.min.to_f.round(1),
-       stats.avg.to_f.round(1)]
+      if stats = @summary.assignment_stats[assignment.id]
+        [stats.max, stats.min, stats.avg].map { |stat| stat.to_f.round(1) }
+      end
     end
   end
 
@@ -114,7 +205,13 @@ class GradeSummaryAssignmentPresenter
   end
 
   def file
-    @file ||= submission.attachments.detect{|a| submission.turnitin_data && submission.turnitin_data[a.asset_string] }
+    @file ||= submission.attachments.detect{|a| is_plagiarism_attachment?(a) }
+  end
+
+  def is_plagiarism_attachment?(a)
+    @originality_reports.find_by(attachment: a) ||
+    (submission.turnitin_data && submission.turnitin_data[a.asset_string]) ||
+    (submission.vericite_data(true) && submission.vericite_data(true)[a.asset_string])
   end
 
   def comments
@@ -124,8 +221,8 @@ class GradeSummaryAssignmentPresenter
   def rubric_assessments
     @visible_rubric_assessments ||= begin
       if submission && !assignment.muted?
-        assessments = submission.rubric_assessments.select { |a| a.grants_rights?(@current_user, :read)[:read] }
-        assessments.sort_by { |a| [a.assessment_type == 'grading' ? SortFirst : SortLast, a.assessor_name] }
+        assessments = submission.rubric_assessments.select { |a| a.grants_right?(@current_user, :read) }
+        assessments.sort_by { |a| [a.assessment_type == 'grading' ? CanvasSort::First : CanvasSort::Last, a.assessor_name] }
       else
         []
       end
@@ -134,6 +231,10 @@ class GradeSummaryAssignmentPresenter
 
   def group
     @group ||= assignment && assignment.assignment_group
+  end
+
+  def viewing_fake_student?
+    @summary.student_enrollment.fake_student?
   end
 end
 
@@ -179,6 +280,12 @@ class GradeSummaryGraph
 
   def score_left
     pixels_for(@score) - 5
+  end
+
+  def title
+    I18n.t('#grade_summary.graph_title', "Mean %{mean}, High %{high}, Low %{low}", {
+      mean: I18n.n(@mean), high: I18n.n(@high), low: I18n.n(@low)
+    })
   end
 
   private

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -23,43 +23,37 @@ describe DataFixup::PopulateSubmissionVersions do
   it "should not migrate a non-submission version" do
     wiki_page_model
     version = Version.create(:versionable => @page, :yaml => @page.attributes.to_yaml)
-    lambda{
+    expect{
       DataFixup::PopulateSubmissionVersions.run
-    }.should_not change(SubmissionVersion, :count)
+    }.not_to change(SubmissionVersion, :count)
   end
 
   it "should not migrate a submission version already having a submission_version" do
     course_with_student
-    submission = @user.submissions.create(:assignment => @course.assignments.create!)
-    lambda{
+    @course.assignments.create!
+    expect{
       DataFixup::PopulateSubmissionVersions.run
-    }.should_not change(SubmissionVersion, :count)
+    }.not_to change(SubmissionVersion, :count)
   end
 
   it "should migrate all submission version rows without submission_versions" do
     n = 5
     course_with_student
-    submission = @user.submissions.build(:assignment => @course.assignments.create!)
-    submission.without_versioning{ submission.save! }
-    submission.versions.exists?.should be_false
+    submission = @user.submissions.find_by(assignment: @course.assignments.create!)
     n.times { |x| Version.create(:versionable => submission, :yaml => submission.attributes.to_yaml) }
-    lambda{
+    expect{
       DataFixup::PopulateSubmissionVersions.run
-    }.should change(SubmissionVersion, :count).by(n)
+    }.to change(SubmissionVersion, :count).by(n)
   end
 
   it "should skip submission version rows without a corresponding submission object" do
     course_with_student
-    submission = @user.submissions.build(:assignment => @course.assignments.create!)
-    submission.without_versioning{ submission.save! }
+    submission = @user.submissions.find_by(assignment: @course.assignments.create!)
     Version.create(:versionable => submission, :yaml => submission.attributes.to_yaml)
-
-    submission.reload
-    submission.versions.exists?.should be_true
     submission.delete
 
-    lambda{
+    expect{
       DataFixup::PopulateSubmissionVersions.run
-    }.should_not change(SubmissionVersion, :count)
+    }.not_to change(SubmissionVersion, :count)
   end
 end

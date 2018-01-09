@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,25 +12,40 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-  'i18n!prerequisites_lookup',
-  'jquery',
-  'str/htmlEscape',
-  'context_modules',
-  'jquery.ajaxJSON',
-  'jquery.instructure_misc_helpers'
-], function(I18n, $, htmlEscape) {
+import I18n from 'i18n!prerequisites_lookup'
+import $ from 'jquery'
+import htmlEscape from './str/htmlEscape'
+import Spinner from 'spin.js'
+import './context_modules'
+import './jquery.ajaxJSON'
+import './jquery.instructure_misc_helpers'
 
-  $(document).ready(function() {
+  var lookupStarted = false;
+
+  INST.lookupPrerequisites = function() {
+    if (lookupStarted) {
+        return;
+    }
+
     var $link = $("#module_prerequisites_lookup_link");
+    if ($link.length == 0) {
+        return;
+    }
+    lookupStarted = true;
+
     var url = $link.attr('href');
+
+    var spinner = new Spinner({radius: 5});
+    spinner.spin();
+    $(spinner.el).css({opacity: 0.5, top: '25px', left: '200px'}).appendTo('.spinner');
+
     $.ajaxJSON(url, 'GET', {}, function(data) {
+      spinner.stop();
       if(data.locked === false) {
-        window.reload();
         return;
       }
       var $ul = $("<ul/>");
@@ -38,11 +53,14 @@ define([
       for(var idx in data.modules) {
         var module = data.modules[idx];
         var $li = $("<li/>");
+        var $i = $("<i/>");
         $li.addClass('module');
         $li.click(function() {
           $(this).find("ul").toggle();
         });
         $li.toggleClass('locked', !!module.locked);
+        if (module.locked) { $i.addClass('icon-lock'); }
+        $li.append($i);
         var $h3 = $("<h3/>");
         $h3.text(module.name);
         $li.append($h3);
@@ -56,6 +74,7 @@ define([
             var $a = $("<a/>");
             $a.attr('href', pre.url);
             $a.text(pre.title);
+            $a.toggleClass('icon-lock', !pre.available);
             $pre.append($a);
             var desc = pre.requirement_description;
             if(desc) {
@@ -72,10 +91,12 @@ define([
       }
       $link.after($ul);
       var header = I18n.t("headers.completion_prerequisites", "Completion Prerequisites");
-      var sentence = I18n.beforeLabel("requirements_must_be_completed", "The following requirements need to be completed before this page will be unlocked");
+      var sentence = I18n.beforeLabel(I18n.t("labels.requirements_must_be_completed", "The following requirements need to be completed before this page will be unlocked"));
       $link.after("<br/><h3 style='margin-top: 15px;'>" + htmlEscape(header) + "</h3>" + htmlEscape(sentence));
       $link.prev("a").hide();
-    }, function(data) {});
-  });
-
-});
+    }, function(data) {
+      spinner.stop();
+      $('.module_prerequisites_fallback').show();
+    })
+  }
+  $(document).ready(INST.lookupPrerequisites);

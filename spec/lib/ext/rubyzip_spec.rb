@@ -1,6 +1,22 @@
 # coding: utf-8
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 
-require File.expand_path(File.dirname(__FILE__) + '/../../spec_helper.rb')
+require 'spec_helper'
 
 describe "rubyzip encoding fix patch" do
   before(:all) do
@@ -36,21 +52,21 @@ describe "rubyzip encoding fix patch" do
 
     describe "entries" do
       it "should return UTF-8 names in UTF-8 encoding" do
-        @arch.entries.map(&:name).select { |filename| filename.encoding.to_s == 'UTF-8' }.should eql [@utf8_name]
+        expect(@arch.entries.map(&:name).select { |filename| filename.encoding.to_s == 'UTF-8' }).to eql [@utf8_name]
       end
 
       it "should return non-UTF-8 names in ASCII-8BIT encoding" do
-        @arch.entries.map(&:name).select { |filename| filename.encoding.to_s == 'ASCII-8BIT' }.should eql [@ascii_name]
+        expect(@arch.entries.map(&:name).select { |filename| filename.encoding.to_s == 'ASCII-8BIT' }).to eql [@ascii_name]
       end
     end
 
     describe "find_entry" do
       it "should find a UTF-8 name" do
-        @arch.find_entry(@utf8_name).should_not be_nil
+        expect(@arch.find_entry(@utf8_name)).not_to be_nil
       end
 
       it "should find a non-UTF-8 name" do
-        @arch.find_entry(@ascii_name).should_not be_nil
+        expect(@arch.find_entry(@ascii_name)).not_to be_nil
       end
     end
   end

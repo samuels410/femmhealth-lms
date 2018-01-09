@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,50 +12,77 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-  'i18n!quizzes.show',
-  'jquery' /* $ */,
-  'compiled/views/MessageStudentsDialog',
-  'quiz_arrows',
-  'quiz_inputs',
-  'compiled/models/Quiz',
-  'compiled/views/PublishButtonView',
-  'jquery.instructure_date_and_time' /* dateString, time_field, datetime_field */,
-  'jqueryui/dialog',
-  'compiled/jquery/fixDialogButtons',
-  'compiled/jquery.rails_flash_notifications',
-  'jquery.instructure_misc_helpers' /* scrollSidebar */,
-  'jquery.instructure_misc_plugins' /* ifExists, confirmDelete */,
-  'jquery.disableWhileLoading',
-  'message_students' /* messageStudents */
-], function(I18n, $, MessageStudentsDialog, showAnswerArrows, inputMethods, Quiz, PublishButtonView) {
+import I18n from 'i18n!quizzes.show'
+import $ from 'jquery'
+import MessageStudentsDialog from 'compiled/views/MessageStudentsDialog'
+import QuizArrowApplicator from 'quiz_arrows'
+import inputMethods from 'quiz_inputs'
+import Quiz from 'compiled/models/Quiz'
+import PublishButtonView from 'compiled/views/PublishButtonView'
+import QuizLogAuditingEventDumper from 'compiled/quizzes/dump_events'
+import CyoeStats from 'jsx/conditional_release_stats/index'
+import './jquery.instructure_date_and_time' /* dateString, time_field, datetime_field */
+import 'jqueryui/dialog'
+import 'compiled/jquery/fixDialogButtons'
+import 'compiled/jquery.rails_flash_notifications'
+import './jquery.instructure_misc_plugins' /* ifExists, confirmDelete */
+import './jquery.disableWhileLoading'
+import 'message_students' /* messageStudents */
 
 
   $(document).ready(function () {
+    if(ENV.QUIZ_SUBMISSION_EVENTS_URL) {
+      QuizLogAuditingEventDumper(true);
+    }
+
+    $('#preview_quiz_button').click(function(e){
+      $('#js-sequential-warning-dialogue div a').attr('href',$('#preview_quiz_button').attr('href'));
+    });
 
     function ensureStudentsLoaded(callback) {
       if ($('#quiz_details').length) {
         return callback();
       } else {
-        return $.get($("#quiz_details_wrapper").data('url'), function(data) {
-          $("#quiz_details_wrapper").html(data);
+        return $.get($("#quiz_details_wrapper").data('url'), function(html) {
+          $("#quiz_details_wrapper").html(html);
           callback();
         });
-      };
+      }
     }
 
-    showAnswerArrows();
-    inputMethods.disableInputs('[type=radio], [type=checkbox]');
-    inputMethods.setWidths();
+    var arrowApplicator = new QuizArrowApplicator();
+    arrowApplicator.applyArrows();
+    // quiz_show is being pulled into ember show for now. only hide inputs
+    // when we don't have a .allow-inputs
+    if (!$('.allow-inputs').length) {
+      inputMethods.disableInputs('[type=radio], [type=checkbox]');
+      inputMethods.setWidths();
+    }
+
+    $('form.edit_quizzes_quiz').on('submit', function(e) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      $(this).find('.loading').removeClass('hidden');
+      var data = $(this).serializeArray();
+      var url = $(this).attr('action');
+      $.ajax({
+        url: url,
+        data: data,
+        type: 'POST',
+        success: function() {
+          $('.edit_quizzes_quiz').parents('.alert').hide();
+        }
+      });
+    });
 
     $(".delete_quiz_link").click(function(event) {
       event.preventDefault();
       var deleteConfirmMessage = I18n.t('confirms.delete_quiz', "Are you sure you want to delete this quiz?");
-      submittedCount = parseInt($('#quiz_details_wrapper').data('submitted-count'));
+      var submittedCount = parseInt($('#quiz_details_wrapper').data('submitted-count'));
       if (submittedCount > 0) {
         deleteConfirmMessage += "\n\n" + I18n.t('confirms.delete_quiz_submissions_warning',
           {'one': "Warning: 1 student has already taken this quiz. If you delete it, any completed submissions will be deleted and no longer appear in the gradebook.",
@@ -118,7 +145,6 @@ define([
         dialog.open();
       });
     });
-    $.scrollSidebar();
 
     $("#let_students_take_this_quiz_button").ifExists(function($link){
       var $unlock_for_how_long_dialog = $("#unlock_for_how_long_dialog");
@@ -128,6 +154,8 @@ define([
         return false;
       });
 
+      var $lock_at = $(this).find('.datetime_field');
+
       $unlock_for_how_long_dialog.dialog({
         autoOpen: false,
         modal: true,
@@ -135,16 +163,16 @@ define([
         width: 400,
         buttons: {
           'Unlock' : function(){
-            var dateString = $(this).find('.datetime_suggest').text();
-
             $('#quiz_unlock_form')
               // append this back to the form since it got moved to be a child of body when we called .dialog('open')
               .append($(this).dialog('destroy'))
-              .find('#quiz_lock_at').val(dateString).end()
+              .find('#quiz_lock_at').val($lock_at.data('iso8601')).end()
               .submit();
           }
         }
-      }).find('.datetime_field').datetime_field();
+      });
+
+      $lock_at.datetime_field();
     });
 
     $('#lock_this_quiz_now_link').ifExists(function($link) {
@@ -178,6 +206,8 @@ define([
     view.on("publish", refresh);
     view.on("unpublish", refresh);
     view.render();
-  });
 
-});
+    var graphsRoot = document.getElementById('crs-graphs')
+    var detailsParent = document.getElementById('not_right_side')
+    CyoeStats.init(graphsRoot, detailsParent)
+  });

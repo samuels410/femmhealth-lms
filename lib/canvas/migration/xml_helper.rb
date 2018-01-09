@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -15,6 +15,8 @@
 # You should have received a copy of the GNU Affero General Public License along
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
+
+require 'nokogiri'
 
 module Canvas::Migration
 module XMLHelper
@@ -86,11 +88,28 @@ module XMLHelper
   end
   
   def open_file(path)
-    File.exists?(path) ? ::Nokogiri::HTML(open(path)) : nil
+    File.exist?(path) ? ::Nokogiri::HTML(File.open(path)) : nil
   end
 
   def open_file_xml(path)
-    File.exists?(path) ? ::Nokogiri::XML(open(path)) : nil
+    File.exist?(path) ? create_xml_doc(File.open(path)) : nil
+  end
+
+  def create_xml_doc(string_or_io)
+    doc = ::Nokogiri::XML(string_or_io)
+    if doc.encoding != 'UTF-8'
+      begin
+        doc.at_css('*')
+      rescue ArgumentError => e
+        # ruby 2.2
+        raise unless e.message =~ /^invalid byte sequence/
+        doc.encoding = 'UTF-8'
+      rescue Encoding::CompatibilityError
+        # ruby 2.1
+        doc.encoding = 'UTF-8'
+      end
+    end
+    doc
   end
 end
 end

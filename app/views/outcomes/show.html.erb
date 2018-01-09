@@ -1,11 +1,31 @@
 <%
-  jammit_css :learning_outcomes
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
+<%
+  css_bundle :learning_outcomes
+  js_bundle :react_outcome_alignment
   content_for :page_title, @outcome.short_description
 %>
 <% content_for :right_side do %>
-  <div class="rs-margin-all">
-    <a class="btn button-sidebar-wide" href="<%= context_url(@context, :context_outcomes_url) %>"><%= image_tag "back.png" %> <%= t "#buttons.back_to_outcomes", "Back to Outcomes" %></a>
-  </div>
+  <a class="btn button-sidebar-wide" href="<%= context_url(@context, :context_outcomes_url) %>">
+    <i class="icon-arrow-left"></i>
+    <%= t "#buttons.back_to_outcomes", "Back to Outcomes" %>
+  </a>
 <% end %>
 
 <h2><%= t "#titles.aligned_items", "Aligned Items" %></h2>
@@ -13,7 +33,7 @@
   <% if @context.is_a?(Course) %>
     <a href="<%= context_url(@context, :context_outcome_reorder_alignments_url, @outcome.id) %>" class="reorder_alignments_url">&nbsp;</a>
     <a href="<%= context_url(@context, :context_outcome_align_url, @outcome.id) %>" class="align_url">&nbsp;</a>
-    <%= render :partial => "shared/select_content_dialog" %>
+    <%= render :partial => "shared/select_content_dialog", locals: {lti_app_placements: [ Lti::ResourcePlacement::LINK_SELECTION, Lti::ResourcePlacement::RESOURCE_SELECTION ]} %>
   <% end %>
 </div>
 <%= t(:no_aligned_items, "No aligned items") if @alignments.empty? %>

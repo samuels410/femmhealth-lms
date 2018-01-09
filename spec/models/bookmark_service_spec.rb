@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,31 +19,31 @@
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 
 describe BookmarkService do
-  before do
+  before :once do
     bookmark_service_model
   end
   
-  it "should include DeliciousDiigo" do
-    BookmarkService.included_modules.should be_include(DeliciousDiigo)
+  it "should include Delicious" do
+    expect(BookmarkService.included_modules).to be_include(Delicious)
   end
 
   context "post_bookmark" do
     before do
       # For safety, that we don't mess with external services at all.
-      @bookmark_service.stubs(:delicious_post_bookmark).returns(true)
-      @bookmark_service.stubs(:diigo_post_bookmark).returns(true)
+      allow(@bookmark_service).to receive(:delicious_post_bookmark).and_return(true)
+      allow(@bookmark_service).to receive(:diigo_post_bookmark).and_return(true)
     end
     
     it "should be able to post a bookmark for diigo" do
-      @bookmark_service.service.should eql('diigo')
+      expect(@bookmark_service.service).to eql('diigo')
       
-      @bookmark_service.expects(:diigo_post_bookmark).with(
+      expect(Diigo::Connection).to receive(:diigo_post_bookmark).with(
         @bookmark_service, 
         'google.com', 
         'some title', 
         'some comments', 
         ['some', 'tags']
-      ).returns(true)
+      ).and_return(true)
       
       @bookmark_service.post_bookmark(
         :title => 'some title', 
@@ -56,15 +56,15 @@ describe BookmarkService do
     it "should be able to post a bookmark for delicious" do
       bookmark_service_model(:service => 'delicious')
 
-      @bookmark_service.service.should eql('delicious')
+      expect(@bookmark_service.service).to eql('delicious')
       
-      @bookmark_service.expects(:delicious_post_bookmark).with(
+      expect(@bookmark_service).to receive(:delicious_post_bookmark).with(
         @bookmark_service, 
         'google.com', 
         'some title', 
         'some comments', 
         ['some', 'tags']
-      ).returns(true)
+      ).and_return(true)
       
       @bookmark_service.post_bookmark(
         :title => 'some title', 
@@ -79,12 +79,12 @@ describe BookmarkService do
         raise ArgumentError
       end
       
-      lambda{@bookmark_service.post_bookmark(
+      expect{@bookmark_service.post_bookmark(
         :title => 'some title', 
         :url => 'google.com', 
         :comments => 'some comments', 
         :tags => %w(some tags)
-      )}.should_not raise_error
+      )}.not_to raise_error
     end
   end
 end

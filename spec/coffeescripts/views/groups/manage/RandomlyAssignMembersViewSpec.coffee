@@ -1,22 +1,41 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
   'underscore'
   'compiled/views/groups/manage/GroupCategoryView'
   'compiled/views/groups/manage/RandomlyAssignMembersView'
   'compiled/models/GroupCategory'
   'helpers/fakeENV'
-], (_, GroupCategoryView, RandomlyAssignMembersView, GroupCategory) ->
+], ($, _, GroupCategoryView, RandomlyAssignMembersView, GroupCategory) ->
 
   server = null
   view = null
   model = null
   globalObj = this
+  clock = null
 
-  sendResponse = (method, url, json) ->
-    server.respond {"cascade": false}, method, url, [200, {
+  queueResponse = (method, url, json) ->
+    server.respondWith method, url, [200, {
       'Content-Type': 'application/json'
     }, JSON.stringify(json)]
 
-  groupsResponse =   # GET "/api/v1/group_categories/20/groups?per_page=50"
+  groupsResponse =   # GET "/api/v1/group_categories/20/groups?per_page=50&include[]=sections"
     [
       {
         "description": null,
@@ -102,6 +121,20 @@ define [
       "workflow_state": "running",
       "url": "http://localhost:3000/api/v1/progress/105"
     }
+  partialProgressResponse =        # GET  /api/v1/progress/105
+    {
+      "completion": 50,
+      "context_id": 20,
+      "context_type": "GroupCategory",
+      "created_at": "2013-07-17T11:05:38-06:00",
+      "id": 105,
+      "message": null,
+      "tag": "assign_unassigned_members",
+      "updated_at": "2013-07-17T11:05:44-06:00",
+      "user_id": null,
+      "workflow_state": "running",
+      "url": "http://localhost:3000/api/v1/progress/105"
+    }
   progressResponse =        # GET  /api/v1/progress/105
     {
       "completion": 100,
@@ -127,7 +160,7 @@ define [
       "course_id": 1
     }
 
-  module 'RandomlyAssignMembersView',
+  QUnit.module 'RandomlyAssignMembersView',
     setup: ->
       server = sinon.fakeServer.create()
       @_ENV = globalObj.ENV
@@ -143,21 +176,25 @@ define [
       # instantiating GroupCategoryView will run GroupCategory.groups()
       #   therefore, server will now have one GET request for "/api/v1/group_categories/20/groups?per_page=50"
       #   and one GET request for "/api/v1/group_categories/20/users?unassigned=true&per_page=50"
-      server.respondWith("GET", "/api/v1/group_categories/20/groups?per_page=50",
-        [200, { "Content-Type": "application/json" }, JSON.stringify(groupsResponse)])
-      server.respondWith("GET", "/api/v1/group_categories/20/users?per_page=50&unassigned=true",
-        [200, { "Content-Type": "application/json" }, JSON.stringify(unassignedUsersResponse)])
+      queueResponse("GET", "/api/v1/group_categories/20/groups?per_page=50", groupsResponse)
+      queueResponse(
+        "GET",
+        "/api/v1/group_categories/20/users?per_page=50&include[]=sections&exclude[]=pseudonym&unassigned=true&include[]=group_submissions",
+        unassignedUsersResponse
+      )
 
       view.render()
-      view.$el.appendTo($(document.body))
+      view.$el.appendTo($("#fixtures"))
 
       server.respond()
       server.responses = []
 
     teardown: ->
       server.restore()
+      clock.restore()
       globalObj.ENV = @_ENV
       view.remove()
+      document.getElementById("fixtures").innerHTML = ""
 
   test 'randomly assigns unassigned users', ->
     $progressContainer = $('.progress-container')
@@ -177,13 +214,21 @@ define [
     $assignOptionLink.click()
 
     ##
+    # so that we can fully manage the progress polling, fake the clock
+    clock = sinon.useFakeTimers()
+
+    ##
     # click the confirm button to run the assignment process
     $confirmAssignButton = $('.randomly-assign-members-confirm')
     $confirmAssignButton.click()
 
     ##
-    # the click will fire a POST request to "/api/v1/group_categories/20/assign_unassigned_members"
-    sendResponse("POST", "/api/v1/group_categories/20/assign_unassigned_members", assignUnassignedMembersResponse)
+    # the click will fire a POST request to
+    # "/api/v1/group_categories/20/assign_unassigned_members" and kick off
+    # polling for progress
+    queueResponse("POST", "/api/v1/group_categories/20/assign_unassigned_members", assignUnassignedMembersResponse)
+    queueResponse("GET", /progress/, partialProgressResponse)
+    server.respond()
 
     ##
     # verify that there is progress bar
@@ -193,16 +238,30 @@ define [
     equal $groups.length, 0, "Hides groups during assigning process"
 
     ##
-    # progressable mixin ensures that the progress model is now polling, respond to it with a 100% completion
-    sendResponse("GET", /progress/, progressResponse)
+    # forward the clock so that we get another request for progress, and reset
+    # the stored responses so that we can respond with complete progress (from
+    # the same url)
+    clock.tick(1001)
 
     ##
-    # the 100% completion response will cascade a model.fetch request + model.groups().fetch + model.unassignedUsers().fetch calls
-    sendResponse("GET", "/api/v1/group_categories/20?includes[]=unassigned_users_count&includes[]=groups_count", JSON.stringify(_.extend({}, groupCategoryResponse, {groups_count: 1, unassigned_users_count: 0})))
-    server.respondWith("GET", "/api/v1/group_categories/20/groups?per_page=50",
-      [200, { "Content-Type": "application/json" }, JSON.stringify(groupsResponse)])
-    server.respondWith("GET", "/api/v1/group_categories/20/users?per_page=50&unassigned=true",
-      [200, { "Content-Type": "application/json" }, JSON.stringify([])])
+    # progressable mixin ensures that the progress model is now polling, respond to it with a 100% completion
+    queueResponse("GET", /progress/, progressResponse)
+    server.respond()
+
+    ##
+    # the 100% completion response will cascade a model.fetch request
+    # + model.groups().fetch + model.unassignedUsers().fetch calls
+    queueResponse("GET", "/api/v1/group_categories/20?includes[]=unassigned_users_count&includes[]=groups_count", _.extend({}, groupCategoryResponse, {groups_count: 1, unassigned_users_count: 0}))
+    server.respond()
+
+    queueResponse("GET", "/api/v1/group_categories/20/groups?per_page=50", groupsResponse)
+    server.respond()
+
+    queueResponse(
+      "GET",
+      "/api/v1/group_categories/20/users?per_page=50&include[]=sections&exclude[]=pseudonym&unassigned=true&include[]=group_submissions",
+      []
+    )
     server.respond()
 
     ##
@@ -212,7 +271,3 @@ define [
     equal $progressContainer.length, 0, "Hides progress bar after assigning process"
     equal $groups.length, 1, "Reveals groups after assigning process"
     equal model.unassignedUsers().length, 0, "There are no longer unassigned users"
-
-
-
-

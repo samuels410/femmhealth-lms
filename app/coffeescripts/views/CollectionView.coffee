@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!instructure'
   'jquery'
@@ -97,10 +114,18 @@ define [
     # @api private
 
     attachCollection: ->
-      @collection.on 'reset', @renderOnReset
-      @collection.on 'add', @renderOnAdd
-      @collection.on 'remove', @removeItem
+      @listenTo @collection, 'reset', @renderOnReset
+      @listenTo @collection, 'add', @renderOnAdd
+      @listenTo @collection, 'remove', @removeItem
       @empty = not @collection.length
+
+    detachCollection: ->
+      @stopListening @collection
+
+    switchCollection: (collection) ->
+      @detachCollection()
+      @collection = collection
+      @attachCollection()
 
     ##
     # Ensures item views are removed properly
@@ -124,6 +149,7 @@ define [
 
     renderItems: ->
       @collection.each @renderItem
+      @trigger "renderedItems"
 
     ##
     # Removes an item

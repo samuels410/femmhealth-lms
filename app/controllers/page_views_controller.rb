@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -31,6 +31,11 @@
 #           "type": "string",
 #           "format": "uuid"
 #         },
+#         "app_name": {
+#           "description": "If the request is from an API request, the app that generated the access token",
+#           "example": "Canvas for iOS",
+#           "type": "string"
+#         },
 #         "url": {
 #           "description": "The URL requested",
 #           "example": "https://canvas.instructure.com/conversations",
@@ -57,14 +62,14 @@
 #           "type": "string"
 #         },
 #         "contributed": {
-#           "description": "True if the request counted as contributing, such as editing a wiki page",
+#           "description": "This field is deprecated, and will always be false",
 #           "example": "false",
 #           "type": "boolean"
 #         },
 #         "interaction_seconds": {
 #           "description": "An approximation of how long the user spent on the page, in seconds",
 #           "example": "7.21",
-#           "type": "float"
+#           "type": "number"
 #         },
 #         "created_at": {
 #           "description": "When the request was made",
@@ -80,7 +85,7 @@
 #         "render_time": {
 #           "description": "How long the response took to render, in seconds",
 #           "example": "0.369",
-#           "type": "float"
+#           "type": "number"
 #         },
 #         "user_agent": {
 #           "description": "The user-agent of the browser or program that made the request",
@@ -104,13 +109,13 @@
 #         },
 #         "links": {
 #           "description": "The page view links to define the relationships",
-#           "type": "PageViewLinks",
-#           "example": "{}"
+#           "$ref": "PageViewLinks",
+#           "example": {"user": 1234, "account": 1234}
 #         }
 #       }
 #     }
 #
-# @object PageViewLinks
+# @model PageViewLinks
 #   {
 #     "id": "PageViewLinks",
 #     "description": "The links of a page view access in Canvas",
@@ -149,58 +154,62 @@
 #   }
 
 class PageViewsController < ApplicationController
-  before_filter :require_user, :only => [:index]
+  before_action :require_user, :only => [:index]
 
   include Api::V1::PageView
 
   def update
     render :json => {:ok => true}
-    # page view update happens in log_page_view after_filter
+    # page view update happens in log_page_view after_action
   end
 
   # @API List user page views
-  # Return the user's page view history in json format, similar to the
-  # available CSV download. Pagination is used as described in API basics
-  # section. Page views are returned in descending order, newest to oldest.
+  # Return a paginated list of the user's page view history in json format,
+  # similar to the available CSV download. Page views are returned in
+  # descending order, newest to oldest.
   #
-  # @argument start_time [Optional, DateTime]
+  # @argument start_time [DateTime]
   #   The beginning of the time range from which you want page views.
   #
-  # @argument end_time [Optional, DateTime]
+  # @argument end_time [DateTime]
   #   The end of the time range from which you want page views.
   #
   # @returns [PageView]
   def index
     @user = api_find(User, params[:user_id])
-    if authorized_action(@user, @current_user, :view_statistics)
-      date_options = {}
-      url_options = {user_id: @user}
-      if start_time = TimeHelper.try_parse(params[:start_time])
-        date_options[:oldest] = start_time
-        url_options[:start_time] = params[:start_time]
-      end
-      if end_time = TimeHelper.try_parse(params[:end_time])
-        date_options[:newest] = end_time
-        url_options[:end_time] = params[:end_time]
-      end
-      page_views = @user.page_views(date_options)
-      url = api_v1_user_page_views_url(url_options)
 
-      respond_to do |format|
-        format.json do
-          @page_views = Api.paginate(page_views, self, url, :total_entries => nil)
-          render :json => page_views_json(@page_views, @current_user, session)
-        end
-        format.csv do
-          cancel_cache_buster
-          data = @user.page_views.paginate(:page => 1, :per_page => Setting.get('page_views_csv_export_rows', '300').to_i)
-          send_data(
-            data.to_a.to_csv,
-            :type => "text/csv",
-            :filename => t(:download_filename, "Pageviews For %{user}", :user => @user.name.to_s.gsub(/ /, "_")) + '.csv',
-            :disposition => "attachment"
-          )
-        end
+    return unless authorized_action(@user, @current_user, :view_statistics)
+
+    date_options = {}
+    url_options = {user_id: @user}
+    if start_time = CanvasTime.try_parse(params[:start_time])
+      date_options[:oldest] = start_time
+      url_options[:start_time] = params[:start_time]
+    end
+    if end_time = CanvasTime.try_parse(params[:end_time])
+      date_options[:newest] = end_time
+      url_options[:end_time] = params[:end_time]
+    end
+    date_options[:viewer] = @current_user
+    page_views = @user.page_views(date_options)
+    url = api_v1_user_page_views_url(url_options)
+
+    respond_to do |format|
+      format.json do
+        @page_views = Api.paginate(page_views, self, url, :total_entries => nil)
+        render :json => page_views_json(@page_views, @current_user, session)
+      end
+      format.csv do
+        cancel_cache_buster
+
+        csv = PageView::CsvReport.new(@user, @current_user).generate
+
+        options = {
+          type: 'text/csv',
+          filename: t(:download_filename, 'Pageviews For %{user}',
+          user: @user.name.to_s.gsub(/ /, '_')) + '.csv', disposition: 'attachment'
+        }
+        send_data(csv, options)
       end
     end
   end

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,39 +18,46 @@
 
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper')
 
-%w{ Twitter GoogleDocs LinkedIn }.each do |integration|
+%w{ Twitter LinkedIn }.each do |integration|
 describe integration do
   before do
     course_with_student_logged_in(:active_all => true)
   end
 
-  it "should error if the service isn't enabled" do
-    UsersController.any_instance.expects(:feature_and_service_enabled?).with(integration.underscore).returns(false)
+  def oauth_start(integration)
+    expect_any_instance_of(UsersController).to receive(:feature_and_service_enabled?).with(integration.underscore).and_return(true)
+    if integration == "LinkedIn"
+      expect(LinkedIn::Connection).to receive(:config).at_least(:once).and_return({})
+    elsif integration == "Twitter"
+      expect(Twitter::Connection).to receive(:config).at_least(:once).and_return({})
+    else
+      expect(integration.constantize).to receive(:config).at_least(:once).and_return({})
+    end
+
+    # mock up the response from the 3rd party service, so we don't actually contact it
+    expect_any_instance_of(OAuth::Consumer).to receive(:token_request).and_return({:oauth_token => "test_token", :oauth_token_secret => "test_secret", :authorize_url => "http://oauth.example.com/start"})
+    expect_any_instance_of(OAuth::RequestToken).to receive(:authorize_url).and_return("http://oauth.example.com/start")
     get "/oauth?service=#{integration.underscore}"
-    response.should redirect_to(user_profile_url(@user))
-    flash[:error].should be_present
   end
 
-  def oauth_start(integration)
-    UsersController.any_instance.expects(:feature_and_service_enabled?).with(integration.underscore).returns(true)
-    integration.constantize.expects(:config).at_least_once.returns({})
-    # mock up the response from the 3rd party service, so we don't actually contact it
-    OAuth::Consumer.any_instance.expects(:token_request).returns({:oauth_token => "test_token", :oauth_token_secret => "test_secret", :authorize_url => "http://oauth.example.com/start"})
-    OAuth::RequestToken.any_instance.expects(:authorize_url).returns("http://oauth.example.com/start")
+  it "should error if the service isn't enabled" do
+    expect_any_instance_of(UsersController).to receive(:feature_and_service_enabled?).with(integration.underscore).and_return(false)
     get "/oauth?service=#{integration.underscore}"
+    expect(response).to redirect_to(user_profile_url(@user))
+    expect(flash[:error]).to be_present
   end
 
   it "should redirect to the service for auth" do
     oauth_start(integration)
-    response.should redirect_to("http://oauth.example.com/start")
+    expect(response).to redirect_to("http://oauth.example.com/start")
 
     oreq = OauthRequest.last
-    oreq.should be_present
-    oreq.service.should == integration.underscore
-    oreq.token.should == "test_token"
-    oreq.secret.should == "test_secret"
-    oreq.user.should == @user
-    oreq.return_url.should == user_profile_url(@user)
+    expect(oreq).to be_present
+    expect(oreq.service).to eq integration.underscore
+    expect(oreq.token).to eq "test_token"
+    expect(oreq.secret).to eq "test_secret"
+    expect(oreq.user).to eq @user
+    expect(oreq.return_url).to eq user_profile_url(@user)
   end
 
   describe "oauth_success" do
@@ -67,55 +74,71 @@ describe integration do
 
     it "should fail without a valid token" do
       get "/oauth_success?service=#{integration.underscore}&oauth_token=wrong&oauth_verifier=test_verifier"
-      response.should redirect_to(user_profile_url(@user))
-      flash[:error].should be_present
+      expect(response).to redirect_to(user_profile_url(@user))
+      expect(flash[:error]).to be_present
     end
 
     it "should fail with the wrong user" do
       OauthRequest.last.update_attribute(:user, User.create!)
       get "/oauth_success?service=#{integration.underscore}&oauth_token=test_token&oauth_verifier=test_verifier"
-      response.should redirect_to(user_profile_url(@user))
-      flash[:error].should be_present
+      expect(response).to redirect_to(user_profile_url(@user))
+      expect(flash[:error]).to be_present
     end
 
     it "should redirect to the original host if a different host is returned to" do
       get "http://otherschool.example.com/oauth_success?service=#{integration.underscore}&oauth_token=test_token&oauth_verifier=test_verifier"
-      response.should redirect_to("http://www.example.com/oauth_success?oauth_token=test_token&oauth_verifier=test_verifier&service=#{integration.underscore}")
+      expect(response).to redirect_to("http://www.example.com/oauth_success?oauth_token=test_token&oauth_verifier=test_verifier&service=#{integration.underscore}")
     end
 
     it "should create the UserService on successful auth" do
       oauth_start(integration)
 
-      # mock up the response from the 3rd party service, so we don't actually contact it
-      OAuth::Consumer.any_instance.expects(:token_request).with(anything, anything, anything, has_entry(:oauth_verifier, "test_verifier"), anything).returns({:oauth_token => "test_token", :oauth_token_secret => "test_secret"})
-      UsersController.any_instance.expects("#{integration.underscore}_get_service_user").with(instance_of(OAuth::AccessToken)).returns(["test_user_id", "test_user_name"])
+      if integration == "LinkedIn"
+        expect(LinkedIn::Connection).to receive(:from_request_token).and_return(double("LinkedInConnection",
+          access_token: double("AccessToken", token: 'test_token', secret: 'test_secret'),
+          service_user_id: "test_user_id",
+          service_user_name: "test_user_name",
+          service_user_url: "test_user_url"
+        ))
+      elsif integration == "Twitter"
+        expect(Twitter::Connection).to receive(:from_request_token).and_return(double("TwitterConnection",
+          access_token: double("AccessToken", token: 'test_token', secret: 'test_secret'),
+          service_user_id: "test_user_id",
+          service_user_name: "test_user_name"
+        ))
+      end
 
       get "/oauth_success?oauth_token=test_token&oauth_verifier=test_verifier&service=#{integration.underscore}"
-      response.should redirect_to(user_profile_url(@user))
-      flash[:error].should be_blank
-      flash[:notice].should be_present
-      us = UserService.find_by_service_and_user_id(integration.underscore, @user.id)
-      us.should be_present
-      us.service_user_id.should == "test_user_id"
-      us.service_user_name.should == "test_user_name"
-      us.token.should == "test_token"
-      us.secret.should == "test_secret"
+      expect(response).to redirect_to(user_profile_url(@user))
+      expect(flash[:error]).to be_blank
+      expect(flash[:notice]).to be_present
+      us = UserService.where(service: integration.underscore, user_id: @user).first
+      expect(us).to be_present
+      expect(us.service_user_id).to eq "test_user_id"
+      expect(us.service_user_name).to eq "test_user_name"
+      expect(us.token).to eq "test_token"
+      expect(us.secret).to eq "test_secret"
     end
 
     it "should fail creating the UserService if getting the initial user info fails" do
       oauth_start(integration)
 
-      # mock up the response from the 3rd party service, so we don't actually contact it
-      OAuth::Consumer.any_instance.expects(:token_request).with(anything, anything, anything, has_entry(:oauth_verifier, "test_verifier"), anything).returns({:oauth_token => "test_token", :oauth_token_secret => "test_secret"})
-
       # pretend that somehow we think we got a valid auth token, but we actually didn't
-      UsersController.any_instance.expects("#{integration.underscore}_get_service_user").with(instance_of(OAuth::AccessToken)).raises(RuntimeError, "Third-party service totally like, failed")
+      if integration == "LinkedIn"
+        # mock up the response from the 3rd party service, so we don't actually contact it
+        expect(LinkedIn::Connection).to receive(:from_request_token).
+          and_raise(RuntimeError, "Third-party service totally like, failed")
+      elsif integration == "Twitter"
+        expect(Twitter::Connection).to receive(:from_request_token).
+          and_raise(RuntimeError, "Third-party service totally like, failed")
+      end
+
       get "/oauth_success?oauth_token=test_token&oauth_verifier=test_verifier&service=#{integration.underscore}"
-      response.should redirect_to(user_profile_url(@user))
-      flash[:error].should be_present
-      flash[:notice].should be_blank
-      us = UserService.find_by_service_and_user_id(integration.underscore, @user.id)
-      us.should_not be_present
+      expect(response).to redirect_to(user_profile_url(@user))
+      expect(flash[:error]).to be_present
+      expect(flash[:notice]).to be_blank
+      us = UserService.where(service: integration.underscore, user_id: @user).first
+      expect(us).not_to be_present
     end
   end
 end

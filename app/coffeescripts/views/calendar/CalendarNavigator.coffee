@@ -1,18 +1,38 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!calendar',
+  'jquery'
   'underscore'
   'Backbone',
-  'jst/calendar/calendarNavigator'
-], (I18n, _, Backbone, template) ->
+  'jst/calendar/calendarNavigator',
+  'jquery.instructure_date_and_time' # $.date_field
+], (I18n, $, _, Backbone, template) ->
 
   class CalendarNavigator extends Backbone.View
     template: template
 
     els:
-      '.navigation_title'     : '$title'
-      '.navigation_buttons'   : '$buttons'
-      '.date_field'           : '$dateField'
-      '.date_field_wrapper'   : '$dateWrapper'
+      '.navigation_title'      : '$title'
+      '.navigation_title_text' : '$titleText'
+      '.navigation_buttons'    : '$buttons'
+      '.date_field'            : '$dateField'
+      '.date_field_wrapper'    : '$dateWrapper'
 
     events:
       'click .navigate_prev'        : '_triggerPrev'
@@ -20,12 +40,6 @@ define [
       'click .navigate_next'        : '_triggerNext'
       'click .navigation_title'     : '_onTitleClick'
       'keyclick .navigation_title'  : '_onTitleClick'
-
-    messages:
-      invalid_date: I18n.t('input_is_invalid_date', "Input is not a valid date.")
-      screenreader_date_suggestion: (dateText) ->
-        I18n.t 'screenreader_date_suggestion', '%{date}. Press enter to accept.',
-          date: dateText
 
     # options:
     #   hide       - set to true if this navigator should start hidden
@@ -45,7 +59,6 @@ define [
           onClose: @_onPickerClose
           onSelect: @_onPickerSelect
           showOn: "both"
-      @$dateSuggestion = @$('.datetime_suggest')
       @hidePicker()
       @hide() if @options.hide
 
@@ -55,8 +68,7 @@ define [
     hide: => @show(false)
 
     setTitle: (new_text) =>
-      # need to use .html instead of .text so &ndash; will render correctly
-      @$title.html(new_text)
+      @$titleText.text(new_text)
 
     showPicker: (visible = true) ->
       @_pickerShowing = visible
@@ -78,8 +90,7 @@ define [
       @$buttons.hide()
 
     _resetPicker: ->
-      @_enterKeyPressed = false
-      @_enterKeyValue = ''
+      @_enterKeyData = null
       @_previousDateFieldValue = ''
       @$dateField.removeAttr('aria-invalid')
       @$dateField.val('')
@@ -87,16 +98,13 @@ define [
     _titleActivated: ->
       @showPicker()
 
-    _dateFieldSelect: (selectedDateText) ->
-      if @_enterKeyPressed
-        selectedDateText = @_enterKeyValue
-      return @_dateFieldEscape() unless selectedDateText
-      selectedDate = Date.parse(selectedDateText)
-      @_triggerDate(selectedDate)
+    _currentSelectedDate: ->
+      @$dateField.trigger('change')
+      @$dateField.data()
 
-      @hidePicker()
-
-    _dateFieldEscape: ->
+    _dateFieldSelect: ->
+      data = @_enterKeyData || @_currentSelectedDate()
+      @_triggerDate data['unfudged-date'] unless data.invalid or data.blank
       @hidePicker()
 
     _triggerPrev: (event) ->
@@ -117,9 +125,9 @@ define [
 
     _onDateFieldKey: (event) =>
       if event.keyCode == 13 # enter
-        # store some values for later so we can tell the difference between this and a mouse click
-        @_enterKeyPressed = true
-        @_enterKeyValue = @_getDateText()
+        # store current field data for later so we can tell the difference
+        # between this and a mouse click
+        @_enterKeyData = @_currentSelectedDate()
       else
         @_flashDateSuggestion()
 
@@ -128,23 +136,8 @@ define [
       return if @_previousDateFieldValue == @$dateField.val()
       @_previousDateFieldValue = @$dateField.val()
 
-      dateText = @_getDateText()
-      textInvalid = !dateText
-      flashText =
-        if textInvalid
-          @messages.invalid_date
-        else
-          @messages.screenreader_date_suggestion(dateText)
-      $.screenReaderFlashMessage(flashText)
-      @$dateField.attr("aria-invalid", if textInvalid then "true" else "false")
+    _onPickerSelect: =>
+      @_dateFieldSelect()
 
-    _onPickerSelect: (selectedDateText) =>
-      @_dateFieldSelect(selectedDateText)
-
-    _onPickerClose: (selectedDateText) =>
-      @_dateFieldEscape()
-
-    _getDateText: ->
-      newDate = @$dateSuggestion.text()
-      newDate = '' if @$dateSuggestion.is('.invalid_datetime')
-      newDate
+    _onPickerClose: =>
+      @hidePicker()

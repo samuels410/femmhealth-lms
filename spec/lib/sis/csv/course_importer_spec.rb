@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -32,11 +32,11 @@ describe SIS::CSV::CourseImporter do
       "C004,,Humanities 2,A001,T001,active",
       "C005,Hum102,,A001,T001,active"
     )
-    Course.count.should == before_count + 1
+    expect(Course.count).to eq before_count + 1
 
-    importer.errors.should == []
+    expect(importer.errors).to eq []
     warnings = importer.warnings.map { |r| r.last }
-    warnings.should == ["No course_id given for a course",
+    expect(warnings).to eq ["No course_id given for a course",
                         "Improper status \"inactive\" for course C003",
                         "No short_name given for course C004",
                         "No long_name given for course C005"]
@@ -47,10 +47,10 @@ describe SIS::CSV::CourseImporter do
       "course_id,short_name,long_name,account_id,term_id,status",
       "test_1,TC 101,Test Course 101,,,active"
     )
-    course = @account.courses.find_by_sis_source_id("test_1")
-    course.course_code.should eql("TC 101")
-    course.name.should eql("Test Course 101")
-    course.associated_accounts.map(&:id).sort.should == [@account.id]
+    course = @account.courses.where(sis_source_id: "test_1").first
+    expect(course.course_code).to eql("TC 101")
+    expect(course.name).to eql("Test Course 101")
+    expect(course.associated_accounts.map(&:id).sort).to eq [@account.id]
   end
 
   it "should support term stickiness" do
@@ -65,24 +65,57 @@ describe SIS::CSV::CourseImporter do
       "course_id,short_name,long_name,account_id,term_id,status",
       "test_1,TC 101,Test Course 101,,T001,active"
     )
-    @account.courses.find_by_sis_source_id("test_1").tap do |course|
-      course.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T001')
+    @account.courses.where(sis_source_id: "test_1").first.tap do |course|
+      expect(course.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T001').first
     end
     process_csv_data_cleanly(
       "course_id,short_name,long_name,account_id,term_id,status",
       "test_1,TC 101,Test Course 101,,T002,active"
     )
-    @account.courses.find_by_sis_source_id("test_1").tap do |course|
-      course.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T002')
-      course.enrollment_term = EnrollmentTerm.find_by_sis_source_id('T003')
+    @account.courses.where(sis_source_id: "test_1").first.tap do |course|
+      expect(course.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T002').first
+      course.enrollment_term = EnrollmentTerm.where(sis_source_id: 'T003').first
       course.save!
     end
     process_csv_data_cleanly(
       "course_id,short_name,long_name,account_id,term_id,status",
       "test_1,TC 101,Test Course 101,,T004,active"
     )
-    @account.courses.find_by_sis_source_id("test_1").tap do |course|
-      course.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T003')
+    @account.courses.where(sis_source_id: "test_1").first.tap do |course|
+      expect(course.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T003').first
+    end
+  end
+
+  it "should support account stickiness" do
+    process_csv_data_cleanly(
+      "account_id,parent_account_id,name,status",
+      "A001,,Humanities,active",
+      "A002,,Humanities,active",
+      "A003,,Humanities,active",
+      "A004,,Humanities,active"
+    )
+    process_csv_data_cleanly(
+      "course_id,short_name,long_name,account_id,term_id,status",
+      "test_1,TC 101,Test Course 101,A001,,active"
+    )
+    @account.all_courses.where(sis_source_id: "test_1").first.tap do |course|
+      expect(course.account).to eq Account.where(sis_source_id: 'A001').take
+    end
+    process_csv_data_cleanly(
+      "course_id,short_name,long_name,account_id,term_id,status",
+      "test_1,TC 101,Test Course 101,A002,,active"
+    )
+    @account.all_courses.where(sis_source_id: "test_1").first.tap do |course|
+      expect(course.account).to eq Account.where(sis_source_id: 'A002').take
+      course.account = Account.where(sis_source_id: 'A003').first
+      course.save!
+    end
+    process_csv_data_cleanly(
+      "course_id,short_name,long_name,account_id,term_id,status",
+      "test_1,TC 101,Test Course 101,A004,,active"
+    )
+    @account.all_courses.where(sis_source_id: "test_1").first.tap do |course|
+      expect(course.account).to eq Account.where(sis_source_id: 'A003').take
     end
   end
 
@@ -102,8 +135,8 @@ describe SIS::CSV::CourseImporter do
       "course_id,short_name,long_name,account_id,term_id,status,abstract_course_id",
       "test_1,TC 101,Test Course 101,,,active,AC001"
     )
-    @account.courses.find_by_sis_source_id("test_1").tap do |course|
-      course.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T001')
+    @account.courses.where(sis_source_id: "test_1").first.tap do |course|
+      expect(course.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T001').first
     end
     process_csv_data_cleanly(
       "abstract_course_id,short_name,long_name,account_id,term_id,status",
@@ -113,9 +146,9 @@ describe SIS::CSV::CourseImporter do
       "course_id,short_name,long_name,account_id,term_id,status,abstract_course_id",
       "test_1,TC 101,Test Course 101,,,active,AC001"
     )
-    @account.courses.find_by_sis_source_id("test_1").tap do |course|
-      course.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T002')
-      course.enrollment_term = EnrollmentTerm.find_by_sis_source_id('T003')
+    @account.courses.where(sis_source_id: "test_1").first.tap do |course|
+      expect(course.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T002').first
+      course.enrollment_term = EnrollmentTerm.where(sis_source_id: 'T003').first
       course.save!
     end
     process_csv_data_cleanly(
@@ -126,8 +159,8 @@ describe SIS::CSV::CourseImporter do
       "course_id,short_name,long_name,account_id,term_id,status,abstract_course_id",
       "test_1,TC 101,Test Course 101,,,active,AC001"
     )
-    @account.courses.find_by_sis_source_id("test_1").tap do |course|
-      course.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T003')
+    @account.courses.where(sis_source_id: "test_1").first.tap do |course|
+      expect(course.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T003').first
     end
   end
 
@@ -136,29 +169,29 @@ describe SIS::CSV::CourseImporter do
       "account_id,parent_account_id,name,status",
       "A001,,Humanities,active"
     )
-    account = @account.sub_accounts.find_by_sis_source_id("A001")
+    account = @account.sub_accounts.where(sis_source_id: "A001").first
     process_csv_data_cleanly(
       "course_id,short_name,long_name,account_id,term_id,status",
       "test_1,TC 101,Test Course 101,,,active"
     )
-    course = @account.courses.find_by_sis_source_id("test_1")
-    course.account.should == @account
-    course.associated_accounts.map(&:id).sort.should == [@account.id]
-    account.should_not == @account
+    course = @account.courses.where(sis_source_id: "test_1").first
+    expect(course.account).to eq @account
+    expect(course.associated_accounts.map(&:id).sort).to eq [@account.id]
+    expect(account).not_to eq @account
     process_csv_data_cleanly(
       "course_id,short_name,long_name,account_id,term_id,status",
       "test_1,TC 101,Test Course 101,A001,,active"
     )
     course.reload
-    course.account.should == account
-    course.associated_accounts.map(&:id).sort.should == [account.id, @account.id].sort
+    expect(course.account).to eq account
+    expect(course.associated_accounts.map(&:id).sort).to eq [account.id, @account.id].sort
     process_csv_data_cleanly(
       "course_id,short_name,long_name,account_id,term_id,status",
       "test_1,TC 101,Test Course 101,,,active"
     )
     course.reload
-    course.account.should == account
-    course.associated_accounts.map(&:id).sort.should == [account.id, @account.id].sort
+    expect(course.account).to eq account
+    expect(course.associated_accounts.map(&:id).sort).to eq [account.id, @account.id].sort
   end
 
   it "should support falling back to a fallback account if the primary one doesn't exist" do
@@ -170,9 +203,9 @@ describe SIS::CSV::CourseImporter do
       "course_id,short_name,long_name,account_id,term_id,status,fallback_account_id",
       "test_1,TC 101,Test Course 101,NOEXIST,,active,A001"
     )
-    account = @account.sub_accounts.find_by_sis_source_id("A001")
-    course = account.courses.find_by_sis_source_id("test_1")
-    course.account.should == account
+    account = @account.sub_accounts.where(sis_source_id: "A001").first
+    course = account.courses.where(sis_source_id: "test_1").first
+    expect(course.account).to eq account
   end
 
   it "should rename courses that have not had their name manually changed" do
@@ -181,12 +214,12 @@ describe SIS::CSV::CourseImporter do
       "test_1,TC 101,Test Course 101,,,active",
       "test_2,TB 101,Testing & Breaking 101,,,active"
     )
-    course = @account.courses.find_by_sis_source_id("test_1")
-    course.course_code.should eql("TC 101")
-    course.name.should eql("Test Course 101")
+    course = @account.courses.where(sis_source_id: "test_1").first
+    expect(course.course_code).to eql("TC 101")
+    expect(course.name).to eql("Test Course 101")
 
-    course = @account.courses.find_by_sis_source_id("test_2")
-    course.name.should eql("Testing & Breaking 101")
+    course = @account.courses.where(sis_source_id: "test_2").first
+    expect(course.name).to eql("Testing & Breaking 101")
 
     process_csv_data_cleanly(
       "course_id,short_name,long_name,account_id,term_id,status",
@@ -194,12 +227,12 @@ describe SIS::CSV::CourseImporter do
       "test_2,TB 102,Testing & Breaking 102,,,active"
     )
 
-    course = @account.courses.find_by_sis_source_id("test_1")
-    course.course_code.should eql("TC 102")
-    course.name.should eql("Test Course 102")
+    course = @account.courses.where(sis_source_id: "test_1").first
+    expect(course.course_code).to eql("TC 102")
+    expect(course.name).to eql("Test Course 102")
 
-    course = @account.courses.find_by_sis_source_id("test_2")
-    course.name.should eql("Testing & Breaking 102")
+    course = @account.courses.where(sis_source_id: "test_2").first
+    expect(course.name).to eql("Testing & Breaking 102")
   end
 
   it "should not rename courses that have had their names manually changed" do
@@ -207,9 +240,9 @@ describe SIS::CSV::CourseImporter do
       "course_id,short_name,long_name,account_id,term_id,status",
       "test_1,TC 101,Test Course 101,,,active"
     )
-    course = @account.courses.find_by_sis_source_id("test_1")
-    course.course_code.should eql("TC 101")
-    course.name.should eql("Test Course 101")
+    course = @account.courses.where(sis_source_id: "test_1").first
+    expect(course.course_code).to eql("TC 101")
+    expect(course.name).to eql("Test Course 101")
 
     course.name = "Haha my course lol"
     course.course_code = "SUCKERS 101"
@@ -219,9 +252,9 @@ describe SIS::CSV::CourseImporter do
       "course_id,short_name,long_name,account_id,term_id,status",
       "test_1,TC 102,Test Course 102,,,active"
     )
-    course = @account.courses.find_by_sis_source_id("test_1")
-    course.course_code.should eql("SUCKERS 101")
-    course.name.should eql("Haha my course lol")
+    course = @account.courses.where(sis_source_id: "test_1").first
+    expect(course.course_code).to eql("SUCKERS 101")
+    expect(course.name).to eql("Haha my course lol")
   end
 
   it 'should override term dates if the start or end dates are set' do
@@ -232,10 +265,10 @@ describe SIS::CSV::CourseImporter do
       "test3,TC 103,Test Course 3,,,active,2011-04-14 00:00:00,",
       "test4,TC 104,Test Course 4,,,active,2011-04-14 00:00:00,2011-05-14 00:00:00"
     )
-    @account.courses.find_by_sis_source_id("test1").restrict_enrollments_to_course_dates.should be_false
-    @account.courses.find_by_sis_source_id("test2").restrict_enrollments_to_course_dates.should be_true
-    @account.courses.find_by_sis_source_id("test3").restrict_enrollments_to_course_dates.should be_true
-    @account.courses.find_by_sis_source_id("test4").restrict_enrollments_to_course_dates.should be_true
+    expect(@account.courses.where(sis_source_id: "test1").first.restrict_enrollments_to_course_dates).to be_falsey
+    expect(@account.courses.where(sis_source_id: "test2").first.restrict_enrollments_to_course_dates).to be_truthy
+    expect(@account.courses.where(sis_source_id: "test3").first.restrict_enrollments_to_course_dates).to be_truthy
+    expect(@account.courses.where(sis_source_id: "test4").first.restrict_enrollments_to_course_dates).to be_truthy
   end
 
   it 'should support start/end date and restriction stickiness' do
@@ -243,23 +276,35 @@ describe SIS::CSV::CourseImporter do
       "course_id,short_name,long_name,account_id,term_id,status,start_date,end_date",
       "test4,TC 104,Test Course 4,,,active,2011-04-14 00:00:00,2011-05-14 00:00:00"
     )
-    @account.courses.find_by_sis_source_id("test4").tap do |course|
-      course.restrict_enrollments_to_course_dates.should be_true
-      course.start_at.should == DateTime.parse("2011-04-14 00:00:00")
-      course.conclude_at.should == DateTime.parse("2011-05-14 00:00:00")
-      course.restrict_enrollments_to_course_dates = false
-      course.start_at = DateTime.parse("2010-04-14 00:00:00")
-      course.conclude_at = DateTime.parse("2010-05-14 00:00:00")
+    @account.courses.where(sis_source_id: "test4").first.tap do |course|
+      expect(course.restrict_enrollments_to_course_dates).to be_truthy
+      expect(course.start_at).to eq DateTime.parse("2011-04-14 00:00:00")
+      expect(course.conclude_at).to eq DateTime.parse("2011-05-14 00:00:00")
+      course.restrict_enrollments_to_course_dates = false # should be able to change this without stickying dates
       course.save!
     end
+
+    process_csv_data_cleanly(
+      "course_id,short_name,long_name,account_id,term_id,status,start_date,end_date",
+      "test4,TC 104,Test Course 4,,,active,2012-04-14 00:00:00,2012-05-14 00:00:00"
+    )
+    @account.courses.where(sis_source_id: "test4").first.tap do |course|
+      expect(course.restrict_enrollments_to_course_dates).to be_falsey
+      expect(course.start_at).to eq DateTime.parse("2012-04-14 00:00:00")
+      expect(course.conclude_at).to eq DateTime.parse("2012-05-14 00:00:00")
+      course.start_at = DateTime.parse("2010-04-14 00:00:00")
+      course.conclude_at = DateTime.parse("2010-05-14 00:00:00") # now get sticky
+      course.save!
+    end
+
     process_csv_data_cleanly(
       "course_id,short_name,long_name,account_id,term_id,status,start_date,end_date",
       "test4,TC 104,Test Course 4,,,active,2011-04-14 00:00:00,2011-05-14 00:00:00"
     )
-    @account.courses.find_by_sis_source_id("test4").tap do |course|
-      course.restrict_enrollments_to_course_dates.should be_false
-      course.start_at.should == DateTime.parse("2010-04-14 00:00:00")
-      course.conclude_at.should == DateTime.parse("2010-05-14 00:00:00")
+    @account.courses.where(sis_source_id: "test4").first.tap do |course|
+      expect(course.restrict_enrollments_to_course_dates).to be_falsey
+      expect(course.start_at).to eq DateTime.parse("2010-04-14 00:00:00")
+      expect(course.conclude_at).to eq DateTime.parse("2010-05-14 00:00:00")
     end
   end
 
@@ -292,46 +337,46 @@ describe SIS::CSV::CourseImporter do
       "c2,s1,active",
       "c3,s2,active"
     )
-    ['c1', 'c2', 'c3'].map{|c| Course.find_by_sis_source_id(c)}.each do |c|
-      c.account.should == Account.find_by_sis_source_id('A001')
-      c.name.should == 'Test Course 1'
-      c.course_code.should == 'TC 101'
-      c.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T001')
-      c.start_at.should == DateTime.parse("2011-04-14 00:00:00")
-      c.conclude_at.should == DateTime.parse("2011-05-14 00:00:00")
-      c.restrict_enrollments_to_course_dates.should be_true
+    Course.where(sis_source_id: ['c1', 'c2', 'c3']).each do |c|
+      expect(c.account).to eq Account.where(sis_source_id: 'A001').first
+      expect(c.name).to eq 'Test Course 1'
+      expect(c.course_code).to eq 'TC 101'
+      expect(c.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T001').first
+      expect(c.start_at).to eq DateTime.parse("2011-04-14 00:00:00")
+      expect(c.conclude_at).to eq DateTime.parse("2011-05-14 00:00:00")
+      expect(c.restrict_enrollments_to_course_dates).to be_truthy
     end
     process_csv_data_cleanly(
       "course_id,short_name,long_name,account_id,term_id,status,start_date,end_date",
       "c1,TC 102,Test Course 2,A002,T002,active,2011-04-12 00:00:00,2011-05-12 00:00:00"
     )
-    ['c1', 'c2', 'c3'].map{|c| Course.find_by_sis_source_id(c)}.each do |c|
-      c.account.should == Account.find_by_sis_source_id('A002')
-      c.name.should == 'Test Course 2'
-      c.course_code.should == 'TC 102'
-      c.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T002')
-      c.start_at.should == DateTime.parse("2011-04-12 00:00:00")
-      c.conclude_at.should == DateTime.parse("2011-05-12 00:00:00")
-      c.restrict_enrollments_to_course_dates.should be_true
+    Course.where(sis_source_id: ['c1', 'c2', 'c3']).each do |c|
+      expect(c.account).to eq Account.where(sis_source_id: 'A002').first
+      expect(c.name).to eq 'Test Course 2'
+      expect(c.course_code).to eq 'TC 102'
+      expect(c.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T002').first
+      expect(c.start_at).to eq DateTime.parse("2011-04-12 00:00:00")
+      expect(c.conclude_at).to eq DateTime.parse("2011-05-12 00:00:00")
+      expect(c.restrict_enrollments_to_course_dates).to be_truthy
     end
     process_csv_data_cleanly(
       "course_id,short_name,long_name,account_id,term_id,status,start_date,end_date",
       "c1,TC 102,Test Course 2,A002,T002,active,,"
     )
-    ['c1', 'c2', 'c3'].map{|c| Course.find_by_sis_source_id(c)}.each do |c|
-      c.account.should == Account.find_by_sis_source_id('A002')
-      c.name.should == 'Test Course 2'
-      c.course_code.should == 'TC 102'
-      c.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T002')
-      c.start_at.should be_nil
-      c.conclude_at.should be_nil
-      c.restrict_enrollments_to_course_dates.should be_false
+    Course.where(sis_source_id: ['c1', 'c2', 'c3']).each do |c|
+      expect(c.account).to eq Account.where(sis_source_id: 'A002').first
+      expect(c.name).to eq 'Test Course 2'
+      expect(c.course_code).to eq 'TC 102'
+      expect(c.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T002').first
+      expect(c.start_at).to be_nil
+      expect(c.conclude_at).to be_nil
+      expect(c.restrict_enrollments_to_course_dates).to be_falsey
     end
-    ['c1'].map{|c| Course.find_by_sis_source_id(c)}.each do |c|
-      c.account = Account.find_by_sis_source_id('A003')
+    Course.where(sis_source_id: 'c1').each do |c|
+      c.account = Account.where(sis_source_id: 'A003').first
       c.name = 'Test Course 3'
       c.course_code = 'TC 103'
-      c.enrollment_term = EnrollmentTerm.find_by_sis_source_id('T003')
+      c.enrollment_term = EnrollmentTerm.where(sis_source_id: 'T003').first
       c.start_at = DateTime.parse("2011-04-13 00:00:00")
       c.conclude_at = DateTime.parse("2011-05-13 00:00:00")
       c.restrict_enrollments_to_course_dates = true
@@ -341,23 +386,23 @@ describe SIS::CSV::CourseImporter do
       "course_id,short_name,long_name,account_id,term_id,status,start_date,end_date",
       "c1,TC 104,Test Course 4,A004,T004,active,2011-04-16 00:00:00,2011-05-16 00:00:00"
     )
-    ['c1'].map{|c| Course.find_by_sis_source_id(c)}.each do |c|
-      c.account.should == Account.find_by_sis_source_id('A004')
-      c.name.should == 'Test Course 3'
-      c.course_code.should == 'TC 103'
-      c.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T003')
-      c.start_at.should == DateTime.parse("2011-04-13 00:00:00")
-      c.conclude_at.should == DateTime.parse("2011-05-13 00:00:00")
-      c.restrict_enrollments_to_course_dates.should be_true
+    Course.where(sis_source_id: 'c1').each do |c|
+      expect(c.account).to eq Account.where(sis_source_id: 'A003').first
+      expect(c.name).to eq 'Test Course 3'
+      expect(c.course_code).to eq 'TC 103'
+      expect(c.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T003').first
+      expect(c.start_at).to eq DateTime.parse("2011-04-13 00:00:00")
+      expect(c.conclude_at).to eq DateTime.parse("2011-05-13 00:00:00")
+      expect(c.restrict_enrollments_to_course_dates).to be_truthy
     end
-    ['c2', 'c3'].map{|c| Course.find_by_sis_source_id(c)}.each do |c|
-      c.account.should == Account.find_by_sis_source_id('A004')
-      c.name.should == 'Test Course 2'
-      c.course_code.should == 'TC 102'
-      c.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T002')
-      c.start_at.should be_nil
-      c.conclude_at.should be_nil
-      c.restrict_enrollments_to_course_dates.should be_false
+    Course.where(sis_source_id: ['c2', 'c3']).each do |c|
+      expect(c.account).to eq Account.where(sis_source_id: 'A002').first
+      expect(c.name).to eq 'Test Course 2'
+      expect(c.course_code).to eq 'TC 102'
+      expect(c.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T002').first
+      expect(c.start_at).to be_nil
+      expect(c.conclude_at).to be_nil
+      expect(c.restrict_enrollments_to_course_dates).to be_falsey
     end
   end
 
@@ -390,46 +435,46 @@ describe SIS::CSV::CourseImporter do
       "c2,s1,active",
       "c3,s2,active"
     )
-    ['c1', 'c2', 'c3'].map{|c| Course.find_by_sis_source_id(c)}.each do |c|
-      c.account.should == Account.find_by_sis_source_id('A001')
-      c.name.should == 'Test Course 1'
-      c.course_code.should == 'TC 101'
-      c.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T001')
-      c.start_at.should == DateTime.parse("2011-04-14 00:00:00")
-      c.conclude_at.should == DateTime.parse("2011-05-14 00:00:00")
-      c.restrict_enrollments_to_course_dates.should be_true
+    Course.where(sis_source_id: ['c1', 'c2', 'c3']).each do |c|
+      expect(c.account).to eq Account.where(sis_source_id: 'A001').first
+      expect(c.name).to eq 'Test Course 1'
+      expect(c.course_code).to eq 'TC 101'
+      expect(c.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T001').first
+      expect(c.start_at).to eq DateTime.parse("2011-04-14 00:00:00")
+      expect(c.conclude_at).to eq DateTime.parse("2011-05-14 00:00:00")
+      expect(c.restrict_enrollments_to_course_dates).to be_truthy
     end
     process_csv_data_cleanly(
       "course_id,short_name,long_name,account_id,term_id,status,start_date,end_date",
       "c1,TC 102,Test Course 2,A002,T002,active,2011-04-12 00:00:00,2011-05-12 00:00:00"
     )
-    ['c1', 'c2', 'c3'].map{|c| Course.find_by_sis_source_id(c)}.each do |c|
-      c.account.should == Account.find_by_sis_source_id('A002')
-      c.name.should == 'Test Course 2'
-      c.course_code.should == 'TC 102'
-      c.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T002')
-      c.start_at.should == DateTime.parse("2011-04-12 00:00:00")
-      c.conclude_at.should == DateTime.parse("2011-05-12 00:00:00")
-      c.restrict_enrollments_to_course_dates.should be_true
+    Course.where(sis_source_id: ['c1', 'c2', 'c3']).each do |c|
+      expect(c.account).to eq Account.where(sis_source_id: 'A002').first
+      expect(c.name).to eq 'Test Course 2'
+      expect(c.course_code).to eq 'TC 102'
+      expect(c.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T002').first
+      expect(c.start_at).to eq DateTime.parse("2011-04-12 00:00:00")
+      expect(c.conclude_at).to eq DateTime.parse("2011-05-12 00:00:00")
+      expect(c.restrict_enrollments_to_course_dates).to be_truthy
     end
     process_csv_data_cleanly(
       "course_id,short_name,long_name,account_id,term_id,status,start_date,end_date",
       "c1,TC 102,Test Course 2,A002,T002,active,,"
     )
-    ['c1', 'c2', 'c3'].map{|c| Course.find_by_sis_source_id(c)}.each do |c|
-      c.account.should == Account.find_by_sis_source_id('A002')
-      c.name.should == 'Test Course 2'
-      c.course_code.should == 'TC 102'
-      c.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T002')
-      c.start_at.should be_nil
-      c.conclude_at.should be_nil
-      c.restrict_enrollments_to_course_dates.should be_false
+    Course.where(sis_source_id: ['c1', 'c2', 'c3']).each do |c|
+      expect(c.account).to eq Account.where(sis_source_id: 'A002').first
+      expect(c.name).to eq 'Test Course 2'
+      expect(c.course_code).to eq 'TC 102'
+      expect(c.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T002').first
+      expect(c.start_at).to be_nil
+      expect(c.conclude_at).to be_nil
+      expect(c.restrict_enrollments_to_course_dates).to be_falsey
     end
-    ['c2', 'c3'].map{|c| Course.find_by_sis_source_id(c)}.each do |c|
-      c.account = Account.find_by_sis_source_id('A003')
+    Course.where(sis_source_id: ['c2', 'c3']).each do |c|
+      c.account = Account.where(sis_source_id: 'A003').first
       c.name = 'Test Course 3'
       c.course_code = 'TC 103'
-      c.enrollment_term = EnrollmentTerm.find_by_sis_source_id('T003')
+      c.enrollment_term = EnrollmentTerm.where(sis_source_id: 'T003').first
       c.start_at = DateTime.parse("2011-04-13 00:00:00")
       c.conclude_at = DateTime.parse("2011-05-13 00:00:00")
       c.restrict_enrollments_to_course_dates = true
@@ -439,36 +484,36 @@ describe SIS::CSV::CourseImporter do
       "course_id,short_name,long_name,account_id,term_id,status,start_date,end_date",
       "c1,TC 104,Test Course 4,A004,T004,active,2011-04-16 00:00:00,2011-05-16 00:00:00"
     )
-    ['c2', 'c3'].map{|c| Course.find_by_sis_source_id(c)}.each do |c|
-      c.account.should == Account.find_by_sis_source_id('A004')
-      c.name.should == 'Test Course 3'
-      c.course_code.should == 'TC 103'
-      c.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T003')
-      c.start_at.should == DateTime.parse("2011-04-13 00:00:00")
-      c.conclude_at.should == DateTime.parse("2011-05-13 00:00:00")
-      c.restrict_enrollments_to_course_dates.should be_true
+    Course.where(sis_source_id: ['c2', 'c3']).each do |c|
+      expect(c.account).to eq Account.where(sis_source_id: 'A003').first
+      expect(c.name).to eq 'Test Course 3'
+      expect(c.course_code).to eq 'TC 103'
+      expect(c.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T003').first
+      expect(c.start_at).to eq DateTime.parse("2011-04-13 00:00:00")
+      expect(c.conclude_at).to eq DateTime.parse("2011-05-13 00:00:00")
+      expect(c.restrict_enrollments_to_course_dates).to be_truthy
     end
-    ['c1'].map{|c| Course.find_by_sis_source_id(c)}.each do |c|
-      c.account.should == Account.find_by_sis_source_id('A004')
-      c.name.should == 'Test Course 4'
-      c.course_code.should == 'TC 104'
-      c.enrollment_term.should == EnrollmentTerm.find_by_sis_source_id('T004')
-      c.start_at.should == DateTime.parse("2011-04-16 00:00:00")
-      c.conclude_at.should == DateTime.parse("2011-05-16 00:00:00")
-      c.restrict_enrollments_to_course_dates.should be_true
+    Course.where(sis_source_id: 'c1').each do |c|
+      expect(c.account).to eq Account.where(sis_source_id: 'A004').first
+      expect(c.name).to eq 'Test Course 4'
+      expect(c.course_code).to eq 'TC 104'
+      expect(c.enrollment_term).to eq EnrollmentTerm.where(sis_source_id: 'T004').first
+      expect(c.start_at).to eq DateTime.parse("2011-04-16 00:00:00")
+      expect(c.conclude_at).to eq DateTime.parse("2011-05-16 00:00:00")
+      expect(c.restrict_enrollments_to_course_dates).to be_truthy
     end
   end
 
   it "should use the default term if none given" do
     @default_term = @account.default_enrollment_term
-    @default_term.should be_present
+    expect(@default_term).to be_present
     @nil_id_term = @account.enrollment_terms.create!(:name => "nil")
     @with_id_term = @account.enrollment_terms.create!(:name => "test") { |t| t.sis_source_id = "test" }
     process_csv_data_cleanly(
       "course_id,short_name,long_name,status",
       "c1,c1,c1,active")
-    @course = @account.courses.find_by_sis_source_id("c1")
-    @course.enrollment_term.should == @default_term
+    @course = @account.courses.where(sis_source_id: "c1").first
+    expect(@course.enrollment_term).to eq @default_term
   end
 
   context 'account associations' do
@@ -487,27 +532,27 @@ describe SIS::CSV::CourseImporter do
         "course_id,short_name,long_name,account_id,term_id,status",
         "test_1,TC 101,Test Course 101,,,active"
       )
-      Course.find_by_sis_source_id("test_1").associated_accounts.map(&:id).should == [@account.id]
+      expect(Course.where(sis_source_id: "test_1").first.associated_accounts.map(&:id)).to eq [@account.id]
       process_csv_data_cleanly(
         "course_id,short_name,long_name,account_id,term_id,status",
         "test_1,TC 101,Test Course 101,A001,,active"
       )
-      Course.find_by_sis_source_id("test_1").associated_accounts.map(&:id).sort.should == [Account.find_by_sis_source_id('A001').id, @account.id].sort
+      expect(Course.where(sis_source_id: "test_1").first.associated_accounts.map(&:id).sort).to eq [Account.where(sis_source_id: 'A001').first.id, @account.id].sort
       process_csv_data_cleanly(
         "course_id,short_name,long_name,account_id,term_id,status",
         "test_1,TC 101,Test Course 101,A004,,active"
       )
-      Course.find_by_sis_source_id("test_1").associated_accounts.map(&:id).sort.should == [Account.find_by_sis_source_id('A004').id, @account.id].sort
+      expect(Course.where(sis_source_id: "test_1").first.associated_accounts.map(&:id).sort).to eq [Account.where(sis_source_id: 'A004').first.id, @account.id].sort
       process_csv_data_cleanly(
         "course_id,short_name,long_name,account_id,term_id,status",
         "test_1,TC 101,Test Course 101,A003,,active"
       )
-      Course.find_by_sis_source_id("test_1").associated_accounts.map(&:id).sort.should == [Account.find_by_sis_source_id('A003').id, Account.find_by_sis_source_id('A002').id, Account.find_by_sis_source_id('A001').id, @account.id].sort
+      expect(Course.where(sis_source_id: "test_1").first.associated_accounts.map(&:id).sort).to eq [Account.where(sis_source_id: 'A003').first.id, Account.where(sis_source_id: 'A002').first.id, Account.where(sis_source_id: 'A001').first.id, @account.id].sort
       process_csv_data_cleanly(
         "course_id,short_name,long_name,account_id,term_id,status",
         "test_1,TC 101,Test Course 101,A001,,active"
       )
-      Course.find_by_sis_source_id("test_1").associated_accounts.map(&:id).sort.should == [Account.find_by_sis_source_id('A001').id, @account.id].sort
+      expect(Course.where(sis_source_id: "test_1").first.associated_accounts.map(&:id).sort).to eq [Account.where(sis_source_id: 'A001').first.id, @account.id].sort
     end
   end
 
@@ -516,16 +561,131 @@ describe SIS::CSV::CourseImporter do
         "course_id,short_name,long_name,account_id,term_id,status",
         "test_1,TC 101,Test Course 101,,,active"
     )
-    course = Course.find_by_sis_source_id("test_1")
-    course.should be_claimed
+    course = Course.where(sis_source_id: "test_1").first
+    expect(course).to be_claimed
     course.process_event('offer')
     course.complete
-    course.should be_completed
+    expect(course).to be_completed
     process_csv_data_cleanly(
         "course_id,short_name,long_name,account_id,term_id,status",
         "test_1,TC 101,Test Course 101,,,active"
     )
     course.reload
-    course.should be_completed
+    expect(course).to be_completed
+  end
+
+  it 'sets and updates course_format' do
+    process_csv_data_cleanly(
+        "course_id,short_name,long_name,account_id,term_id,status,course_format",
+        "test_1,TC 101,Test Course 101,,,active,online",
+        "test_2,TC 102,Test Course 102,,,active,blended",
+        "test_3,TC 103,Test Course 103,,,active,on_campus"
+    )
+    expect(Course.find_by_sis_source_id('test_1').course_format).to eq 'online'
+    expect(Course.find_by_sis_source_id('test_2').course_format).to eq 'blended'
+    expect(Course.find_by_sis_source_id('test_3').course_format).to eq 'on_campus'
+
+    process_csv_data_cleanly(
+        "course_id,short_name,long_name,account_id,term_id,status,course_format",
+        "test_1,TC 101,Test Course 101,,,active,",
+        "test_2,TC 102,Test Course 102,,,active,\"\"",
+        "test_3,TC 103,Test Course 103,,,active,blended"
+    )
+    expect(Course.find_by_sis_source_id('test_1').course_format).not_to be_present
+    expect(Course.find_by_sis_source_id('test_2').course_format).not_to be_present
+    expect(Course.find_by_sis_source_id('test_3').course_format).to eq 'blended'
+  end
+
+  it 'rejects invalid course_format' do
+    importer = process_csv_data(
+        "course_id,short_name,long_name,account_id,term_id,status,course_format",
+        "test_1,TC 101,Test Course 101,,,active,FAT32"
+    )
+    expect(importer.warnings.map(&:last)).to include "Invalid course_format \"FAT32\" for course test_1"
+  end
+
+  it 'should allow unpublished to be passed for active' do
+    process_csv_data_cleanly(
+      "course_id,short_name,long_name,account_id,term_id,status",
+      "c1,TC 101,Test Course 1,A001,T001,unpublished"
+    )
+    expect(Course.active.find_by_sis_source_id('c1')).to be_present
+  end
+
+  context "blueprint courses" do
+    before :once do
+      account_model
+      @mc = @account.courses.create!(:sis_source_id => "blahprint")
+      @template = MasterCourses::MasterTemplate.set_as_master_course(@mc)
+    end
+
+    it "should give a warning when trying to associate an existing blueprint course" do
+      mc2 = @account.courses.create!(:sis_source_id => "anothermastercourse")
+      template2 = MasterCourses::MasterTemplate.set_as_master_course(mc2)
+      importer = process_csv_data(
+        "course_id,short_name,long_name,status,blueprint_course_id",
+        "#{mc2.sis_source_id},shortname,long name,active,#{@mc.sis_source_id}"
+      )
+      expect(importer.warnings.map(&:last)).to include("Cannot associate course \"#{mc2.sis_source_id}\" - is a blueprint course")
+    end
+
+    it "should give a warning when trying to associate an already associated course" do
+      mc2 = @account.courses.create!(:sis_source_id => "anothermastercourse")
+      template2 = MasterCourses::MasterTemplate.set_as_master_course(mc2)
+      ac = @account.courses.create!(:sis_source_id => "anassociatedcourse")
+      template2.add_child_course!(ac)
+      importer = process_csv_data(
+        "course_id,short_name,long_name,status,blueprint_course_id",
+        "#{ac.sis_source_id},shortname,long name,active,#{@mc.sis_source_id}"
+      )
+      expect(importer.warnings.map(&:last)).to include("Cannot associate course \"#{ac.sis_source_id}\" - is associated to another blueprint course")
+    end
+
+    it "shouldn't fail if a course is already associated to the target" do
+      ac = @account.courses.create!(:sis_source_id => "anassociatedcourse")
+      @template.add_child_course!(ac)
+      process_csv_data_cleanly(
+        "course_id,short_name,long_name,status,blueprint_course_id",
+        "#{ac.sis_source_id},shortname,long name,active,#{@mc.sis_source_id}"
+      )
+    end
+
+    it "should allow destroying" do
+      ac = @account.courses.create!(:sis_source_id => "anassociatedcourse")
+      child = @template.add_child_course!(ac)
+      process_csv_data_cleanly(
+        "course_id,short_name,long_name,status,blueprint_course_id",
+        "#{ac.sis_source_id},shortname,long name,active,dissociate"
+      )
+      expect(child.reload.workflow_state).to eq 'deleted'
+    end
+
+    it "should be able to associate courses in bulk" do
+      c1 = @account.courses.create!(:sis_source_id => "acourse1")
+      c2 = @account.courses.create!(:sis_source_id => "acourse2")
+      mc2 = @account.courses.create!(:sis_source_id => "anothermastercourse")
+      template2 = MasterCourses::MasterTemplate.set_as_master_course(mc2)
+      c3 = @account.courses.create!(:sis_source_id => "acourse3")
+      process_csv_data_cleanly(
+        "course_id,short_name,long_name,status,blueprint_course_id",
+        "#{c1.sis_source_id},shortname,long name,active,#{@mc.sis_source_id}",
+        "#{c2.sis_source_id},shortname,long name,active,#{@mc.sis_source_id}",
+        "#{c3.sis_source_id},shortname,long name,active,#{mc2.sis_source_id}"
+      )
+      expect(@template.child_subscriptions.active.pluck(:child_course_id)).to match_array([c1.id, c2.id])
+      expect(template2.child_subscriptions.active.pluck(:child_course_id)).to eq([c3.id])
+    end
+
+    it "should try to queue a migration afterwards" do
+      account_admin_user(:active_all => true)
+      c1 = @account.courses.create!(:sis_source_id => "acourse1")
+      process_csv_data_cleanly(
+        "course_id,short_name,long_name,status,blueprint_course_id",
+        "#{c1.sis_source_id},shortname,long name,active,#{@mc.sis_source_id}",
+        :batch => @account.sis_batches.create!(:user => @admin, :data => {})
+      )
+      mm = @template.master_migrations.last
+      expect(mm).to be_queued
+    end
   end
 end

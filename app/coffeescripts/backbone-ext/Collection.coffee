@@ -1,10 +1,26 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
-  'use!vendor/backbone'
+  'node_modules-version-of-backbone'
   'underscore'
   'compiled/util/mixin'
   'compiled/backbone-ext/DefaultUrlMixin'
 ], (Backbone, _, mixin, DefaultUrlMixin) ->
-
   class Backbone.Collection extends Backbone.Collection
     ##
     # Mixes in objects to a model's definition, being mindful of certain
@@ -105,7 +121,7 @@ define [
     fetch: (options = {}) ->
       # TODO: we might want to merge options.data and options.params here instead
       options.data = @options.params if !options.data? and @options.params?
-      super(options).fail (xhr) => @trigger 'fetch:fail', xhr
+      super(options).then(null, (xhr) => @trigger 'fetch:fail', xhr)
 
     url: -> @_defaultUrl()
 

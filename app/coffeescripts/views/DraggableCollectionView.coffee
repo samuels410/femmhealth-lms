@@ -1,8 +1,26 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'Backbone'
+  'jquery'
   'underscore'
   'compiled/views/CollectionView'
-], (Backbone, _, CollectionView) ->
+], (Backbone, $, _, CollectionView) ->
 
   class DraggableCollectionView extends CollectionView
 
@@ -46,6 +64,8 @@ define [
       @_noItemsViewIfEmpty()
 
     modifyPlaceholder: (e, ui) =>
+      # Prevent the sortstart action from propagating up.
+      e.stopPropagation()
       $(ui.placeholder).data("group", @groupId)
 
     # If there are no children within the group,
@@ -95,17 +115,22 @@ define [
       @_removeFromGroup(model)
       @_addToGroup(model)
 
+    # must explicitly update @empty attribute from CollectionView class so view
+    # will properly recognize if it does/doesn't have items on subsequent
+    # re-renders, since drag & drop doesn't trigger a render
     _removeFromGroup: (model) ->
       old_group_id = model.get(@groupKey)
       old_group = @parentCollection.findWhere id: old_group_id
       old_children = old_group.get(@childKey)
       old_children.remove(model, {silent: true})
+      @empty = _.isEmpty(old_children.models)
 
     _addToGroup: (model) ->
       model.set(@groupKey, @groupId)
       new_group = @parentCollection.findWhere id: @groupId
       new_children = new_group.get(@childKey)
       new_children.add(model, {silent: true})
+      @empty = false if @empty
 
     # Internal: On a user's sort action, update the sort order on the server.
     #

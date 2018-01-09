@@ -1,7 +1,24 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require File.expand_path(File.dirname(__FILE__) + '/../common')
 
 describe "admin avatars" do
-  include_examples "in-process server selenium tests"
+  include_context "in-process server selenium tests"
 
   before (:each) do
     course_with_admin_logged_in
@@ -23,14 +40,14 @@ describe "admin avatars" do
 
   def verify_avatar_state(user, opts={})
     if (opts.empty?)
-      f("#submitted_profile").should include_text "Submitted 1"
+      expect(f("#submitted_profile")).to include_text "Submitted 1"
       f("#submitted_profile").click
     else
-      f(opts.keys[0]).should include_text(opts.values[0])
+      expect(f(opts.keys[0])).to include_text(opts.values[0])
       f(opts.keys[0]).click
     end
-    f("#avatars .name").should include_text user.name
-    f(".avatar img").attribute('src').should_not be_nil
+    expect(f("#avatars .name")).to include_text user.name
+    expect(f(".avatar")).to have_attribute('style', /http/)
   end
 
   def lock_avatar(user, element)
@@ -38,9 +55,9 @@ describe "admin avatars" do
     f(".links .lock_avatar_link").click
     driver.switch_to.alert.accept
     wait_for_ajax_requests
-    f(".links .unlock_avatar_link").should be_displayed
+    expect(f(".links .unlock_avatar_link")).to be_displayed
     user.reload
-    user.avatar_state.should == :locked
+    expect(user.avatar_state).to eq :locked
     user
   end
 
@@ -78,18 +95,18 @@ describe "admin avatars" do
     f(".links .unlock_avatar_link").click
     wait_for_ajax_requests
     user.reload
-    user.avatar_state.should == :approved
-    f(".links .lock_avatar_link").should be_displayed
+    expect(user.avatar_state).to eq :approved
+    expect(f(".links .lock_avatar_link")).to be_displayed
   end
 
   it "should approve un-approved avatar" do
     user = create_avatar_state
-    user.avatar_state.should == :submitted
+    expect(user.avatar_state).to eq :submitted
     f(".links .approve_avatar_link").click
     wait_for_ajax_requests
     user.reload
-    user.avatar_state.should == :approved
-    f(".links .approve_avatar_link").should_not be_displayed
+    expect(user.avatar_state).to eq :approved
+    expect(f(".links .approve_avatar_link")).not_to be_displayed
   end
   it "should delete the avatar" do
     user = create_avatar_state
@@ -98,7 +115,24 @@ describe "admin avatars" do
     driver.switch_to.alert.accept
     wait_for_ajax_requests
     user.reload
-    user.avatar_state.should == :none
-    user.avatar_image_url.should be_nil
+    expect(user.avatar_state).to eq :none
+    expect(user.avatar_image_url).to be_nil
+  end
+
+  context "student tray" do
+
+    before(:each) do
+      @account = Account.default
+      @account.enable_feature!(:student_context_cards)
+      @student = User.create!
+      @student.avatar_image_url = "http://www.example.com"
+      @course.enroll_student(@student).accept!
+    end
+
+    it "should display student avatar in tray", priority: "1", test_id: 3299466 do
+      get("/courses/#{@course.id}/gradebook")
+      f("a[data-student_id='#{@student.id}']").click
+      expect(f(".StudentContextTray__Avatar a span")).to have_attribute('style', /http/)
+    end
   end
 end

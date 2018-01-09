@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -25,12 +25,12 @@ module Canvas::Plugins::Validators::TwitterValidator
         plugin_setting.errors.add(:base, I18n.t('canvas.plugins.errors.all_fields_required', 'All fields are required'))
         false
       else
-        res = Twitter.config_check(settings)
+        res = Twitter::Connection.config_check(api_key: settings[:consumer_key], secret_key: settings[:consumer_secret])
         if res
           plugin_setting.errors.add(:base, res)
           false
         else
-          settings.slice(:api_key, :secret_key)
+          settings.slice(:consumer_key, :consumer_secret).to_h.with_indifferent_access
         end
       end
     end

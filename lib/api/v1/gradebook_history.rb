@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 module Api::V1
   module GradebookHistory
     include Api
@@ -13,14 +30,12 @@ module Api::V1
           date_hash[:graders].each { |grader| compress(grader, :assignments) }
         end
 
-      day_hash.inject([]) do |memo, (date, hash)|
-        memo << hash.merge(:date => date)
-      end.sort_by { |a| a[:date] }.reverse
+      day_hash.map { |date, hash| hash.merge(:date => date) }.sort_by { |a| a[:date] }.reverse
     end
 
     def json_for_date(date, course, api_context)
       submissions_set(course, api_context, :date => date).
-        each_with_object(Hash.new) { |sub, memo| update_graders_hash(memo, sub, api_context) }.values.
+        each_with_object({}) { |sub, memo| update_graders_hash(memo, sub, api_context) }.values.
         each { |grader| compress(grader, :assignments) }
     end
 
@@ -32,7 +47,8 @@ module Api::V1
 
       model = version.model
       json = model.without_versioned_attachments do
-        submission_attempt_json(model, assignment, api_context.user, api_context.session, nil, course).with_indifferent_access
+        submission_attempt_json(model, assignment, api_context.user, api_context.session, course, params).
+          with_indifferent_access
       end
       grader = (json[:grader_id] && json[:grader_id] > 0 && user_cache[json[:grader_id]]) || default_grader
 
@@ -50,11 +66,13 @@ module Api::V1
     def versions_json(course, versions, api_context, opts={})
       # preload for efficiency
       unless opts[:submission]
-        ::Version.send(:preload_associations, versions, :versionable)
+        ActiveRecord::Associations::Preloader.new.preload(versions, :versionable)
         submissions = versions.map(&:versionable)
-        ::Submission.send(:preload_associations, submissions, :assignment) unless opts[:assignment]
-        ::Submission.send(:preload_associations, submissions, :user) unless opts[:student]
-        ::Submission.send(:preload_associations, submissions, :grader)
+        ActiveRecord::Associations::Preloader.new.preload(versions.map(&:model), :originality_reports)
+        ActiveRecord::Associations::Preloader.new.preload(submissions, :assignment) unless opts[:assignment]
+        ActiveRecord::Associations::Preloader.new.preload(submissions, :user) unless opts[:student]
+        ActiveRecord::Associations::Preloader.new.preload(submissions, :grader)
+        ::Submission.bulk_load_versioned_attachments(versions.map(&:model))
       end
 
       versions.map do |version|
@@ -73,7 +91,7 @@ module Api::V1
       # load all versions for the given submissions and back-populate their
       # versionable associations
       submission_index = submissions.index_by(&:id)
-      versions = Version.where(:versionable_type => 'Submission', :versionable_id => submissions).order('number DESC')
+      versions = Version.where(:versionable_type => 'Submission', :versionable_id => submissions).order(:number)
       versions.each{ |version| version.versionable = submission_index[version.versionable_id] }
 
       # convert them all to json and then group by submission
@@ -81,9 +99,9 @@ module Api::V1
       versions_hash = versions.group_by{ |version| version[:id] }
 
       # populate previous_* and new_* keys and convert hash to array of objects
-      versions_hash.inject([]) do |memo, (submission_id, versions)|
+      versions_hash.inject([]) do |memo, (submission_id, submission_versions)|
         prior = HashWithIndifferentAccess.new
-        filtered_versions = versions.sort_by{|v| v[:graded_at].to_i || 0 }.each_with_object([]) do |version, new_array|
+        filtered_versions = submission_versions.each_with_object([]) do |version, new_array|
           if version[:score]
             if prior[:id].nil? || prior[:score] != version[:score]
               if prior[:id].nil? || prior[:graded_at].nil? || version[:graded_at].nil?
@@ -119,7 +137,7 @@ module Api::V1
       end
 
       if assignment_id = options[:assignment_id]
-        collection = collection.scoped_by_assignment_id(assignment_id)
+        collection = collection.where(assignment_id: assignment_id)
       end
 
       if grader_id = options[:grader_id]
@@ -127,7 +145,7 @@ module Api::V1
           # yes, this is crazy.  autograded submissions have the grader_id of (quiz_id x -1)
           collection = collection.where("submissions.grader_id<=0")
         else
-          collection = collection.scoped_by_grader_id(grader_id)
+          collection = collection.where(grader_id: grader_id)
         end
       end
 

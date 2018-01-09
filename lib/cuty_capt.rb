@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -48,7 +48,7 @@ class CutyCapt
 
   def self.config
     return @@config if defined?(@@config) && @@config
-    setting = (Setting.from_config('cutycapt') || {}).symbolize_keys
+    setting = (ConfigFile.load('cutycapt') || {}).symbolize_keys
     @@config = CUTYCAPT_DEFAULTS.merge(setting).with_indifferent_access
     self.process_config
     @@config = nil unless @@config[:path]
@@ -84,6 +84,7 @@ class CutyCapt
     end
 
     addresses = Resolv.getaddresses(uri.host)
+    return false if addresses.blank?
     if config[:ip_blacklist] && addresses.any? {|address| config[:ip_blacklist].any? {|cidr| cidr.matches?(address) rescue false } }
       logger.warn("Skipping url because of blacklisted IP address: #{url}")
       return false
@@ -132,7 +133,7 @@ class CutyCapt
     end
 
     if !success
-      File.unlink(img_file) if File.exists?(img_file)
+      File.unlink(img_file) if File.exist?(img_file)
       return nil
     else
       logger.info("Capture took #{Time.now.to_i - start.to_i} seconds")
@@ -140,7 +141,7 @@ class CutyCapt
 
     if block_given?
       yield img_file
-      File.unlink(img_file) if File.exists?(img_file)
+      File.unlink(img_file) if File.exist?(img_file)
       return nil
     end
 

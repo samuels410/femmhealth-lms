@@ -1,30 +1,53 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
-  'underscore'
+  'i18n!groups'
+  'jquery'
   'compiled/views/groups/manage/GroupUsersView'
   'compiled/views/groups/manage/AssignToGroupMenu'
   'compiled/views/groups/manage/Scrollable'
-  'compiled/views/Filterable'
+  'compiled/views/groups/manage/GroupCategoryCloneView'
   'jst/groups/manage/groupUsers'
-], (_, GroupUsersView, AssignToGroupMenu, Scrollable, Filterable, template) ->
+  'compiled/util/groupHasSubmissions'
+], (I18n, $, GroupUsersView, AssignToGroupMenu, Scrollable, GroupCategoryCloneView, template, groupHasSubmissions) ->
 
   class UnassignedUsersView extends GroupUsersView
 
     @optionProperty 'groupsCollection'
     @optionProperty 'category'
 
-    defaults: _.extend {},
+    defaults: Object.assign {},
       GroupUsersView::defaults,
       autoFetch: true # load until below the viewport, don't wait for the user to scroll
       itemViewOptions:
         canAssignToGroup: true
         canEditGroupAssignment: false
 
-    els: _.extend {},
+    els: Object.assign {},
       GroupUsersView::els,
       '.no-results-wrapper': '$noResultsWrapper'
       '.no-results': '$noResults'
+      '.invalid-filter': '$invalidFilter'
 
-    @mixin Filterable, Scrollable
+    @mixin Scrollable
+
+    elementIndex: -1
+    fromAddButton: false
 
     dropOptions:
       accept: '.group-user'
@@ -34,20 +57,26 @@ define [
 
     attach: ->
       @collection.on 'reset', @render
+      @collection.on 'remove', @render
       @collection.on 'moved', @highlightUser
-      @collection.on 'filterOut', _(=> @checkScroll()).debounce(50)
+      @on 'renderedItems', @realAfterRender
 
       @collection.once 'fetch', => @$noResultsWrapper.hide()
       @collection.on 'fetched:last', => @$noResultsWrapper.show()
 
     afterRender: ->
-      @$filter = @$externalFilter
       super
       @collection.load('first')
-      @$el.parent().droppable(_.extend({}, @dropOptions))
+      @$el.parent().droppable(Object.assign({}, @dropOptions)).unbind('drop')
                    .on('drop', @_onDrop)
       @scrollContainer = @heightContainer = @$el
       @$scrollableElement = @$el.find("ul")
+
+    realAfterRender: =>
+      listElements = $("ul.collectionViewItems li.group-user", @$el)
+      if @elementIndex > -1 and listElements.length > 0
+        focusElement = $(listElements[@elementIndex] || listElements[listElements.length - 1])
+        focusElement.find("a.assign-to-group").focus()
 
     toJSON: ->
       loading: !@collection.loadedAll
@@ -59,21 +88,69 @@ define [
       super
 
     events:
-      'click .assign-to-group': 'showAssignToGroup'
+      'click .assign-to-group': 'focusAssignToGroup'
       'focus .assign-to-group': 'showAssignToGroup'
       'blur .assign-to-group':  'hideAssignToGroup'
       'scroll':                 'hideAssignToGroup'
 
-    showAssignToGroup: (e) ->
+    focusAssignToGroup: (e) ->
       e.preventDefault()
       e.stopPropagation()
       $target = $(e.currentTarget)
-      @assignToGroupMenu ?= new AssignToGroupMenu collection: @groupsCollection
-      @assignToGroupMenu.model = @collection.get($target.data('user-id'))
-      @assignToGroupMenu.showBy $target
+      @fromAddButton = true
+      assignToGroupMenu = @_getAssignToGroup()
+      assignToGroupMenu.model = @collection.getUser($target.data('user-id'))
+      assignToGroupMenu.showBy($target, true)
 
-    hideAssignToGroup: ->
-      @assignToGroupMenu?.hide()
+    showAssignToGroup: (e) ->
+      if @elementIndex == -1
+        e.preventDefault()
+        e.stopPropagation()
+      $target = $(e.currentTarget)
+
+      assignToGroupMenu = @_getAssignToGroup()
+      assignToGroupMenu.model = @collection.getUser($target.data('user-id'))
+      assignToGroupMenu.showBy($target)
+
+
+    _getAssignToGroup: ->
+      if(!@assignToGroupMenu)
+        @assignToGroupMenu = new AssignToGroupMenu collection: @groupsCollection
+        @assignToGroupMenu.on("open", (options) =>
+          @elementIndex = Array.prototype.indexOf.apply($("ul.collectionViewItems li.group-user", @$el), $(options.target).parent("li"))
+        )
+        @assignToGroupMenu.on("close", (options) =>
+          studentElements = $("li.group-user a.assign-to-group", @$el)
+          if @elementIndex != -1
+            if studentElements.length == 0
+              $('.filterable-unassigned-users').focus()
+            else if options.escapePressed
+              $(studentElements[@elementIndex] || studentElements[studentElements.length - 1]).focus()
+            else if options.userMoved
+              if @elementIndex == 0
+                $('.filterable-unassigned-users').focus()
+              else
+                $(studentElements[@elementIndex - 1] || studentElements[studentElements.length - 1]).focus()
+            @elementIndex = -1
+        )
+      return @assignToGroupMenu
+
+    hideAssignToGroup: (e) ->
+      if !@fromAddButton
+        @assignToGroupMenu?.hide()
+        setTimeout => # Element with next focus will not get focus until _after_ 'focusout' and 'blur' have been called.
+          @elementIndex = -1 if !@$el.find("a.assign-to-group").is(":focus")
+        , 100
+      @fromAddButton = false
+
+    setFilter: (search_term, options) ->
+      searchDefer = @collection.search(search_term, options)
+      searchDefer.always(=>
+        if search_term.length < 3
+          shouldShow = search_term.length > 0
+          @$invalidFilter.toggleClass("hidden", !shouldShow)
+          @$noResultsWrapper.toggle(shouldShow)
+      ) if searchDefer
 
     canAssignToGroup: ->
       @options.canAssignToGroup and @groupsCollection.length
@@ -83,5 +160,25 @@ define [
     # ui.draggable: the user being dragged
     _onDrop: (e, ui) =>
       user = ui.draggable.data('model')
+
+      if user.has('group') and groupHasSubmissions user.get('group')
+        @cloneCategoryView = new GroupCategoryCloneView
+          model: @collection.category
+          openedFromCaution: true
+        @cloneCategoryView.open()
+        @cloneCategoryView.on "close", =>
+            if @cloneCategoryView.cloneSuccess
+              window.location.reload()
+            else if @cloneCategoryView.changeGroups
+              @moveUser(user)
+      else
+        @moveUser(user)
+
+    moveUser: (user) ->
       setTimeout =>
         @category.reassignUser(user, null)
+
+    _initDrag: (view) ->
+      super
+      view.$el.on 'dragstart', (event, ui) =>
+        @elementIndex = -1

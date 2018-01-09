@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -30,6 +30,7 @@ module Api::V1::PageView
   def page_view_json(page_view, current_user, session)
     json_hash = api_json(page_view, current_user, session, API_PAGE_VIEW_JSON_OPTS)
     json_hash[:id] = json_hash.delete(:request_id)
+    json_hash[:contributed] = false # for backwards compatibility
     json_hash[:links] = {
       :user => json_hash.delete(:user_id),
       :context => json_hash.delete(:context_id),
@@ -37,6 +38,7 @@ module Api::V1::PageView
       :real_user => json_hash.delete(:real_user_id),
       :account => json_hash.delete(:account_id),
     }
+    json_hash[:app_name] = page_view.app_name
     json_hash
   end
 end

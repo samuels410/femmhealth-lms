@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,8 +19,7 @@
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 
 describe AssignmentGroup do
-
-  before(:each) do
+  before(:once) do
     @valid_attributes = {
       :name => "value for name",
       :rules => "value for rules",
@@ -28,33 +27,86 @@ describe AssignmentGroup do
       :assignment_weighting_scheme => "value for assignment weighting scheme",
       :group_weight => 1.0
     }
+    course_with_student(active_all: true)
+    @course.update_attribute(:group_weighting_scheme, 'percent')
   end
 
   it "should act as list" do
-    AssignmentGroup.should be_respond_to(:acts_as_list)
+    expect(AssignmentGroup).to be_respond_to(:acts_as_list)
+  end
+
+  it "should convert NaN group weight values to 0 on save" do
+    ag = @course.assignment_groups.create!(@valid_attributes)
+    ag.group_weight = 0/0.0
+    ag.save!
+    expect(ag.group_weight).to eq 0
+  end
+
+  it "allows association with scores" do
+    ag = @course.assignment_groups.create!(@valid_attributes)
+    enrollment = @course.student_enrollments.first
+    score = ag.scores.first
+    expect(score.assignment_group_id).to be ag.id
+  end
+
+  context "visible assignments" do
+    before(:each) do
+      @ag = @course.assignment_groups.create!(@valid_attributes)
+      @s = @course.course_sections.create!(name: "test section")
+      student_in_section(@s, user: @student)
+      assignments = (0...4).map { @course.assignments.create!({:title => "test_foo",
+                                  :assignment_group => @ag,
+                                  :points_possible => 10,
+                                  :only_visible_to_overrides => true})}
+      assignments.first.destroy
+      assignments.second.grade_student(@student, grade: 10, grader: @teacher)
+      assignment_to_override = assignments.last
+      create_section_override_for_assignment(assignment_to_override, course_section: @s)
+      @course.reload
+      @ag.reload
+    end
+
+    context "with differentiated assignments and draft state on" do
+      it "should return only active assignments with overrides or grades for the user" do
+        expect(@ag.active_assignments.count).to eq 3
+        # one with override, one with grade
+        expect(@ag.visible_assignments(@student).count).to eq 2
+        expect(AssignmentGroup.visible_assignments(@student, @course, [@ag]).count).to eq 2
+      end
+    end
+
+    context "logged out users" do
+      it "should return published assignments for logged out users so that invited users can see them before accepting a course invite" do
+        @course.active_assignments.first.unpublish
+        expect(@ag.visible_assignments(nil).count).to eq 2
+        expect(AssignmentGroup.visible_assignments(nil, @course, [@ag]).count).to eq 2
+      end
+    end
   end
 
   context "broadcast policy" do
     context "grade weight changed" do
-      # it "should have a 'Grade Weight Changed' policy" do
-        # assignment_group_model
-        # @ag.broadcast_policy_list.map {|bp| bp.dispatch}.should be_include('Grade Weight Changed')
-      # end
+      before(:once) do
+        Notification.create!(name: 'Grade Weight Changed', category: 'TestImmediately')
+        assignment_group_model
+      end
 
-      # it "should create a message when the grade weight changes on an assignment group" do
-        # Notification.create!(:name => 'Grade Weight Changed')
-        # assignment_group_model
-        # @ag.group_weight = 0.2
-        # @ag.save!
-        # @ag.context.messages_sent.should be_include('Grade Weight Changed')
-      # end
+      it "sends a notification when the grade weight changes" do
+        @ag.update_attribute(:group_weight, 0.2)
+        expect(@ag.context.messages_sent['Grade Weight Changed'].any?{|m| m.user_id == @student.id}).to be_truthy
+      end
 
+      it "sends a notification to observers when the grade weight changes" do
+        course_with_observer(course: @course, associated_user_id: @student.id, active_all: true)
+        @ag.reload.update_attribute(:group_weight, 0.2)
+        expect(@ag.context.messages_sent['Grade Weight Changed'].any?{|m| m.user_id == @observer.id}).to be_truthy
+      end
     end
   end
 
   it "should have a state machine" do
     assignment_group_model
-    @ag.state.should eql(:available)
+    expect(@ag.state).to eql(:available)
   end
 
   it "should return never_drop list as ints" do
@@ -65,7 +117,7 @@ describe AssignmentGroup do
     end
     assignment_group_model :rules => rules
     result = @ag.rules_hash()
-    result['never_drop'].should eql(expected)
+    expect(result['never_drop']).to eql(expected)
   end
 
   it "should return never_drop list as strings if `stringify_json_ids` is true" do
@@ -77,27 +129,326 @@ describe AssignmentGroup do
 
     assignment_group_model :rules => rules
     result = @ag.rules_hash({stringify_json_ids: true})
-    result['never_drop'].should eql(expected)
+    expect(result['never_drop']).to eql(expected)
   end
 
   it "should return rules that aren't never_drops as ints" do
     rules = "drop_highest:25\n"
     assignment_group_model :rules => rules
     result = @ag.rules_hash()
-    result['drop_highest'].should eql(25)
+    expect(result['drop_highest']).to eql(25)
   end
 
   it "should return rules that aren't never_drops as ints when `strigify_json_ids` is true" do
     rules = "drop_lowest:2\n"
     assignment_group_model :rules => rules
     result = @ag.rules_hash({stringify_json_ids: true})
-    result['drop_lowest'].should eql(2)
+    expect(result['drop_lowest']).to eql(2)
+  end
+
+  describe "#grants_right?" do
+    before(:once) do
+      @assignment_group = @course.assignment_groups.create!(@valid_attributes)
+      assignments = (0..1).map do |n|
+        @course.assignments.create!(
+          title: "Example Assignment #{n}",
+          assignment_group: @assignment_group,
+          points_possible: 10
+        )
+      end
+      @assignment = assignments.first
+
+      @quiz = quiz_model(course: @course)
+      @quiz.assignment_group_id = @assignment_group.id
+      @quiz.save!
+
+      @admin = account_admin_user()
+      teacher_in_course(:course => @course)
+      @grading_period_group = @course.root_account.grading_period_groups.create!(title: "Example Group")
+      @grading_period_group.enrollment_terms << @course.enrollment_term
+      @course.enrollment_term.save!
+      @assignment_group.reload
+
+      @grading_period_group.grading_periods.create!({
+        title: "Example Grading Period",
+        start_date: 5.weeks.ago,
+        end_date: 3.weeks.ago,
+        close_date: 1.week.ago
+      })
+      @grading_period_group.grading_periods.create!({
+        title: "Example Grading Period",
+        start_date: 3.weeks.ago,
+        end_date: 1.week.ago,
+        close_date: 1.week.from_now
+      })
+    end
+
+    context "to delete" do
+      context "without grading periods" do
+        it "is true for admins" do
+          allow(@course).to receive(:grading_periods?).and_return false
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to be true
+        end
+
+        it "is false for teachers" do
+          allow(@course).to receive(:grading_periods?).and_return false
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to be true
+        end
+      end
+
+      context "when the assignment is due in a closed grading period" do
+        before(:once) do
+          @assignment.update_attributes(due_at: 4.weeks.ago)
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is false for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(false)
+        end
+      end
+
+      context "when the assignment is due in an open grading period" do
+        before(:once) do
+          @assignment.update_attributes(due_at: 2.weeks.ago)
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is true for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(true)
+        end
+      end
+
+      context "when the assignment is due after all grading periods" do
+        before(:once) do
+          @assignment.update_attributes(due_at: 1.day.from_now)
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is true for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(true)
+        end
+      end
+
+      context "when the assignment is due before all grading periods" do
+        before(:once) do
+          @assignment.update_attributes(due_at: 6.weeks.ago)
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is true for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(true)
+        end
+      end
+
+      context "when the assignment has no due date" do
+        before(:once) do
+          @assignment.update_attributes(due_at: nil)
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is true for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(true)
+        end
+      end
+
+      context "when the assignment is due in a closed grading period for a student" do
+        before(:once) do
+          @assignment.update_attributes(due_at: 2.days.from_now)
+          override = @assignment.assignment_overrides.build
+          override.set = @course.default_section
+          override.override_due_at(4.weeks.ago)
+          override.save!
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is false for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(false)
+        end
+      end
+
+      context "when the assignment is overridden with no due date for a student" do
+        before(:once) do
+          @assignment.update_attributes(due_at: nil)
+          override = @assignment.assignment_overrides.build
+          override.set = @course.default_section
+          override.save!
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is true for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(true)
+        end
+      end
+
+      context "when the assignment is deleted and due in a closed grading period" do
+        before(:once) do
+          @assignment.update_attributes(due_at: 4.weeks.ago)
+          @assignment.destroy
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is true for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(true)
+        end
+      end
+
+      context "when the quiz is due in a closed grading period" do
+        before(:once) do
+          @quiz.update_attributes(due_at: 4.weeks.ago)
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is false for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(false)
+        end
+      end
+
+      context "when the quiz is due in an open grading period" do
+        before(:once) do
+          @quiz.update_attributes(due_at: 2.weeks.ago)
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is true for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(true)
+        end
+      end
+
+      context "when the quiz is due after all grading periods" do
+        before(:once) do
+          @quiz.update_attributes(due_at: 1.day.from_now)
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is true for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(true)
+        end
+      end
+
+      context "when the quiz is due before all grading periods" do
+        before(:once) do
+          @quiz.update_attributes(due_at: 6.weeks.ago)
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is true for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(true)
+        end
+      end
+
+      context "when the quiz has no due date" do
+        before(:once) do
+          @quiz.update_attributes(due_at: nil)
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is true for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(true)
+        end
+      end
+
+      context "when the quiz is due in a closed grading period for a student" do
+        before(:once) do
+          @quiz.update_attributes(due_at: 2.days.from_now)
+          override = @quiz.assignment_overrides.build
+          override.set = @course.default_section
+          override.override_due_at(4.weeks.ago)
+          override.save!
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is false for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(false)
+        end
+      end
+
+      context "when the quiz is overridden with no due date for a student" do
+        before(:once) do
+          @quiz.update_attributes(due_at: nil)
+          override = @quiz.assignment_overrides.build
+          override.set = @course.default_section
+          override.save!
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is true for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(true)
+        end
+      end
+
+      context "when the quiz is deleted and due in a closed grading period" do
+        before(:once) do
+          @quiz.update_attributes(due_at: 4.weeks.ago)
+          @quiz.destroy
+        end
+
+        it "is true for admins" do
+          expect(@assignment_group.reload.grants_right?(@admin, :delete)).to eql(true)
+        end
+
+        it "is true for teachers" do
+          expect(@assignment_group.reload.grants_right?(@teacher, :delete)).to eql(true)
+        end
+      end
+    end
+  end
+
+  describe '#any_assignment_in_closed_grading_period?' do
+    it 'calls EffectiveDueDates#in_closed_grading_period?' do
+      assignment_group_model
+      edd = EffectiveDueDates.for_course(@ag.context, @ag.published_assignments)
+      expect(EffectiveDueDates).to receive(:for_course).with(@ag.context, @ag.published_assignments).and_return(edd)
+      expect(edd).to receive(:any_in_closed_grading_period?).and_return(true)
+      expect(@ag.any_assignment_in_closed_grading_period?).to eq(true)
+    end
   end
 end
 
 def assignment_group_model(opts={})
-  @u = factory_with_protected_attributes(User, :name => "some user", :workflow_state => "registered")
-  @c = factory_with_protected_attributes(Course, :name => "some course", :workflow_state => "available")
-  @c.enroll_student(@u)
-  @ag = @c.assignment_groups.create!(@valid_attributes.merge(opts))
+  @ag = @course.assignment_groups.create!(@valid_attributes.merge(opts))
 end

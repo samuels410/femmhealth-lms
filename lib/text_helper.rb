@@ -1,101 +1,53 @@
 # encoding: UTF-8
 #
-# By Henrik Nyh <http://henrik.nyh.se> 2008-01-30.
-# Free to modify and redistribute with credit.
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 
-# modified by Dave Nolan <http://textgoeshere.org.uk> 2008-02-06
-# Ellipsis appended to text of last HTML node
-# Ellipsis inserted after final word break
-
-# modified by Mark Dickson <mark@sitesteaders.com> 2008-12-18
-# Option to truncate to last full word
-# Option to include a 'more' link
-# Check for nil last child
-
-# Copied from http://pastie.textmate.org/342485,
-# based on http://henrik.nyh.se/2008/01/rails-truncate-html-helper
+require 'nokogiri'
+require 'rdiscount'
 
 module TextHelper
-  def strip_and_truncate(text, options={})
-    truncate_text(HtmlTextHelper.strip_tags(text), options)
-  end
-  module_function :strip_and_truncate
-
-  def truncate_text(text, options={})
-    truncated = text || ""
-
-    # truncate words
-    if options[:max_words]
-      word_separator = options[:word_separator] || I18n.t('lib.text_helper.word_separator', ' ')
-      truncated = truncated.split(word_separator)[0,options[:max_words]].join(word_separator)
-    end
-
-    max_length = options[:max_length] || 30
-    return truncated if truncated.length <= max_length
-
-    ellipsis = options[:ellipsis] || I18n.t('lib.text_helper.ellipsis', '...')
-    actual_length = max_length - ellipsis.length
-
-    # First truncate the text down to the bytes max, then lop off any invalid
-    # unicode characters at the end.
-    truncated = truncated[0,actual_length][/.{0,#{actual_length}}/mu]
-    truncated + ellipsis
-  end
-
-  def indent(text, spaces=2)
-    text = text.to_s rescue ""
-    indentation = " " * spaces
-    text.gsub(/\n/, "\n#{indentation}")
-  end
-
   def force_zone(time)
     (time.in_time_zone(@time_zone || Time.zone) rescue nil) || time
   end
 
   def self.date_string(start_date, *args)
     return nil unless start_date
-    start_date = start_date.in_time_zone.to_date rescue start_date.to_date
+    start_date = start_date.in_time_zone.beginning_of_day
     style = args.last.is_a?(Symbol) ? args.pop : :normal
     end_date = args.pop
-    end_date = end_date.in_time_zone.to_date rescue end_date.to_date if end_date
+    end_date = end_date.in_time_zone.beginning_of_day if end_date
+    start_date_display = Utils::DatePresenter.new(start_date).as_string(style)
     if end_date.nil? || start_date == end_date
-      date_component(start_date, style)
+      start_date_display
     else
       I18n.t('time.ranges.different_days', "%{start_date_and_time} to %{end_date_and_time}",
-        :start_date_and_time => date_component(start_date, style),
-        :end_date_and_time => date_component(end_date, style)
+        :start_date_and_time => start_date_display,
+        :end_date_and_time => Utils::DatePresenter.new(end_date).as_string(style)
       )
     end
-  end
-
-def self.date_component(start_date, style=:normal)
-    today = Time.zone.today
-    if style != :long
-      if style != :no_words
-        string = nil
-        return string if start_date == today && (string = I18n.t('date.days.today', 'Today')) && string.strip.present?
-        return string if start_date == today + 1 && (string = I18n.t('date.days.tomorrow', 'Tomorrow')) && string.strip.present?
-        return string if start_date == today - 1 && (string = I18n.t('date.days.yesterday', 'Yesterday')) && string.strip.present?
-        return string if start_date < today + 1.week && start_date >= today && (string = I18n.l(start_date, :format => :weekday) rescue nil) && string.strip.present?
-      end
-      return I18n.l(start_date, :format => :short) if start_date.year == today.year || style == :short
-    end
-    return I18n.l(start_date, :format => :medium)
   end
 
   def date_string(*args)
     TextHelper.date_string(*args)
   end
 
-  def time_string(start_time, end_time=nil)
-    start_time = start_time.in_time_zone rescue start_time
-    end_time = end_time.in_time_zone rescue end_time
-    return nil unless start_time
-    result = I18n.l(start_time, :format => start_time.min == 0 ? :tiny_on_the_hour : :tiny)
-    if end_time && end_time != start_time
-      result = I18n.t('time.ranges.times', "%{start_time} to %{end_time}", :start_time => result, :end_time => time_string(end_time))
-    end
-    result
+  def time_string(start_time, end_time=nil, zone=nil)
+    presenter = Utils::TimePresenter.new(start_time, zone)
+    presenter.as_string(display_as_range: end_time)
   end
 
   def datetime_span(*args)
@@ -107,42 +59,10 @@ def self.date_component(start_date, style=:normal)
     end
   end
 
-  def datetime_string(start_datetime, datetime_type=:event, end_datetime=nil, shorten_midnight=false)
-    start_datetime = start_datetime.in_time_zone rescue start_datetime
-    return nil unless start_datetime
-    end_datetime = end_datetime.in_time_zone rescue end_datetime
-    if !datetime_type.is_a?(Symbol)
-      datetime_type = :event
-      end_datetime = nil
-    end
-    end_datetime = nil if datetime_type == :due_date
-
-    def datetime_component(date_string, time, type)
-      if type == :due_date
-        I18n.t('time.due_date', "%{date} by %{time}", :date => date_string, :time => time_string(time))
-      else
-        I18n.t('time.event', "%{date} at %{time}", :date => date_string, :time => time_string(time))
-      end
-    end
-
-    start_date_string = date_string(start_datetime, datetime_type == :verbose ? :long : :no_words)
-    start_string = datetime_component(start_date_string, start_datetime, datetime_type)
-
-    if !end_datetime || end_datetime == start_datetime
-      if shorten_midnight && ((datetime_type == :due_date  && start_datetime.hour == 23 && start_datetime.min == 59) || (datetime_type == :event && start_datetime.hour == 0 && start_datetime.min == 0))
-        start_date_string
-      else
-        start_string
-      end
-    else
-      if start_datetime.to_date == end_datetime.to_date
-        I18n.t('time.ranges.same_day', "%{date} from %{start_time} to %{end_time}", :date => start_date_string, :start_time => time_string(start_datetime), :end_time => time_string(end_datetime))
-      else
-        end_date_string = date_string(end_datetime, datetime_type == :verbose ? :long : :no_words)
-        end_string = datetime_component(end_date_string, end_datetime, datetime_type)
-        I18n.t('time.ranges.different_days', "%{start_date_and_time} to %{end_date_and_time}", :start_date_and_time => start_string, :end_date_and_time => end_string)
-      end
-    end
+  def datetime_string(start_datetime, datetime_type=:event, end_datetime=nil, shorten_midnight=false, zone=nil)
+    zone ||= ::Time.zone
+    presenter = Utils::DatetimeRangePresenter.new(start_datetime, end_datetime, datetime_type, zone)
+    presenter.as_string(shorten_midnight: shorten_midnight)
   end
 
   def time_ago_in_words_with_ago(time)
@@ -170,6 +90,20 @@ def self.date_component(start_date, style=:normal)
     end
   end
 
+  # By Henrik Nyh <http://henrik.nyh.se> 2008-01-30.
+  # Free to modify and redistribute with credit.
+
+  # modified by Dave Nolan <http://textgoeshere.org.uk> 2008-02-06
+  # Ellipsis appended to text of last HTML node
+  # Ellipsis inserted after final word break
+
+  # modified by Mark Dickson <mark@sitesteaders.com> 2008-12-18
+  # Option to truncate to last full word
+  # Option to include a 'more' link
+  # Check for nil last child
+
+  # Copied from http://pastie.textmate.org/342485,
+  # based on http://henrik.nyh.se/2008/01/rails-truncate-html-helper
   def truncate_html(input, options={})
     doc = Nokogiri::HTML(input)
     options[:max_length] ||= 250
@@ -311,38 +245,15 @@ def self.date_component(start_date, style=:normal)
     result.strip.html_safe
   end
 
-  # This doesn't make any attempt to convert other encodings to utf-8, it just
-  # removes invalid bytes from otherwise valid utf-8 strings.
-  # Basically, this is a last ditch effort, you probably don't want to use it
-  # as part of normal request processing.
-  # It's used for things like filtering out ErrorReport data so that we can
-  # make sure we won't get an invalid utf-8 error trying to save the error
-  # report to the db.
-  def self.strip_invalid_utf8(string)
-    return string if string.nil?
-    # add four spaces to the end of the string, because iconv with the //IGNORE
-    # option will still fail on incomplete byte sequences at the end of the input
-    # we force_encoding on the returned string because Iconv.conv returns binary.
-    string = Iconv.conv('UTF-8//IGNORE', 'UTF-8', string + '    ')[0...-4]
-    if string.respond_to?(:force_encoding)
-      string.force_encoding(Encoding::UTF_8)
-    end
-    string
+  def round_if_whole(value)
+    TextHelper.round_if_whole(value)
   end
 
-  def self.recursively_strip_invalid_utf8!(object, force_utf8 = false)
-    case object
-    when Hash
-      object.each_value { |o| self.recursively_strip_invalid_utf8!(o, force_utf8) }
-    when Array
-      object.each { |o| self.recursively_strip_invalid_utf8!(o, force_utf8) }
-    when String
-      if object.encoding == Encoding::ASCII_8BIT && force_utf8
-        object.force_encoding(Encoding::UTF_8)
-      end
-      if !object.valid_encoding?
-        object.replace(self.strip_invalid_utf8(object))
-      end
+  def self.round_if_whole(value)
+    if value.is_a?(Float) && (i = value.to_i) == value
+      i
+    else
+      value
     end
   end
 end

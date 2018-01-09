@@ -15,7 +15,6 @@
 # You should have received a copy of the GNU Affero General Public License along
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
-
 def init
   get_routes
   sections :header, [:method_signature, T('docstring')]
@@ -23,7 +22,7 @@ end
 
 def header
   get_routes
-  @subtopic = (object.parent.tag('subtopic') || object.parent.tag('API')).text
+  @subtopic = (object.tag('subtopic') || object.parent.tag('subtopic') || object.parent.tag('API')).text
   route = @routes.first
   @method_link = "method.#{route.requirements[:controller]}.#{route.requirements[:action]}"
   @beta = object.tag('beta') || object.parent.tag('beta')
@@ -34,7 +33,7 @@ def get_routes
   @controller = object.parent.path.underscore.sub("_controller", '')
   @action = object.path.sub(/^.*#/, '')
   @action = @action.sub(/_with_.*$/, '')
-  @routes = ApiRouteSet::V1.api_methods_for_controller_and_action(@controller, @action)
+  @routes = ApiRouteSet.api_methods_for_controller_and_action(@controller, @action)
   @route = @routes.first
   @controller_path = "app/controllers/#{@route.requirements[:controller]}_controller.rb"
   @controller_path = nil unless File.file?(Rails.root+@controller_path)

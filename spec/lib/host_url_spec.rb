@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,25 +21,25 @@ require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 describe 'HostUrl' do
   describe "protocol" do
     it "should return https if domain config says ssl" do
-      Setting.expects(:from_config).with("domain").returns({})
-      Attachment.stubs(:file_store_config).returns({})
-      HostUrl.protocol.should == 'http'
+      expect(ConfigFile).to receive(:load).with("domain").and_return({})
+      allow(Attachment).to receive(:file_store_config).and_return({})
+      expect(HostUrl.protocol).to eq 'http'
       HostUrl.reset_cache!
-      Setting.expects(:from_config).with("domain").returns('ssl' => true)
-      HostUrl.protocol.should == 'https'
+      expect(ConfigFile).to receive(:load).with("domain").and_return('ssl' => true)
+      expect(HostUrl.protocol).to eq 'https'
     end
 
     it "should return https if file store config says secure" do
-      Setting.stubs(:from_config).with("domain").returns({})
-      Attachment.stubs(:file_store_config).returns('secure' => true)
-      HostUrl.protocol.should == 'https'
+      allow(ConfigFile).to receive(:load).with("domain").and_return({})
+      allow(Attachment).to receive(:file_store_config).and_return('secure' => true)
+      expect(HostUrl.protocol).to eq 'https'
     end
 
     it "should return https for production" do
-      HostUrl.protocol.should == 'http'
+      expect(HostUrl.protocol).to eq 'http'
       HostUrl.reset_cache!
-      Rails.env.expects(:production?).returns(true)
-      HostUrl.protocol.should == 'https'
+      expect(Rails.env).to receive(:production?).and_return(true)
+      expect(HostUrl.protocol).to eq 'https'
     end
   end
 end

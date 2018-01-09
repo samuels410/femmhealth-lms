@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,7 +20,7 @@ require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 
 describe DataFixup::UndeleteSomeOutcomeAlignments do
   before do
-    course_with_teacher_logged_in(:active_all => true)
+    course_with_teacher(:active_all => true)
     outcome_with_rubric
     @rubric_association_object = @course.assignments.create!(:title => 'blah')
     @rubric_association = @rubric.rubric_associations.create!({
@@ -38,21 +38,21 @@ describe DataFixup::UndeleteSomeOutcomeAlignments do
     Rubric.where(:id => @rubric.id).update_all(:data => data.to_yaml)
 
     ContentTag.where(:id => [align, align2]).update_all(:workflow_state => 'deleted')
-    align.reload.should be_deleted
-    align2.reload.should be_deleted
+    expect(align.reload).to be_deleted
+    expect(align2.reload).to be_deleted
 
     DataFixup::UndeleteSomeOutcomeAlignments.run
-    align.reload.should_not be_deleted
-    align2.reload.should_not be_deleted
+    expect(align.reload).not_to be_deleted
+    expect(align2.reload).not_to be_deleted
   end
 
   it "should not undelete assignments tags that aren't linked to rubrics already undeleted" do
     align = @rubric_association_object.learning_outcome_alignments.first
 
     ContentTag.where(:id => align).update_all(:workflow_state => 'deleted')
-    align.reload.should be_deleted
+    expect(align.reload).to be_deleted
 
     DataFixup::UndeleteSomeOutcomeAlignments.run
-    align.reload.should be_deleted
+    expect(align.reload).to be_deleted
   end
 end

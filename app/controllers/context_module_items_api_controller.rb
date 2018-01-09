@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,137 +19,204 @@
 # @API Modules
 # @subtopic Module Items
 #
-# @object ModuleItem
+# @model CompletionRequirement
 #     {
-#       // the unique identifier for the module item
-#       "id": 768,
-#
-#       // the id of the Module this item appears in
-#       "module_id": 123,
-#
-#       // the position of this item in the module (1-based)
-#       "position": 1,
-#
-#       // the title of this item
-#       "title": "Square Roots: Irrational numbers or boxy vegetables?",
-#
-#       // 0-based indent level; module items may be indented to show a hierarchy
-#       "indent": 0,
-#
-#       // the type of object referred to
-#       // one of "File", "Page", "Discussion", "Assignment", "Quiz", "SubHeader",
-#       // "ExternalUrl", "ExternalTool"
-#       "type": "Assignment",
-#
-#       // the id of the object referred to
-#       // applies to "File", "Discussion", "Assignment", "Quiz", "ExternalTool" types
-#       "content_id": 1337,
-#
-#       // link to the item in Canvas
-#       "html_url": "https://canvas.example.edu/courses/222/modules/items/768",
-#
-#       // (Optional) link to the Canvas API object, if applicable
-#       "url": "https://canvas.example.edu/api/v1/courses/222/assignments/987",
-#
-#       // (only for 'Page' type) unique locator for the linked wiki page
-#       "page_url": "my-page-title",
-#
-#       // (only for 'ExternalUrl' and 'ExternalTool' types) external url that the item points to
-#       "external_url": "https://www.example.com/externalurl",
-#
-#       // (only for 'ExternalTool' type) whether the external tool opens in a new tab
-#       "new_tab": false,
-#
-#       // Completion requirement for this module item
-#       "completion_requirement": {
-#         // one of "must_view", "must_submit", "must_contribute", "min_score"
-#         "type": "min_score",
-#
-#         // minimum score required to complete (only present when type == 'min_score')
-#         "min_score": 10,
-#
-#         // whether the calling user has met this requirement
-#         // (Optional; present only if the caller is a student
-#         // or if the optional parameter 'student_id' is included)
-#         "completed": true
-#       },
-#
-#       // (Present only if requested through include[]=content_details)
-#       // If applicable, returns additional details specific to the associated object
-#       "content_details": {
-#         "points_possible": 20,
-#         "due_at": "2012-12-31T06:00:00-06:00",
-#         "unlock_at": "2012-12-31T06:00:00-06:00",
-#         "lock_at": "2012-12-31T06:00:00-06:00"
+#       "id": "CompletionRequirement",
+#       "description": "",
+#       "properties": {
+#         "type": {
+#           "description": "one of 'must_view', 'must_submit', 'must_contribute', 'min_score'",
+#           "example": "min_score",
+#           "type": "string",
+#           "allowableValues": {
+#             "values": [
+#               "must_view",
+#               "must_submit",
+#               "must_contribute",
+#               "min_score"
+#             ]
+#           }
+#         },
+#         "min_score": {
+#           "description": "minimum score required to complete (only present when type == 'min_score')",
+#           "example": 10,
+#           "type": "integer"
+#         },
+#         "completed": {
+#           "description": "whether the calling user has met this requirement (Optional; present only if the caller is a student or if the optional parameter 'student_id' is included)",
+#           "example": true,
+#           "type": "boolean"
+#         }
 #       }
 #     }
 #
-#
-# @object ModuleItemSequence
+# @model ContentDetails
 #     {
-#       // an array containing one hash for each appearence of the asset in the module sequence
-#       // (up to 10 total)
-#       "items": [
-#         {
-#           // the ModuleItem for the previous asset in the sequence, if present
-#           // this is the previous asset in the module, or the last asset in the previous module,
-#           // or null if this is the first module item in the course sequence
-#           "prev": null,
-#
-#           // the ModuleItem for the requested asset
-#           "current": {
-#             "id": 768,
-#             "module_id": 123,
-#             "title": "A lonely page",
-#             "type": "Page"
-#             // ...
-#           },
-#
-#           // the ModuleItem for the next asset in the sequence, if present
-#           // this is the next asset in the module, or the first asset in the next module,
-#           // or null if this is the last module item in the course sequence
-#           "next": {
-#             "id": 769,
-#             "module_id": 127,
-#             "title": "Project 1",
-#             "type": "Assignment"
-#             // ...
-#           }
-#         }
-#       ],
-#
-#       // an array containing each Module referenced above
-#       "modules": [
-#         {
-#           "id": 123,
-#           "name": "Module A"
-#           // ...
+#       "id": "ContentDetails",
+#       "description": "",
+#       "properties": {
+#         "points_possible": {
+#           "example": 20,
+#           "type": "integer"
 #         },
-#         {
-#           "id": 127,
-#           "name": "Module B"
-#           // ...
+#         "due_at": {
+#           "example": "2012-12-31T06:00:00-06:00",
+#           "type": "datetime"
+#         },
+#         "unlock_at": {
+#           "example": "2012-12-31T06:00:00-06:00",
+#           "type": "datetime"
+#         },
+#         "lock_at": {
+#           "example": "2012-12-31T06:00:00-06:00",
+#           "type": "datetime"
+#         },
+#         "locked_for_user": {
+#           "example": true,
+#           "type": "boolean"
+#         },
+#         "lock_explanation": {
+#           "example": "This quiz is part of an unpublished module and is not available yet.",
+#           "type": "string"
+#         },
+#         "lock_info": {
+#           "example": {"asset_string": "assignment_4", "unlock_at": "2012-12-31T06:00:00-06:00", "lock_at": "2012-12-31T06:00:00-06:00", "context_module": {}},
+#           "$ref": "LockInfo"
 #         }
-#       ]
+#       }
 #     }
+#
+# @model ModuleItem
+#     {
+#       "id": "ModuleItem",
+#       "description": "",
+#       "properties": {
+#         "id": {
+#           "description": "the unique identifier for the module item",
+#           "example": 768,
+#           "type": "integer"
+#         },
+#         "module_id": {
+#           "description": "the id of the Module this item appears in",
+#           "example": 123,
+#           "type": "integer"
+#         },
+#         "position": {
+#           "description": "the position of this item in the module (1-based)",
+#           "example": 1,
+#           "type": "integer"
+#         },
+#         "title": {
+#           "description": "the title of this item",
+#           "example": "Square Roots: Irrational numbers or boxy vegetables?",
+#           "type": "string"
+#         },
+#         "indent": {
+#           "description": "0-based indent level; module items may be indented to show a hierarchy",
+#           "example": 0,
+#           "type": "integer"
+#         },
+#         "type": {
+#           "description": "the type of object referred to one of 'File', 'Page', 'Discussion', 'Assignment', 'Quiz', 'SubHeader', 'ExternalUrl', 'ExternalTool'",
+#           "example": "Assignment",
+#           "type": "string",
+#           "allowableValues": {
+#             "values": [
+#               "File",
+#               "Page",
+#               "Discussion",
+#               "Assignment",
+#               "Quiz",
+#               "SubHeader",
+#               "ExternalUrl",
+#               "ExternalTool"
+#             ]
+#           }
+#         },
+#         "content_id": {
+#           "description": "the id of the object referred to applies to 'File', 'Discussion', 'Assignment', 'Quiz', 'ExternalTool' types",
+#           "example": 1337,
+#           "type": "integer"
+#         },
+#         "html_url": {
+#           "description": "link to the item in Canvas",
+#           "example": "https://canvas.example.edu/courses/222/modules/items/768",
+#           "type": "string"
+#         },
+#         "url": {
+#           "description": "(Optional) link to the Canvas API object, if applicable",
+#           "example": "https://canvas.example.edu/api/v1/courses/222/assignments/987",
+#           "type": "string"
+#         },
+#         "page_url": {
+#           "description": "(only for 'Page' type) unique locator for the linked wiki page",
+#           "example": "my-page-title",
+#           "type": "string"
+#         },
+#         "external_url": {
+#           "description": "(only for 'ExternalUrl' and 'ExternalTool' types) external url that the item points to",
+#           "example": "https://www.example.com/externalurl",
+#           "type": "string"
+#         },
+#         "new_tab": {
+#           "description": "(only for 'ExternalTool' type) whether the external tool opens in a new tab",
+#           "example": false,
+#           "type": "boolean"
+#         },
+#         "completion_requirement": {
+#           "description": "Completion requirement for this module item",
+#           "example": {"type": "min_score", "min_score": 10, "completed": true},
+#           "$ref": "CompletionRequirement"
+#         },
+#         "content_details": {
+#           "description": "(Present only if requested through include[]=content_details) If applicable, returns additional details specific to the associated object",
+#           "example": {"points_possible": 20, "due_at": "2012-12-31T06:00:00-06:00", "unlock_at": "2012-12-31T06:00:00-06:00", "lock_at": "2012-12-31T06:00:00-06:00"},
+#           "$ref": "ContentDetails"
+#         }
+#       }
+#     }
+#
+# @model ModuleItemSequence
+#     {
+#       "id": "ModuleItemSequence",
+#       "description": "",
+#       "properties": {
+#         "items": {
+#           "description": "an array containing one hash for each appearence of the asset in the module sequence (up to 10 total)",
+#           "example": [{"prev": null, "current": {"id": 768, "module_id": 123, "title": "A lonely page", "type": "Page"}, "next": {"id": 769, "module_id": 127, "title": "Project 1", "type": "Assignment"}, "mastery_path": {"locked": true, "assignment_sets": [], "selected_set_id": null, "awaiting_choice": false, "still_processing": false, "modules_url": "/courses/11/modules", "choose_url": "/courses/11/modules/items/9/choose", "modules_tab_disabled": false}}],
+#           "type": "array",
+#           "items": { "type": "object" }
+#         },
+#         "modules": {
+#           "description": "an array containing each Module referenced above",
+#           "type": "array",
+#           "items": { "$ref": "Module" }
+#         }
+#       }
+#     }
+#
 class ContextModuleItemsApiController < ApplicationController
-  before_filter :require_context
-  before_filter :find_student, :only => [:index, :show]
+  before_action :require_context
+  before_action :require_user, :only => [:select_mastery_path]
+  before_action :find_student, :only => [:index, :show, :select_mastery_path]
+  before_action :disable_escape_html_entities, :only => [:index, :show]
+  after_action :enable_escape_html_entities, :only => [:index, :show]
   include Api::V1::ContextModule
 
   # @API List module items
   #
-  # List the items in a module
+  # A paginated list of the items in a module
   #
   # @argument include[] [String, "content_details"]
   #   If included, will return additional details specific to the content
   #   associated with each item. Refer to the {api:Modules:Module%20Item Module
   #   Item specification} for more details.
+  #   Includes standard lock information for each item.
   #
-  # @argument search_term [Optional, String]
+  # @argument search_term [String]
   #   The partial title of the items to match and return.
   #
-  # @argument student_id [Optional]
+  # @argument student_id
   #   Returns module completion information for the student with this id.
   #
   # @example_request
@@ -160,13 +227,21 @@ class ContextModuleItemsApiController < ApplicationController
   def index
     if authorized_action(@context, @current_user, :read)
       mod = @context.modules_visible_to(@student || @current_user).find(params[:module_id])
-      ContextModule.send(:preload_associations, mod, {:content_tags => :content})
+      ActiveRecord::Associations::Preloader.new.preload(mod, content_tags: :content)
       route = polymorphic_url([:api_v1, @context, mod, :items])
       scope = mod.content_tags_visible_to(@student || @current_user)
       scope = ContentTag.search_by_attribute(scope, :title, params[:search_term])
       items = Api.paginate(scope, self, route)
       prog = @student ? mod.evaluate_for(@student) : nil
-      render :json => items.map { |item| module_item_json(item, @student || @current_user, session, mod, prog, Array(params[:include])) }
+      includes = Array(params[:include])
+      opts = {}
+
+      # Get conditionally released objects if requested
+      # TODO: Document in API when out of beta
+      if includes.include?("mastery_paths")
+        opts[:conditional_release_rules] = ConditionalRelease::Service.rules_for(@context, @student, items, session)
+      end
+      render :json => items.map { |item| module_item_json(item, @student || @current_user, session, mod, prog, includes, opts) }
     end
   end
 
@@ -178,8 +253,9 @@ class ContextModuleItemsApiController < ApplicationController
   #   If included, will return additional details specific to the content
   #   associated with this item. Refer to the {api:Modules:Module%20Item Module
   #   Item specification} for more details.
+  #   Includes standard lock information for each item.
   #
-  # @argument student_id [Optional]
+  # @argument student_id
   #   Returns module completion information for the student with this id.
   #
   # @example_request
@@ -189,10 +265,9 @@ class ContextModuleItemsApiController < ApplicationController
   # @returns ModuleItem
   def show
     if authorized_action(@context, @current_user, :read)
-      mod = @context.modules_visible_to(@student || @current_user).find(params[:module_id])
-      item = mod.content_tags_visible_to(@student || @current_user).find(params[:id])
-      prog = @student ? mod.evaluate_for(@student) : nil
-      render :json => module_item_json(item, @student || @current_user, session, mod, prog, Array(params[:include]))
+      get_module_item
+      prog = @student ? @module.evaluate_for(@student) : nil
+      render :json => module_item_json(@item, @student || @current_user, session, @module, prog, Array(params[:include]))
     end
   end
 
@@ -217,20 +292,20 @@ class ContextModuleItemsApiController < ApplicationController
   #
   # Create and return a new module item
   #
-  # @argument module_item[title] [Optional, String]
+  # @argument module_item[title] [String]
   #   The name of the module item and associated content
   #
-  # @argument module_item[type] [String, "File"|"Page"|"Discussion"|"Assignment"|"Quiz"|"SubHeader"|"ExternalUrl"|"ExternalTool"]
+  # @argument module_item[type] [Required, String, "File"|"Page"|"Discussion"|"Assignment"|"Quiz"|"SubHeader"|"ExternalUrl"|"ExternalTool"]
   #   The type of content linked to the item
   #
-  # @argument module_item[content_id] [String]
+  # @argument module_item[content_id] [Required, String]
   #   The id of the content to link to the module item. Required, except for
   #   'ExternalUrl', 'Page', and 'SubHeader' types.
   #
-  # @argument module_item[position] [Optional, Integer]
+  # @argument module_item[position] [Integer]
   #   The position of this item in the module (1-based).
   #
-  # @argument module_item[indent] [Optional, Integer]
+  # @argument module_item[indent] [Integer]
   #   0-based indent level; module items may be indented to show a hierarchy
   #
   # @argument module_item[page_url] [String]
@@ -241,11 +316,11 @@ class ContextModuleItemsApiController < ApplicationController
   #   External url that the item points to. [Required for 'ExternalUrl' and
   #   'ExternalTool' types.
   #
-  # @argument module_item[new_tab] [Optional, Boolean]
+  # @argument module_item[new_tab] [Boolean]
   #   Whether the external tool opens in a new tab. Only applies to
   #   'ExternalTool' type.
   #
-  # @argument module_item[completion_requirement][type] [Optional, String, "must_view"|"must_contribute"|"must_submit"]
+  # @argument module_item[completion_requirement][type] [String, "must_view"|"must_contribute"|"must_submit"]
   #   Completion requirement for this module item.
   #   "must_view": Applies to all item types
   #   "must_contribute": Only applies to "Assignment", "Discussion", and "Page" types
@@ -278,7 +353,7 @@ class ContextModuleItemsApiController < ApplicationController
       item_params[:id] = params[:module_item][:content_id]
       if ['Page', 'WikiPage'].include?(item_params[:type])
         if page_url = params[:module_item][:page_url]
-          if wiki_page = @context.wiki.wiki_pages.not_deleted.find_by_url(page_url)
+          if wiki_page = @context.wiki_pages.not_deleted.where(url: page_url).first
             item_params[:id] = wiki_page.id
           else
             return render :json => {:message => "invalid page_url parameter"}, :status => :bad_request
@@ -291,10 +366,8 @@ class ContextModuleItemsApiController < ApplicationController
       item_params[:url] = params[:module_item][:external_url]
 
       if (@tag = @module.add_item(item_params)) && set_position && set_completion_requirement
-        if @context.feature_enabled?(:draft_state)
-          @tag.workflow_state = 'unpublished'
-          @tag.save
-        end
+        @tag.workflow_state = 'unpublished'
+        @tag.save
         @module.touch
         render :json => module_item_json(@tag, @current_user, session, @module, nil)
       elsif @tag
@@ -309,23 +382,23 @@ class ContextModuleItemsApiController < ApplicationController
   #
   # Update and return an existing module item
   #
-  # @argument module_item[title] [Optional, String]
+  # @argument module_item[title] [String]
   #   The name of the module item
   #
-  # @argument module_item[position] [Optional, Integer]
+  # @argument module_item[position] [Integer]
   #   The position of this item in the module (1-based)
   #
-  # @argument module_item[indent] [Optional, Integer]
+  # @argument module_item[indent] [Integer]
   #   0-based indent level; module items may be indented to show a hierarchy
   #
-  # @argument module_item[external_url] [Optional, String]
+  # @argument module_item[external_url] [String]
   #   External url that the item points to. Only applies to 'ExternalUrl' type.
   #
-  # @argument module_item[new_tab] [Optional, Boolean]
+  # @argument module_item[new_tab] [Boolean]
   #   Whether the external tool opens in a new tab. Only applies to
   #   'ExternalTool' type.
   #
-  # @argument module_item[completion_requirement][type] [Optional, "must_view"|"must_contribute"|"must_submit"]
+  # @argument module_item[completion_requirement][type] [String, "must_view"|"must_contribute"|"must_submit"]
   #   Completion requirement for this module item.
   #   "must_view": Applies to all item types
   #   "must_contribute": Only applies to "Assignment", "Discussion", and "Page" types
@@ -336,10 +409,10 @@ class ContextModuleItemsApiController < ApplicationController
   #   Minimum score required to complete, Required for completion_requirement
   #   type 'min_score'.
   #
-  # @argument module_item[published] [Optional, Boolean]
+  # @argument module_item[published] [Boolean]
   #   Whether the module item is published and visible to students.
   #
-  # @argument module_item[module_id] [Optional, String]
+  # @argument module_item[module_id] [String]
   #   Move this item to another module by specifying the target module id here.
   #   The target module must be in the same course.
   #
@@ -348,7 +421,6 @@ class ContextModuleItemsApiController < ApplicationController
   #     curl https://<canvas>/api/v1/courses/<course_id>/modules/<module_id>/items/<item_id> \
   #       -X PUT \
   #       -H 'Authorization: Bearer <token>' \
-  #       -d 'module_item[content_id]=10' \
   #       -d 'module_item[position]=2' \
   #       -d 'module_item[indent]=1' \
   #       -d 'module_item[new_tab]=true'
@@ -364,7 +436,7 @@ class ContextModuleItemsApiController < ApplicationController
       @tag.indent = params[:module_item][:indent] if params[:module_item][:indent]
       @tag.new_tab = value_to_boolean(params[:module_item][:new_tab]) if params[:module_item][:new_tab]
       if (target_module_id = params[:module_item][:module_id]) && target_module_id.to_i != @tag.context_module_id
-        target_module = @context.context_modules.find_by_id(target_module_id)
+        target_module = @context.context_modules.where(id: target_module_id).first
         return render :json => {:message => "invalid module_id"}, :status => :bad_request unless target_module
         old_module = @context.context_modules.find(@tag.context_module_id)
         @tag.remove_from_list
@@ -391,11 +463,74 @@ class ContextModuleItemsApiController < ApplicationController
       end
 
       if @tag.save && set_position && set_completion_requirement
-        @tag.update_asset_name! if params[:module_item][:title]
+        @tag.update_asset_name!(@current_user) if params[:module_item][:title]
         render :json => module_item_json(@tag, @current_user, session, @tag.context_module, nil)
       else
         render :json => @tag.errors, :status => :bad_request
       end
+    end
+  end
+
+  # @API Select a mastery path
+  #
+  # Select a mastery path when module item includes several possible paths.
+  # Requires Mastery Paths feature to be enabled.  Returns a compound document
+  # with the assignments included in the given path and any module items
+  # related to those assignments
+  #
+  # @argument assignment_set_id
+  #   Assignment set chosen, as specified in the mastery_paths portion of the
+  #   context module item response
+  #
+  # @argument student_id
+  #   Which student the selection applies to.  If not specified, current user is
+  #   implied.
+  #
+  # @example_request
+  #
+  #     curl https://<canvas>/api/v1/courses/<course_id>/modules/<module_id>/items/<item_id>/select_master_path \
+  #       -X POST \
+  #       -H 'Authorization: Bearer <token>' \
+  #       -d 'assignment_set_id=2992'
+  #
+  def select_mastery_path
+    return unless authorized_action(@context, @current_user, :read)
+    return unless @student == @current_user || authorized_action(@context, @current_user, :manage_assignments)
+    return render json: { message: 'mastery paths not enabled' }, status: :bad_request unless cyoe_enabled?(@context)
+    return render json: { message: 'assignment_set_id required' }, status: :bad_request unless params[:assignment_set_id]
+
+    get_module_item
+    assignment = @item.assignment
+    return render json: { message: 'requested item is not an assignment' }, status: :bad_request unless assignment
+
+    response = ConditionalRelease::Service.select_mastery_path(
+      @context,
+      @current_user,
+      @student,
+      assignment,
+      params[:assignment_set_id],
+      session)
+
+    if response[:code] != '200'
+      render json: response[:body], status: response[:code]
+    else
+      assignment_ids = response[:body]['assignments'].map {|a| a['assignment_id'].try(&:to_i) }
+      # assignment occurs in delayed job, may not be fully visible to user until job completes
+      assignments = @context.assignments.published.where(id: assignment_ids)
+
+      Assignment.preload_context_module_tags(assignments)
+
+      # match cyoe order, omit unpublished or deleted assignments
+      assignments = assignments.index_by(&:id).values_at(*assignment_ids).compact
+
+      # grab locally relevant module items
+      items = assignments.map(&:all_context_module_tags).flatten.select{|a| a.context_module_id == @module.id}
+
+      render json: {
+        meta: { primaryCollection: 'assignments' },
+        items: items.map { |item| module_item_json(item, @student || @current_user, session, @module) },
+        assignments: assignments_json(assignments, @current_user, session)
+      }
     end
   end
 
@@ -420,12 +555,48 @@ class ContextModuleItemsApiController < ApplicationController
     end
   end
 
-  MAX_SEQUENCES = 10
 
+  # @API Mark module item as done/not done
+  #
+  # Mark a module item as done/not done. Use HTTP method PUT to mark as done,
+  # and DELETE to mark as not done.
+  #
+  # @example_request
+  #
+  #     curl https://<canvas>/api/v1/courses/<course_id>/modules/<module_id>/items/<item_id>/done \
+  #       -X Put \
+  #       -H 'Authorization: Bearer <token>'
+  def mark_as_done
+    if authorized_action(@context, @current_user, :read)
+      get_module_item
+      @item.context_module_action(@current_user, :done)
+      render :json => { :message => t('OK') }
+    end
+  end
+
+  def mark_as_not_done
+    if authorized_action(@context, @current_user, :read)
+      get_module_item
+      if (progression = @item.progression_for_user(@current_user))
+        progression.uncomplete_requirement(params[:id].to_i)
+        progression.evaluate
+      end
+      render :json => { :message => t('OK') }
+    end
+  end
+
+  def get_module_item
+    user = @student || @current_user
+    @module = @context.modules_visible_to(user).find(params[:module_id])
+    @item = @module.content_tags.find(params[:id])
+    raise ActiveRecord::RecordNotFound unless @item && @item.visible_to_user?(user)
+  end
+
+  MAX_SEQUENCES = 10
   # @API Get module item sequence
   #
-  # Given an asset in a course, find the ModuleItem it belongs to, and also the previous and next Module Items
-  # in the course sequence.
+  # Given an asset in a course, find the ModuleItem it belongs to, the previous and next Module Items
+  # in the course sequence, and also any applicable mastery path rules
   #
   # @argument asset_type [String, "ModuleItem"|"File"|"Page"|"Discussion"|"Assignment"|"Quiz"|"ExternalTool"]
   #   The type of asset to find module sequence information for. Use the ModuleItem if it is known
@@ -450,20 +621,16 @@ class ContextModuleItemsApiController < ApplicationController
 
       # assemble a sequence of content tags in the course
       # (break ties on module position by module id)
-      tags = @context.module_items_visible_to(@current_user).
-          select('content_tags.*, context_modules.id as module_id, context_modules.position AS module_position').
-          reject { |item| item.content_type == 'ContextModuleSubHeader' }.
-          sort_by { |item| [item.module_position.to_i, item.module_id, item.position] }
+      tag_ids = @context.sequential_module_item_ids & @context.module_items_visible_to(@current_user).reorder(nil).pluck(:id)
 
       # find content tags to include
       tag_indices = []
       if asset_type == 'ContentTag'
-        tag_ix = tags.each_index.detect { |ix| tags[ix].id == asset_id.to_i }
-        tag_indices << tag_ix if tag_ix
+        tag_ids.each_with_index { |tag_id, ix| tag_indices << ix if tag_id == asset_id.to_i }
       else
         # map wiki page url to id
         if asset_type == 'WikiPage'
-          page = @context.wiki.wiki_pages.not_deleted.find_by_url(asset_id)
+          page = @context.wiki_pages.not_deleted.where(url: asset_id).first
           asset_id = page.id if page
         else
           asset_id = asset_id.to_i
@@ -471,47 +638,145 @@ class ContextModuleItemsApiController < ApplicationController
 
         # find the associated assignment id, if applicable
         if asset_type == 'Quizzes::Quiz'
-          asset = @context.quizzes.find_by_id(asset_id.to_i)
+          asset = @context.quizzes.where(id: asset_id.to_i).first
           associated_assignment_id = asset.assignment_id if asset
         end
 
         if asset_type == 'DiscussionTopic'
-          asset = @context.send(asset_type.tableize).find_by_id(asset_id.to_i)
+          asset = @context.send(asset_type.tableize).where(id: asset_id.to_i).first
           associated_assignment_id = asset.assignment_id if asset
         end
 
         # find up to MAX_SEQUENCES tags containing the object (or its associated assignment)
-        tags.each_index do |ix|
-          if (tags[ix].content_type == asset_type && tags[ix].content_id == asset_id) ||
-             (associated_assignment_id && tags[ix].content_type == 'Assignment' && tags[ix].content_id == associated_assignment_id)
-            tag_indices << ix
-            break if tag_indices.length == MAX_SEQUENCES
-          end
+        matching_tag_ids = @context.context_module_tags.where(:id => tag_ids).
+          where(:content_type => asset_type, :content_id => asset_id).pluck(:id)
+        if associated_assignment_id
+          matching_tag_ids += @context.context_module_tags.where(:id => tag_ids).
+            where(:content_type => 'Assignment', :content_id => associated_assignment_id).pluck(:id)
+        end
+
+        if matching_tag_ids.any?
+          tag_ids.each_with_index { |tag_id, ix| tag_indices << ix if matching_tag_ids.include?(tag_id) }
         end
       end
 
+      tag_indices.sort!
+      if tag_indices.length > MAX_SEQUENCES
+        tag_indices = tag_indices[0, MAX_SEQUENCES]
+      end
+
       # render the result
-      module_ids = Set.new
       result = { :items => [] }
+
+      needed_tag_ids = []
       tag_indices.each do |ix|
-        hash = { :current => module_item_json(tags[ix], @current_user, session), :prev => nil, :next => nil }
-        module_ids << tags[ix].context_module_id
+        needed_tag_ids << tag_ids[ix]
+        needed_tag_ids << tag_ids[ix - 1] if ix > 0
+        needed_tag_ids << tag_ids[ix + 1] if ix < tag_ids.size - 1
+      end
+
+      needed_tags = ContentTag.where(:id => needed_tag_ids.uniq).preload(:context_module).index_by(&:id)
+      tag_indices.each do |ix|
+        hash = { :current => module_item_json(needed_tags[tag_ids[ix]], @current_user, session), :prev => nil, :next => nil }
         if ix > 0
-          hash[:prev] = module_item_json(tags[ix - 1], @current_user, session)
-          module_ids << tags[ix - 1].context_module_id
+          hash[:prev] = module_item_json(needed_tags[tag_ids[ix - 1]], @current_user, session)
         end
-        if ix < tags.size - 1
-          hash[:next] = module_item_json(tags[ix + 1], @current_user, session)
-          module_ids << tags[ix + 1].context_module_id
+        if ix < tag_ids.size - 1
+          hash[:next] = module_item_json(needed_tags[tag_ids[ix + 1]], @current_user, session)
+        end
+        if cyoe_enabled?(@context)
+          is_student = @context.grants_right?(@current_user, session, :participate_as_student)
+          opts = { context: @context, user: @current_user, session: session, is_student: is_student }
+          hash[:mastery_path] = conditional_release_rule_for_module_item(needed_tags[tag_ids[ix]], opts)
         end
         result[:items] << hash
       end
-      modules = @context.context_modules.find_all_by_id(module_ids.to_a)
+      modules = needed_tags.values.map(&:context_module).uniq
       result[:modules] = modules.map { |mod| module_json(mod, @current_user, session) }
 
       render :json => result
     end
   end
+
+  # @API Mark module item read
+  #
+  # Fulfills "must view" requirement for a module item. It is generally not necessary to do this explicitly,
+  # but it is provided for applications that need to access external content directly (bypassing the html_url
+  # redirect that normally allows Canvas to fulfill "must view" requirements).
+  #
+  # This endpoint cannot be used to complete requirements on locked or unpublished module items.
+  #
+  # @example_request
+  #
+  #     curl https://<canvas>/api/v1/courses/<course_id>/modules/<module_id>/items/<item_id>/mark_read \
+  #       -X POST \
+  #       -H 'Authorization: Bearer <token>'
+  #
+  def mark_item_read
+    if authorized_action(@context, @current_user, :read)
+      get_module_item
+      content = (@item.content && @item.content.respond_to?(:locked_for?)) ? @item.content : @item
+      return render :json => { :message => t('The module item is locked.') }, :status => :forbidden if content.locked_for?(@current_user)
+
+      @item.context_module_action(@current_user, :read)
+      render :json => { :message => t('OK') }
+    end
+  end
+
+  # @API Duplicate module item
+  #
+  # Makes a copy of an assignment, discussion or wiki page module item, within the same module.
+  # It also creates a duplicate copy of the assignment, discussion, or wiki page.
+  #
+  # @example_request
+  #
+  #     curl https://<canvas>/api/v1/courses/<course_id>/modules/items/<item_id>/duplicate \
+  #       -X POST \
+  #       -H 'Authorization: Bearer <token>'
+  #
+  include ContextModulesHelper
+  def duplicate
+    original_tag = @context.context_module_tags.not_deleted.find(params[:id])
+    if authorized_action(original_tag.context_module, @current_user, :update)
+      if original_tag.duplicate_able?
+        new_content = original_tag.content.duplicate
+        new_content.save!
+        new_tag = original_tag.context_module.add_item({
+          type: original_tag.content_type,
+          indent: original_tag.indent,
+          id: new_content.id,
+        })
+
+        new_tag.insert_at(original_tag.position + 1)
+
+        json = new_tag.as_json
+        json['new_positions'] = new_tag.context_module.content_tags.select(:id, :position)
+        json['content_tag'].merge!(
+          publishable: module_item_publishable?(new_tag),
+          published: new_tag.published?,
+          publishable_id: module_item_publishable_id(new_tag),
+          unpublishable: module_item_unpublishable?(new_tag),
+          graded: new_tag.graded?,
+          content_details: content_details(new_tag, @current_user),
+          assignment_id: new_tag.assignment.try(:id),
+          is_duplicate_able: new_tag.duplicate_able?,
+        )
+        render json: json
+      else
+        render :status => 400, :json => { :message => t("Item cannot be duplicated") }
+      end
+    end
+  end
+
+  def disable_escape_html_entities
+    ActiveSupport.escape_html_entities_in_json = false
+  end
+  private :disable_escape_html_entities
+
+  def enable_escape_html_entities
+    ActiveSupport.escape_html_entities_in_json = true
+  end
+  private :enable_escape_html_entities
 
   def set_position
     return true unless @tag && params[:module_item][:position]
@@ -542,7 +807,7 @@ class ContextModuleItemsApiController < ApplicationController
     if params[:module_item][:completion_requirement].blank?
       reqs[@tag.id] = {}
     elsif ["must_view", "must_submit", "must_contribute", "min_score"].include?(params[:module_item][:completion_requirement][:type])
-      reqs[@tag.id] = params[:module_item][:completion_requirement].with_indifferent_access
+      reqs[@tag.id] = params[:module_item][:completion_requirement].to_unsafe_h
     else
       @tag.errors.add(:completion_requirement, t(:invalid_requirement_type, "Invalid completion requirement type"))
       return false
@@ -556,7 +821,7 @@ class ContextModuleItemsApiController < ApplicationController
   def find_student
     if params[:student_id]
       student_enrollments = @context.student_enrollments.for_user(params[:student_id])
-      return render_unauthorized_action unless student_enrollments.any?{|e| e.grants_right?(@current_user, session, :read)}
+      return render_unauthorized_action unless student_enrollments.any?{|e| e.grants_right?(@current_user, session, :read_grades)}
       @student = student_enrollments.first.user
     elsif @context.grants_right?(@current_user, session, :participate_as_student)
       @student = @current_user

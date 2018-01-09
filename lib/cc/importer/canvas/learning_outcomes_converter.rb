@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,16 +18,16 @@
 module CC::Importer::Canvas
   module LearningOutcomesConverter
     include CC::Importer
-    
+
     def convert_learning_outcomes(doc)
       return [] unless doc
-      
+
       process_outcome_children(doc.at_css('learningOutcomes'))
     end
-    
+
     def process_outcome_children(node, list=[])
       return list unless node
-      
+
       node.children.each do |child|
         if child.name == 'learningOutcome'
           list << process_learning_outcome(child)
@@ -35,10 +35,10 @@ module CC::Importer::Canvas
           list << process_outcome_group(child)
         end
       end
-      
+
       list
     end
-    
+
     def process_outcome_group(node)
       group = {}
       group[:migration_id] = node['identifier']
@@ -46,7 +46,7 @@ module CC::Importer::Canvas
       group[:type] = 'learning_outcome_group'
       group[:description] = get_val_if_child(node, 'description')
       group[:outcomes] = process_outcome_children(node.at_css('learningOutcomes'))
-      
+
       group
     end
 
@@ -58,19 +58,32 @@ module CC::Importer::Canvas
       outcome[:description] = get_val_if_child(node, 'description')
       outcome[:mastery_points] = get_float_val(node, 'mastery_points')
       outcome[:points_possible] = get_float_val(node, 'points_possible')
+      outcome[:calculation_method] = get_node_val(node, 'calculation_method')
+      outcome[:calculation_int] = get_int_val(node, 'calculation_int')
       outcome[:is_global_outcome] = get_bool_val(node, 'is_global_outcome')
       outcome[:external_identifier] = get_node_val(node, 'external_identifier')
+
       outcome[:ratings] = []
-      
       node.css('rating').each do |r_node|
         rating = {}
         rating[:description] = get_node_val(r_node, 'description')
         rating[:points] = get_float_val(r_node, 'points')
         outcome[:ratings] << rating
       end
-      
+
+      outcome[:alignments] = []
+      node.css('alignments alignment').each do |align_node|
+        alignment = {}
+        alignment[:content_type] = get_node_val(align_node, 'content_type')
+        alignment[:content_id] = get_node_val(align_node, 'content_id')
+        alignment[:mastery_type] = get_node_val(align_node, 'mastery_type')
+        alignment[:mastery_score] = get_float_val(align_node, 'mastery_score')
+        alignment[:position] = get_int_val(align_node, 'position')
+        outcome[:alignments] << alignment
+      end
+
       outcome
     end
-    
+
   end
 end

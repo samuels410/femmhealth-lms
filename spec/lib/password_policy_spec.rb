@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -25,7 +25,7 @@ describe Canvas::PasswordPolicy do
       account.settings[:password_policy] = policy
       account.save
       @pseudonym = Pseudonym.new
-      @pseudonym.user = user
+      @pseudonym.user = user_factory
       @pseudonym.account = Account.default
       @pseudonym.unique_id = "foo"
     end
@@ -33,52 +33,60 @@ describe Canvas::PasswordPolicy do
     it "should only enforce minimum length by default" do
       pseudonym_with_policy({})
       @pseudonym.password = @pseudonym.password_confirmation = "aaaaa"
-      @pseudonym.should_not be_valid
+      expect(@pseudonym).not_to be_valid
 
-      @pseudonym.password = @pseudonym.password_confirmation = "aaaaaa"
-      @pseudonym.should be_valid
+      @pseudonym.password = @pseudonym.password_confirmation = "aaaaaaaa"
+      expect(@pseudonym).to be_valid
 
       @pseudonym.password = @pseudonym.password_confirmation = "football"
-      @pseudonym.should be_valid
+      expect(@pseudonym).to be_valid
 
       @pseudonym.password = @pseudonym.password_confirmation = "abcdefgh"
-      @pseudonym.should be_valid
+      expect(@pseudonym).to be_valid
     end
 
     it "should enforce minimum length" do
-      pseudonym_with_policy(:min_length => 6)
+      pseudonym_with_policy(:min_length => 10)
       @pseudonym.password = @pseudonym.password_confirmation = "asdfg"
-      @pseudonym.should_not be_valid
+      expect(@pseudonym).not_to be_valid
 
-      @pseudonym.password = @pseudonym.password_confirmation = "asdfgh"
-      @pseudonym.should be_valid
+      @pseudonym.password = @pseudonym.password_confirmation = "asdfghijklm"
+      expect(@pseudonym).to be_valid
     end
 
     it "should reject common passwords" do
       pseudonym_with_policy(:disallow_common_passwords => true)
       @pseudonym.password = @pseudonym.password_confirmation = "football"
-      @pseudonym.should_not be_valid
+      expect(@pseudonym).not_to be_valid
 
       @pseudonym.password = @pseudonym.password_confirmation = "lacrosse"
-      @pseudonym.should be_valid
+      expect(@pseudonym).to be_valid
     end
 
     it "should enforce repeated character limits" do
       pseudonym_with_policy(:max_repeats => 4)
       @pseudonym.password = @pseudonym.password_confirmation = "aaaaabbbb"
-      @pseudonym.should_not be_valid
+      expect(@pseudonym).not_to be_valid
 
       @pseudonym.password = @pseudonym.password_confirmation = "aaaabbbb"
-      @pseudonym.should be_valid
+      expect(@pseudonym).to be_valid
     end
 
     it "should enforce sequence limits" do
       pseudonym_with_policy(:max_sequence => 4)
       @pseudonym.password = @pseudonym.password_confirmation = "edcba1234"
-      @pseudonym.should_not be_valid
+      expect(@pseudonym).not_to be_valid
 
       @pseudonym.password = @pseudonym.password_confirmation = "dcba1234"
-      @pseudonym.should be_valid
+      expect(@pseudonym).to be_valid
+    end
+
+    it "should reject passwords longer than 255 characters" do
+      pseudonym_with_policy({})
+      @pseudonym.password = @pseudonym.password_confirmation = "a" * 255
+      expect(@pseudonym).to be_valid
+      @pseudonym.password = @pseudonym.password_confirmation = "a" * 256
+      expect(@pseudonym).not_to be_valid
     end
   end
 end

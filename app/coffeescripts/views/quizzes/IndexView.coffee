@@ -1,9 +1,29 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'i18n!quizzes'
+  'jquery'
   'underscore'
   'Backbone'
   'compiled/views/quizzes/QuizItemGroupView'
   'jst/quizzes/IndexView'
-], (_, Backbone, QuizItemGroupView, template) ->
+  'compiled/jquery.rails_flash_notifications'
+], (I18n, $, _, Backbone, QuizItemGroupView, template) ->
 
   class IndexView extends Backbone.View
     template: template
@@ -27,31 +47,36 @@ define [
       @options.hasOpenQuizzes        = @openView.collection.length > 0
       @options.hasSurveys            = @surveyView.collection.length > 0
 
-    collections: ->
+    views: ->
       [
-        @options.assignmentView.collection
-        @options.openView.collection
-        @options.surveyView.collection
+        @options.assignmentView
+        @options.openView
+        @options.surveyView
       ]
 
-    keyUpSearch: =>
-      clearTimeout @onInputTimer
-      @onInputTimer = setTimeout @filterResults, 200
+    keyUpSearch: _.debounce ->
+      @filterResults()
+      @announceCount()
+    , 200
 
     filterResults: =>
-      term = $('#searchTerm').val()
+      _.each @views(), (view) =>
+        view.filterResults($('#searchTerm').val())
 
-      _.each @collections(), (collection) =>
-        collection.each (model) =>
-          model.set('hidden', !@filter(model, term))
+    announceCount: =>
+      searchTerm = $('#searchTerm').val()
+      return if searchTerm == '' || searchTerm == null
 
-    filter: (model, term) =>
-      return true unless term
+      matchingQuizCount = _.reduce(@views(), (runningCount, view) =>
+        return runningCount + view.matchingCount(searchTerm)
+      , 0)
+      @announceMatchingQuizzes(matchingQuizCount)
 
-      title = model.get('title').toLowerCase()
-      numMatches = 0
-      keys = term.toLowerCase().split(' ')
-      for part in keys
-        #not using match to avoid javascript string to regex oddness
-        numMatches++ if title.indexOf(part) != -1
-      numMatches == keys.length
+    announceMatchingQuizzes: (numQuizzes) ->
+      msg = I18n.t({
+          one: "1 quiz found."
+          other: "%{count} quizzes found."
+          zero: "No matching quizzes found."
+        }, count: numQuizzes
+      )
+      $.screenReaderFlashMessageExclusive(msg)

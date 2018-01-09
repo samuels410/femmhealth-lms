@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2014 Instructure, Inc.
+# Copyright (C) 2014 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,27 +21,19 @@ require 'spec_helper'
 describe LtiOutbound::LTIUser do
   it_behaves_like 'an LTI context'
 
-  it_behaves_like 'it has an attribute setter and getter for', :avatar_url
-  it_behaves_like 'it has an attribute setter and getter for', :email
-  it_behaves_like 'it has an attribute setter and getter for', :first_name
-  it_behaves_like 'it has an attribute setter and getter for', :last_name
-  it_behaves_like 'it has an attribute setter and getter for', :login_id
-  it_behaves_like 'it has an attribute setter and getter for', :current_roles
-  it_behaves_like 'it has an attribute setter and getter for', :concluded_roles
-  it_behaves_like 'it has an attribute setter and getter for', :currently_active_in_course
+  it_behaves_like 'it has a proc attribute setter and getter for', :avatar_url
+  it_behaves_like 'it has a proc attribute setter and getter for', :email
+  it_behaves_like 'it has a proc attribute setter and getter for', :first_name
+  it_behaves_like 'it has a proc attribute setter and getter for', :last_name
+  it_behaves_like 'it has a proc attribute setter and getter for', :login_id
+  it_behaves_like 'it has a proc attribute setter and getter for', :current_roles
+  it_behaves_like 'it has a proc attribute setter and getter for', :concluded_roles
+  it_behaves_like 'it has a proc attribute setter and getter for', :currently_active_in_course
+  it_behaves_like 'it has a proc attribute setter and getter for', :current_observee_ids
 
-  it_behaves_like 'it provides variable mapping', '$Canvas.user.id', :id
-  it_behaves_like 'it provides variable mapping', '$Canvas.user.loginId', :login_id
-  it_behaves_like 'it provides variable mapping', '$Canvas.user.sisSourceId', :sis_source_id
-  it_behaves_like 'it provides variable mapping', '$Canvas.enrollment.enrollmentState', :enrollment_state
-  it_behaves_like 'it provides variable mapping', '$Canvas.membership.concludedRoles', :concluded_roles
-  it_behaves_like 'it provides variable mapping', '$Person.name.full', :name
-  it_behaves_like 'it provides variable mapping', '$Person.name.family', :last_name
-  it_behaves_like 'it provides variable mapping', '$Person.name.given', :first_name
-  it_behaves_like 'it provides variable mapping', '$Person.address.timezone', :timezone
-
-  let(:teacher_role) { LtiOutbound::LTIRole::INSTRUCTOR }
-  let(:learner_role) { LtiOutbound::LTIRole::LEARNER }
+  let(:teacher_role) { LtiOutbound::LTIRoles::ContextNotNamespaced::INSTRUCTOR }
+  let(:learner_role) { LtiOutbound::LTIRoles::ContextNotNamespaced::LEARNER }
+  let(:observer_role) { LtiOutbound::LTIRoles::ContextNotNamespaced::OBSERVER.split(',').last }
 
   describe '#current_role_types' do
     it 'provides a string representation of current roles' do
@@ -49,11 +41,17 @@ describe LtiOutbound::LTIUser do
         user.current_roles = [teacher_role, learner_role]
       end
 
-      expect(subject.current_role_types).to eq("#{LtiOutbound::LTIRole::INSTRUCTOR},#{LtiOutbound::LTIRole::LEARNER}")
+      expect(subject.current_role_types).to eq("#{LtiOutbound::LTIRoles::ContextNotNamespaced::INSTRUCTOR},#{LtiOutbound::LTIRoles::ContextNotNamespaced::LEARNER}")
     end
 
-    it 'defaults if no roles exist' do
-      expect(subject.current_role_types).to eq(LtiOutbound::LTIRole::NONE)
+    it 'defaults to NONE if no roles exist' do
+      expect(subject.current_role_types).to eq(LtiOutbound::LTIRoles::System::NONE)
+    end
+
+    it 'defaults to NONE if roles are empty' do
+      subject.current_roles = []
+
+      expect(subject.current_role_types).to eq(LtiOutbound::LTIRoles::System::NONE)
     end
   end
 
@@ -63,11 +61,17 @@ describe LtiOutbound::LTIUser do
         user.concluded_roles = [teacher_role, learner_role]
       end
 
-      expect(subject.concluded_role_types).to eq("#{LtiOutbound::LTIRole::INSTRUCTOR},#{LtiOutbound::LTIRole::LEARNER}")
+      expect(subject.concluded_role_types).to eq("#{LtiOutbound::LTIRoles::ContextNotNamespaced::INSTRUCTOR},#{LtiOutbound::LTIRoles::ContextNotNamespaced::LEARNER}")
     end
 
     it 'defaults if no roles exist' do
-      expect(subject.concluded_role_types).to eq(LtiOutbound::LTIRole::NONE)
+      expect(subject.concluded_role_types).to eq(LtiOutbound::LTIRoles::System::NONE)
+    end
+
+    it 'defaults to NONE if roles are empty' do
+      subject.concluded_roles = []
+
+      expect(subject.current_role_types).to eq(LtiOutbound::LTIRoles::System::NONE)
     end
   end
 
@@ -77,9 +81,23 @@ describe LtiOutbound::LTIUser do
       expect(LtiOutbound::LTIUser::INACTIVE_STATE).to eq 'inactive'
     end
   end
-  
+
+  describe '#observer?' do
+    it 'returns true when current roles includes observer role' do
+      subject.current_roles = [learner_role, observer_role]
+
+      expect(subject.observer?).to eq true
+    end
+
+    it 'returns false when current roles do not include observer role' do
+      subject.current_roles = [teacher_role]
+
+      expect(subject.observer?).to eq false
+    end
+  end
+
   describe '#learner?' do
-    it 'returns false when current roles includes learner role' do
+    it 'returns true when current roles includes learner role' do
       subject.current_roles = [teacher_role, learner_role]
 
       expect(subject.learner?).to eq true

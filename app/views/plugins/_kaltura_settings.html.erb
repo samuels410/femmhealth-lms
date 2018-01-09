@@ -1,3 +1,21 @@
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
 <%= fields_for :settings, OpenObject.new(settings) do |f| %>
   <table style="width: 500px;" class="formtable">
     <tr>
@@ -6,8 +24,8 @@ You will need an account either at [Kaltura.com](%{kaltura_url})
 or with a self-hosted instance of Kaltura.
 
 **Note:** once you have Kaltura configured within Canvas,
-you need to go to the Kaltura Management Console and under "Settings -> 
-Integration Settings" enable server notifications with a 
+you need to go to the Kaltura Management Console and under "Settings ->
+Integration Settings" enable server notifications with a
 Notification URL of:
 
 %{notification_url}
@@ -114,8 +132,15 @@ TEXT
       <td colspan="2" style="font-size: 0.8em;"><%= t(:kaltura_path_example, "e.g.")%><code>(#{domain}/api_v3/index.php?service=stats&action=collect&...)</code></td>
     </tr>
     <tr>
-      <td><%= f.label :do_flash_var_test, :en => "Enable experimental flash settings" %></td>
-      <td><%= f.check_box :do_flash_var_test, {}, 'yes', 'no' %></td>
+      <td><%= f.label :hide_rte_button, :en => "Hide the video icon in Rich Content Editor." %></td>
+      <td><%= f.check_box :hide_rte_button, {}, 'yes', 'no' %></td>
+    </tr>
+    <tr>
+      <td colspan="2" style="font-size: 0.8em;"><%= t(:hide_rte_button_note, "(still there for conversations/SpeedGrader/Media Recordings homework submissions)")%></td>
+    </tr>
+    <tr>
+      <td><%= f.label :js_uploader, :en => "Use html5 (accessible) uploader" %></td>
+      <td><%= f.check_box :js_uploader, {}, 'yes', 'no' %></td>
     </tr>
   </table>
 <% end %>

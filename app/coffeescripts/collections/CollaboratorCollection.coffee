@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -29,5 +29,5 @@ define [
       model.get('sortable_name') or model.get('name')
 
     parse: (response) ->
-      map(response, (model) -> extend(model, id: model.collaborator_id))
+      map(response, (model) -> extend(model, id: "#{model.type}_#{model.collaborator_id}"))
 

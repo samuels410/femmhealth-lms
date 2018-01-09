@@ -1,144 +1,181 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 class DueDateCacher
+  INFER_SUBMISSION_WORKFLOW_STATE_SQL = <<~SQL_FRAGMENT
+    CASE
+    WHEN grade IS NOT NULL OR excused IS TRUE THEN
+      'graded'
+    WHEN submission_type = 'online_quiz' AND quiz_submission_id IS NOT NULL THEN
+      'pending_review'
+    WHEN submission_type IS NOT NULL AND submitted_at IS NOT NULL THEN
+      'submitted'
+    ELSE
+      'unsubmitted'
+    END
+  SQL_FRAGMENT
+
   def self.recompute(assignment)
-    new([assignment]).send_later_if_production_enqueue_args(:recompute,
-      :strand => "cached_due_date:calculator:#{assignment.context_type}:#{Shard.global_id_for(assignment.context_id)}")
+    return unless assignment.active?
+    recompute_course(assignment.context, [assignment.id],
+      singleton: "cached_due_date:calculator:Assignment:#{assignment.global_id}")
   end
 
-  def self.recompute_course(course, assignments = nil)
-    assignments ||= Assignment.where(context_id: course, context_type: 'Course').pluck(:id)
+  def self.recompute_course(course, assignments = nil, inst_jobs_opts = {})
+    course = Course.find(course) unless course.is_a?(Course)
+    inst_jobs_opts[:singleton] ||= "cached_due_date:calculator:Course:#{course.global_id}" if assignments.nil?
+    assignments ||= Assignment.active.where(context: course).pluck(:id)
     return if assignments.empty?
-    new(assignments).send_later_if_production_enqueue_args(:recompute,
-      :strand => "cached_due_date:calculator:Course:#{Shard.global_id_for(course)}")
+    new(course, assignments).send_later_if_production_enqueue_args(:recompute, inst_jobs_opts)
   end
 
-  def self.recompute_batch(assignments)
-    new(assignments).send_later_if_production_enqueue_args(:recompute,
-      :strand => "cached_due_date:calculator:batch:#{Shard.current.id}",
-      :priority => Delayed::LOWER_PRIORITY)
-  end
-
-  # expects all assignments to be on the same shard
-  def initialize(assignments)
-    @assignments = assignments
-    @shard = Shard.shard_for(assignments.first)
-  end
-
-  def shard
-    @shard
-  end
-
-  def submissions
-    Submission.where(:assignment_id => @assignments)
-  end
-
-  def create_overridden_submissions
-    # Get the students that have an overridden due date
-    overridden_students = Assignment.participants_with_overridden_due_at(@assignments)
-    return if overridden_students.length < 1
-
-    # Get default submission values.
-    default_submission = Submission.new
-    default_submission.infer_values
-
-    # Create insert scope
-    insert_scope = Course
-      .select("DISTINCT assignments.id, enrollments.user_id, '#{default_submission.workflow_state}', {{now}}, assignments.context_code, 0")
-      .joins("INNER JOIN assignments ON assignments.context_id = courses.id AND assignments.context_type = 'Course'
-        LEFT OUTER JOIN submissions ON submissions.user_id = enrollments.user_id AND submissions.assignment_id = assignments.id")
-      .joins(:current_enrollments)
-      .where("enrollments.user_id IN (?) AND assignments.id IN (?) AND submissions.id IS NULL", overridden_students, @assignments)
-
-    #Set timestamp syntax depending on the connection adapter
-    insert_sql = case ActiveRecord::Base.connection.adapter_name
-                 when 'PostgreSQL'
-                   insert_scope.to_sql.gsub("{{now}}", "now() AT TIME ZONE 'UTC'")
-                 when 'MySQL', 'Mysql2'
-                   insert_scope.to_sql.gsub("{{now}}", "utc_timestamp()")
-                 when /sqlite/
-                   insert_scope.to_sql.gsub("{{now}}", "datetime('now')")
-                 end
-
-    # Create submissions that do not exist yet to calculate due dates for non submitted assignments.
-    Assignment.connection.update("INSERT INTO submissions (assignment_id, user_id, workflow_state, created_at, context_code, process_attempts) #{insert_sql}")
+  def initialize(course, assignments)
+    @course = course
+    @assignment_ids = Array(assignments).map { |a| a.is_a?(Assignment) ? a.id : a }
   end
 
   def recompute
     # in a transaction on the correct shard:
-    shard.activate do
-      Assignment.transaction do
-        # Create overridden due date submissions
-        create_overridden_submissions
-
-        # create temporary table
-        cast = Submission.connection.adapter_name == 'Mysql2' ? 'UNSIGNED INTEGER' : 'BOOL'
-        Assignment.connection.execute("CREATE TEMPORARY TABLE calculated_due_ats AS (#{submissions.select([
-          "submissions.id AS submission_id",
-          "submissions.user_id",
-          "submissions.assignment_id",
-          "assignments.due_at",
-          "CAST(#{Submission.sanitize(false)} AS #{cast}) AS overridden"
-        ]).joins(:assignment).where(assignments: { id: @assignments }).to_sql})")
-
-        # create an ActiveRecord class around that temp table for the update_all
-        scope = Class.new(ActiveRecord::Base) do
-          self.table_name = :calculated_due_ats
-          self.primary_key = :submission_id
+    @course.shard.activate do
+      values = []
+      effective_due_dates.to_hash.each do |assignment_id, student_due_dates|
+        (student_due_dates.keys - enrollment_counts.prior_student_ids).each do |student_id|
+          submission_info = student_due_dates[student_id]
+          due_date = submission_info[:due_at] ? "'#{submission_info[:due_at].iso8601}'::timestamptz" : 'NULL'
+          grading_period_id = submission_info[:grading_period_id] || 'NULL'
+          values << [assignment_id, student_id, due_date, grading_period_id]
         end
-
-        # for each override, narrow to the affected subset of the table, and
-        # apply
-        AssignmentOverride.active.overriding_due_at.where(:assignment_id => @assignments).each do |override|
-          override_scope(scope, override).update_all(
-            :due_at => override.due_at,
-            :overridden => true)
-        end
-
-        # copy the results back to the submission table
-        submissions.
-          joins("INNER JOIN calculated_due_ats ON calculated_due_ats.submission_id=submissions.id").
-          where("cached_due_date<>calculated_due_ats.due_at OR (cached_due_date IS NULL)<>(calculated_due_ats.due_at IS NULL)").
-          update_all("cached_due_date=calculated_due_ats.due_at")
-
-        # clean up
-        temporary = "TEMPORARY " if Assignment.connection.adapter_name == 'Mysql2'
-        Assignment.connection.execute("DROP #{temporary}TABLE calculated_due_ats")
       end
+      # Delete submissions for students who don't have visibility to this assignment anymore
+      @assignment_ids.each do |assignment_id|
+        assigned_student_ids = effective_due_dates.find_effective_due_dates_for_assignment(assignment_id).keys
+        submission_scope = Submission.active.where(assignment_id: assignment_id)
+
+        if assigned_student_ids.blank? && enrollment_counts.prior_student_ids.blank?
+          submission_scope.in_batches.update_all(workflow_state: :deleted)
+        else
+          # Delete the users we KNOW we need to delete in batches (it makes the database happier this way)
+          deletable_student_ids =
+            enrollment_counts.accepted_student_ids - assigned_student_ids - enrollment_counts.prior_student_ids
+          deletable_student_ids.each_slice(1000) do |deletable_student_ids_chunk|
+            # using this approach instead of using .in_batches because we want to limit the IDs in the IN clause to 1k
+            submission_scope.where(user_id: deletable_student_ids_chunk).update_all(workflow_state: :deleted)
+          end
+        end
+      end
+
+      # Get any stragglers that might have had their enrollment removed from the course
+      # 100 students at a time for 10 assignments each == slice of up to 1K submissions
+      enrollment_counts.deleted_student_ids.each_slice(100) do |student_slice|
+        @assignment_ids.each_slice(10) do |assignment_ids_slice|
+          Submission.active.
+            where(assignment_id: assignment_ids_slice, user_id: student_slice).
+            update_all(workflow_state: :deleted)
+        end
+      end
+      return if values.empty?
+
+      values = values.sort_by(&:first).map { |v| "(#{v.join(',')})" }
+      values.each_slice(1000) do |batch|
+        # Construct upsert statement to update existing Submissions or create them if needed.
+        query = <<-SQL
+          UPDATE #{Submission.quoted_table_name}
+            SET
+              cached_due_date = vals.due_date::timestamptz,
+              grading_period_id = vals.grading_period_id::integer,
+              workflow_state = COALESCE(NULLIF(workflow_state, 'deleted'), (
+                -- infer actual workflow state
+                #{INFER_SUBMISSION_WORKFLOW_STATE_SQL}
+              ))
+            FROM (
+              VALUES
+                #{batch.join(',')}
+             )
+             AS vals(assignment_id, student_id, due_date, grading_period_id)
+            WHERE submissions.user_id = vals.student_id AND
+                  submissions.assignment_id = vals.assignment_id;
+          INSERT INTO #{Submission.quoted_table_name}
+           (assignment_id, user_id, workflow_state, created_at, updated_at, context_code, process_attempts,
+            cached_due_date, grading_period_id)
+            SELECT
+              assignments.id, vals.student_id, 'unsubmitted',
+              now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC',
+              assignments.context_code, 0, vals.due_date::timestamptz, vals.grading_period_id::integer
+            FROM (
+              VALUES
+                #{batch.join(',')}
+             )
+             AS vals(assignment_id, student_id, due_date, grading_period_id)
+            INNER JOIN #{Assignment.quoted_table_name} assignments
+              ON assignments.id = vals.assignment_id
+            LEFT OUTER JOIN #{Submission.quoted_table_name} submissions
+              ON submissions.assignment_id = assignments.id
+              AND submissions.user_id = vals.student_id
+            WHERE submissions.id IS NULL;
+        SQL
+
+        Assignment.connection.execute(query)
+      end
+    end
+
+    if @assignment_ids.size == 1
+      # Only changes to LatePolicy or (sometimes) Assignment records can result in a re-calculation
+      # of student scores.  No changes to the Course record can trigger such re-calculations so
+      # let's ensure this is triggered only when DueDateCacher is called for a Assignment-level
+      # changes and not for Course-level changes
+      assignment = Assignment.find(@assignment_ids.first)
+
+      LatePolicyApplicator.for_assignment(assignment)
     end
   end
 
-  def override_scope(scope, override)
-    scope = scope.where(:assignment_id => override.assignment_id)
+  private
 
-    # and the override's due_at is more lenient than any existing overridden
-    # due_at
-    if override.due_at
-      scope = scope.where(
-        "NOT overridden OR (due_at IS NOT NULL AND due_at<?)",
-        override.due_at)
-    end
+  EnrollmentCounts = Struct.new(:accepted_student_ids, :prior_student_ids, :deleted_student_ids)
+  def enrollment_counts
+    @enrollment_counts ||= begin
+      counts = EnrollmentCounts.new([], [], [])
 
-    case override.set_type
-    when 'ADHOC'
-      # any student explicitly tagged by an adhoc override,
-      scope.joins("INNER JOIN assignment_override_students ON assignment_override_students.user_id=calculated_due_ats.user_id").
-        where(:assignment_override_students => {
-          :assignment_override_id => override
-        })
-    when 'CourseSection'
-      # any student in a section override's tagged section, or
-      scope.joins("INNER JOIN enrollments ON enrollments.user_id=calculated_due_ats.user_id").
-        where(:enrollments => {
-          :workflow_state => 'active',
-          :type => ['StudentEnrollment', 'StudentViewEnrollment'],
-          :course_section_id => override.set_id
-        })
-    when 'Group'
-      # any student in a group override's tagged group
-      scope.joins("INNER JOIN group_memberships ON group_memberships.user_id=calculated_due_ats.user_id").
-        where(:group_memberships => {
-          :workflow_state => 'accepted',
-          :group_id => override.set_id
-        })
+      Shackles.activate(:slave) do
+        # The various workflow states below try to mimic similarly named scopes off of course
+        Enrollment.select(
+          :user_id,
+          "count(nullif(workflow_state not in ('rejected', 'deleted', 'completed'), false)) as accepted_count",
+          "count(nullif(workflow_state in ('completed'), false)) as prior_count",
+          "count(nullif(workflow_state in ('rejected', 'deleted'), false)) as deleted_count"
+        ).
+          where(course_id: @course, type: ['StudentEnrollment', 'StudentViewEnrollment']).
+          group(:user_id).find_each do |record|
+            if record.accepted_count == 0 && record.deleted_count > 0
+              counts.deleted_student_ids << record.user_id
+            elsif record.accepted_count == 0 && record.prior_count > 0
+              counts.prior_student_ids << record.user_id
+            elsif record.accepted_count > 0
+              counts.accepted_student_ids << record.user_id
+            else
+              raise "Unknown enrollment state: #{record.accepted_count}, #{record.prior_count}, #{record.deleted_count}"
+            end
+        end
+      end
+      counts
     end
+  end
+
+  def effective_due_dates
+    @effective_due_dates ||= EffectiveDueDates.for_course(@course, @assignment_ids)
   end
 end

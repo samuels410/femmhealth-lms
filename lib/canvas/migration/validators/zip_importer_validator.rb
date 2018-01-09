@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,7 +21,7 @@ module Canvas::Migration::Validators::ZipImporterValidator
     if !options || !options[:folder_id]
       return I18n.t :zip_argument_error, 'A .zip upload requires a folder to upload to.'
     end
-    if !course.folders.find_by_id(options[:folder_id])
+    if !course.folders.where(id: options[:folder_id]).first
       return I18n.t :zip_no_folder_error, "The specified folder couldn't be found in this course."
     end
 

@@ -1,11 +1,28 @@
-class AddForeignKeys4 < ActiveRecord::Migration
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+class AddForeignKeys4 < ActiveRecord::Migration[4.2]
   disable_ddl_transaction!
   tag :postdeploy
 
   def self.up
     add_foreign_key_if_not_exists :discussion_topic_participants, :discussion_topics, :delay_validation => true
     add_foreign_key_if_not_exists :discussion_topics, :assignments, :delay_validation => true
-    DiscussionTopic.where("NOT EXISTS (SELECT 1 FROM attachments WHERE attachment_id=attachments.id)").update_all(attachment_id: nil)
+    DiscussionTopic.where("NOT EXISTS (?)", Attachment.where("attachment_id=attachments.id")).update_all(attachment_id: nil)
     add_foreign_key_if_not_exists :discussion_topics, :attachments, :delay_validation => true
     add_foreign_key_if_not_exists :discussion_topics, :cloned_items, :delay_validation => true
     add_foreign_key_if_not_exists :discussion_topics, :assignments, :column => :old_assignment_id, :delay_validation => true

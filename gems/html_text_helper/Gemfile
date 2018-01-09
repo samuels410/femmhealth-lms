@@ -3,10 +3,11 @@ source 'https://rubygems.org'
 # Specify your gem's dependencies in html_text_helper.gemspec
 gemspec
 
-CANVAS_RAILS3 = !!ENV['CANVAS_RAILS3'] || File.exist?(File.expand_path("../../RAILS3", __FILE__))
+gem 'simplecov', '0.14.1', :require => false
 
-if CANVAS_RAILS3
-  gem 'rails', '3.2.15'
-else
-  gem 'rails', :github => 'makandra/rails', :branch => '2-3-lts', :ref => 'e86daf8ff727d5efc0040c876ba00c9444a5d915'
+gem 'canvas_text_helper', path: '../canvas_text_helper'
+
+platforms :ruby_20, :ruby_21, :ruby_22 do
+  gem 'iconv', '1.0.4'
 end
+

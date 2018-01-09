@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,15 +16,26 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-def wiki_page_model(opts={})
-  course = opts.delete(:course) || (course_with_student(:active_all => true); @course)
-  @wiki = course.wiki
-  @wiki.save!
-  @page = @wiki.wiki_pages.create!(valid_wiki_page_attributes.merge(opts))
-end
+module Factories
+  def wiki_page_model(opts={})
+    course = opts.delete(:course) || (course_with_student(active_all: true); @course)
+    opts = opts.slice(:title, :body, :url, :user_id, :user, :editing_roles, :notify_of_update, :todo_date)
+    @page = course.wiki_pages.create!(valid_wiki_page_attributes.merge(opts))
+  end
 
-def valid_wiki_page_attributes
-  {
-    :title => "some page"
-  }
+  def wiki_page_assignment_model(opts={})
+    @page = opts.delete(:wiki_page) || wiki_page_model(opts)
+    assignment_model({
+      course: @page.course,
+      wiki_page: @page,
+      submission_types: 'wiki_page',
+      title: 'Content Page Assignment'
+    }.merge(opts))
+  end
+
+  def valid_wiki_page_attributes
+    {
+      title: "some page"
+    }
+  end
 end

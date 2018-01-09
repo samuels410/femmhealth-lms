@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -23,11 +23,11 @@ describe "/users/new" do
   it "should render" do
     course_with_student
     view_context
-    assigns[:user] = User.new
-    assigns[:pseudonym] = Pseudonym.new
-    
+    assign(:user, User.new)
+    assign(:pseudonym, Pseudonym.new)
+
     render "users/new"
-    response.should_not be_nil
+    expect(response).not_to be_nil
   end
 end
 

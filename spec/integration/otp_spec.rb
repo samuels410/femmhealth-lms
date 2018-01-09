@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,34 +17,40 @@
 #
 
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper')
+require 'rotp'
 
 describe "one time passwords" do
   before do
     Account.default.settings[:mfa_settings] = :required
     Account.default.save!
-    user_with_pseudonym(:active_all => 1, :password => 'qwerty')
+    user_with_pseudonym(:active_all => 1, :password => 'qwertyuiop')
     @user.otp_secret_key = ROTP::Base32.random_base32
     @user.save!
   end
 
   context "mid-login" do
     before do
-      post '/login', :pseudonym_session => { :unique_id => @pseudonym.unique_id, :password => 'qwerty' }
-      response.should render_template('otp_login')
+      post '/login/canvas', params: {:pseudonym_session => { :unique_id => @pseudonym.unique_id, :password => 'qwertyuiop' }}
+    end
+
+    it "should redirect" do
+      expect(response).to redirect_to(otp_login_url)
     end
 
     it "should not allow access to the rest of canvas" do
       get '/'
-      response.should redirect_to login_url
+      expect(response).to redirect_to login_url
       follow_redirect!
-      response.should be_success
+      expect(response).to redirect_to canvas_login_url
+      follow_redirect!
+      expect(response).to be_success
     end
 
-    it "should not allow re-enrolling" do
-      get '/login/otp'
-      response.should redirect_to login_url
-      follow_redirect!
-      response.should be_success
+    it "should not destroy your session when someone does an XHR accidentally" do
+      get '/api/v1/conversations/unread_count', :xhr => true
+      expect(response.status).to eq 403
+      get otp_login_url
+      expect(response).to be_success
     end
   end
 end

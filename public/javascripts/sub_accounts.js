@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,21 +12,19 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-  'i18n!sub_accounts',
-  'jquery' /* jQuery, $ */,
-  'jquery.ajaxJSON' /* ajaxJSON */,
-  'jquery.instructure_forms' /* formSubmit, fillFormData */,
-  'jquery.instructure_misc_helpers' /* replaceTags */,
-  'jquery.instructure_misc_plugins' /* confirmDelete, showIf */,
-  'jquery.keycodes' /* keycodes */,
-  'jquery.loadingImg' /* loadingImage */,
-  'jquery.templateData' /* fillTemplateData, getTemplateData */
-], function(I18n, jQuery) {
+import I18n from 'i18n!sub_accounts'
+import jQuery from 'jquery'
+import './jquery.ajaxJSON'
+import './jquery.instructure_forms' /* formSubmit, fillFormData */
+import './jquery.instructure_misc_helpers' /* replaceTags */
+import './jquery.instructure_misc_plugins' /* confirmDelete, showIf */
+import './jquery.keycodes'
+import './jquery.loadingImg'
+import './jquery.templateData'
 
 jQuery(function($){
   
@@ -85,6 +83,11 @@ jQuery(function($){
       var url = $.replaceTags($("#sub_account_urls .sub_account_url").attr('href'), 'id', account.id);
       $(this).attr({action: url, method: 'PUT'});
       $(this).parents(".account:first").attr('id', 'account_' + account.id);
+
+      var expand_link = $("#account_" + account.id + " .expand_sub_accounts_link");
+      expand_link.attr({'data-link': $.replaceTags(expand_link.attr('data-link'), 'id', account.id)});
+
+      $("#account_" + account.id + " > .header .name").focus();
     }
   });
   
@@ -101,9 +104,19 @@ jQuery(function($){
         url: $(this).parents(".header").find("form").attr('action'),
         message: I18n.t('confirms.delete_subaccount', "Are you sure you want to delete this sub-account?"),
         success: function() {
+          var $list_entry = $(this).closest(".sub_account");
+          var $prev_entry = $list_entry.prev();
+          var $focusTo = $prev_entry.length ? $("> .account > .header .name", $prev_entry) : $("> .header .name", $list_entry.closest(".account"))
           $(this).slideUp(function() {
             $(this).remove();
+            $focusTo.focus();
           });
+        },
+        error: function(data, request, status, error) {
+          this.undim();
+          if (data.hasOwnProperty('message')) {
+            alert(data.message);
+          }
         }
       });
     }
@@ -113,7 +126,7 @@ jQuery(function($){
   $(".collapse_sub_accounts_link").click(function() {
     var $header = $(this).parents(".header:first");
     $header.closest(".account").children("ul").slideUp();
-    $header.find(".expand_sub_accounts_link").show();
+    $header.find(".expand_sub_accounts_link").show().focus();
     $header.find(".collapse_sub_accounts_link, .add_sub_account_link").hide();
     return false;
   });
@@ -124,9 +137,10 @@ jQuery(function($){
       $header.parent(".account").children("ul").slideDown();
       $header.find(".expand_sub_accounts_link").hide();
       $header.find(".collapse_sub_accounts_link, .add_sub_account_link").show();
+      $header.find(".collapse_sub_accounts_link").focus();
     } else {
       $header.loadingImage({image_size: 'small'});
-      $.ajaxJSON($(this).attr('href'), 'GET', {}, function(data) {
+      $.ajaxJSON($(this).data('link'), 'GET', {}, function(data) {
         $header.loadingImage('remove').find(".expand_sub_accounts_link").hide();
         $header.find(".collapse_sub_accounts_link, .add_sub_account_link").show();
         $header.parent(".account").children("ul").empty().hide();
@@ -143,8 +157,8 @@ jQuery(function($){
           }
           sub_account.courses_count = I18n.t('courses_count', {one: '1 Course', other: '%{count} Courses'}, {count: sub_account.course_count});
           sub_account.sub_accounts_count = I18n.t('sub_accounts_count', {one: '1 Sub-Account', other: '%{count} Sub-Accounts'}, {count: sub_account.sub_account_count});
-          $("<li class='sub_account'/>")
-            .append($("#account_blank")
+          var sub_account_node = $("<li class='sub_account'/>")
+          sub_account_node.append($("#account_blank")
                       .clone(true)
                       .attr('id', 'account_new')
                       .show()
@@ -158,19 +172,21 @@ jQuery(function($){
             .find(".sub_accounts_count").showIf(sub_account.sub_account_count).end()
             .find(".courses_count").showIf(sub_account.course_count).end()
             .find(".collapse_sub_accounts_link").hide().end()
-            .find(".expand_sub_accounts_link").showIf(sub_account.sub_account_count > 0).end()
+            .find(".expand_sub_accounts_link").showIf(sub_account.sub_account_count > 0).attr({
+                'data-link': $.replaceTags(sub_account_node.find('.expand_sub_accounts_link').attr('data-link'), 'id', sub_account.id)
+              }).end()
             .find(".add_sub_account_link").showIf(sub_account.sub_account_count == 0).end()
             .find(".edit_sub_account_form").attr({
-              action: $.replaceTags($("#sub_account_urls .sub_account_url").attr('href'), 'id', sub_account.id), 
+              action: $.replaceTags($("#sub_account_urls .sub_account_url").attr('href'), 'id', sub_account.id),
               method: 'PUT'}
             );
         }
         $header.parent(".account").children("ul").slideDown();
+        $header.find(".collapse_sub_accounts_link").focus();
       }, function(data) {
       });
     }
     return false;
   });
   
-});
 });

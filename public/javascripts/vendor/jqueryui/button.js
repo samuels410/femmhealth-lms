@@ -11,11 +11,9 @@
  *	jquery.ui.core.js
  *	jquery.ui.widget.js
  */
-define([
-  'jquery',
-  'jqueryui/core',
-  'jqueryui/widget'
-], function( $ ) {
+import $ from 'jquery'
+import 'jqueryui/core'
+import 'jqueryui/widget'
 
 var lastActive, startXPos, startYPos, clickDragged,
 	baseClasses = "ui-button ui-widget ui-state-default ui-corner-all",
@@ -82,7 +80,9 @@ $.widget( "ui.button", {
 
 		this.buttonElement
 			.addClass( baseClasses )
+			.not( ".no-button-role" )
 			.attr( "role", "button" )
+			.end()
 			.bind( "mouseenter" + this.eventNamespace, function() {
 				if ( options.disabled ) {
 					return;
@@ -415,4 +415,4 @@ $.widget( "ui.buttonset", {
 	}
 });
 
-});
+

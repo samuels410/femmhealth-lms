@@ -1,13 +1,30 @@
+#
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require File.expand_path(File.dirname(__FILE__) + '/common')
 
 describe "enhanceable_content" do
-  include_examples "in-process server selenium tests"
+  include_context "in-process server selenium tests"
 
   it "should automatically enhance content using jQuery UI" do
     stub_kaltura
     course_with_teacher_logged_in
 
-    page = @course.wiki.front_page
+    page = @course.wiki_pages.build(:title => 'title')
     page.body = %{
       <div id="dialog_for_link1" class="enhanceable_content dialog">dialog for link 1</div>
       <a href="#dialog_for_link1" id="link1">link 1</a>
@@ -21,31 +38,6 @@ describe "enhanceable_content" do
         <li>item 2</li>
       </ul>
 
-      <div class="enhanceable_content accordion">
-        <h3><a href="#">Section 1</a></h3>
-        <div>
-          <p>
-            Section 1 Content
-          </p>
-        </div>
-        <h3><a href="#">Section 2</a></h3>
-        <div>
-          <p>
-            Section 2 Content
-          </p>
-        </div>
-        <h3><a href="#">Section 3</a></h3>
-        <div>
-          <p>
-            Section 3 Content
-          </p>
-          <ul>
-            <li>List item one</li>
-            <li>List item two</li>
-            <li>List item three</li>
-          </ul>
-        </div>
-      </div>
 
       <div class="enhanceable_content tabs">
         <ul>
@@ -73,51 +65,75 @@ describe "enhanceable_content" do
 
     dialog = f(".enhanceable_content.dialog")
 
-    # need to wait for the content to get enhanced (it happens in instructure.js in a setTimeout of 1000 ms)
-    keep_trying_until {
-      f("#link1").click
-      dialog.should be_displayed
-      dialog.should have_class('ui-dialog')
-    }
+    f("#link1").click
+    expect(dialog).to be_displayed
+    expect(dialog).to have_class('ui-dialog')
     f(".ui-dialog .ui-dialog-titlebar-close").click
-    dialog.should_not be_displayed
+    expect(dialog).not_to be_displayed
 
-    f(".enhanceable_content.draggable").should have_class('ui-draggable')
-    f(".enhanceable_content.resizable").should have_class('ui-resizable')
+    expect(f(".enhanceable_content.draggable")).to have_class('ui-draggable')
+    expect(f(".enhanceable_content.resizable")).to have_class('ui-resizable')
 
     ul = f(".enhanceable_content.sortable")
-    ul.should be_displayed
-    ul.should have_class('ui-sortable')
-
-    accordion = f(".enhanceable_content.accordion")
-    accordion.should have_class('ui-accordion')
-    headers = accordion.find_elements(:css, ".ui-accordion-header")
-    headers.length.should == 3
-    divs = accordion.find_elements(:css, ".ui-accordion-content")
-    divs.length.should == 3
-    headers[0].should have_class('ui-state-active')
-    divs[0].should be_displayed
-    divs[1].should_not be_displayed
-    headers[1].click
-    wait_for_ajaximations
-    headers[0].should have_class('ui-state-default')
-    headers[1].should have_class('ui-state-active')
-    divs[0].should_not be_displayed
-    divs[1].should be_displayed
+    expect(ul).to be_displayed
+    expect(ul).to have_class('ui-sortable')
 
 
     tabs = f(".enhanceable_content.tabs")
-    tabs.should have_class('ui-tabs')
+    expect(tabs).to have_class('ui-tabs')
     headers = tabs.find_elements(:css, ".ui-tabs-nav li")
-    headers.length.should == 3
+    expect(headers.length).to eq 3
     divs = tabs.find_elements(:css, ".ui-tabs-panel")
-    divs.length.should == 3
-    headers[0].should have_class('ui-state-active')
-    headers[1].should have_class('ui-state-default')
-    divs[0].should be_displayed
-    divs[1].should_not be_displayed
+    expect(divs.length).to eq 3
+    expect(headers[0]).to have_class('ui-state-active')
+    expect(headers[1]).to have_class('ui-state-default')
+    expect(divs[0]).to be_displayed
+    expect(divs[1]).not_to be_displayed
 
-    f('#media_comment_0_deadbeef span.media_comment_thumbnail').should_not be_nil
+    expect(f('#media_comment_0_deadbeef span.media_comment_thumbnail')).not_to be_nil
+  end
+
+  context "media file preview thumbnails" do
+    before :each do
+      stub_kaltura
+      course_factory(active_all: true)
+
+      @attachment = @course.attachments.create!(:uploaded_data => stub_file_data('video1.mp4', nil, 'video/mp4'))
+      @page = @course.wiki_pages.build(:title => 'title')
+      @page.body = %{
+        <a id="media_comment_0_deadbeef" class="instructure_file_link instructure_video_link" title="Video.mp4"
+          href="/courses/#{@course.id}/files/#{@attachment.id}/download?wrap=1">Video</a>
+      }
+      @page.save!
+    end
+
+    it "should show for students" do
+      student_in_course(:course => @course, :active_user => true)
+      user_session(@student)
+      get "/courses/#{@course.id}/wiki/#{@page.url}"
+      expect(f('#media_comment_0_deadbeef span.media_comment_thumbnail')).to_not be_nil
+    end
+
+    describe "for locked files" do
+      before :each do
+        @attachment.locked = true
+        @attachment.save!
+      end
+
+      it "should not show for students" do
+        student_in_course(:course => @course, :active_user => true)
+        user_session(@student)
+        get "/courses/#{@course.id}/wiki/#{@page.url}"
+        expect(f("#content")).not_to contain_css('#media_comment_0_deadbeef span.media_comment_thumbnail')
+      end
+
+      it "should show for teachers" do
+        teacher_in_course(:course => @course, :active_user => true)
+        user_session(@teacher)
+        get "/courses/#{@course.id}/wiki/#{@page.url}"
+        expect(f('#media_comment_0_deadbeef span.media_comment_thumbnail')).to_not be_nil
+      end
+    end
   end
 end
 

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -31,6 +31,7 @@ define [
     events:
       'submit': 'onSubmit'
       'click .cancel_button': 'onCancel'
+      'keydown': 'onKeydown'
 
     initialize: ->
       super
@@ -44,7 +45,7 @@ define [
 
     render: (focus = true) ->
       @$el.show()
-      @$el.find('h2').focus() if focus
+      @$el.find('[name="collaboration[collaboration_type]"]').focus() if focus
       @picker.render() if @$collaborators.is(':empty')
       this
 
@@ -66,6 +67,10 @@ define [
       e.preventDefault()
       @$el.hide()
       @trigger('hide')
+
+    onKeydown: (e) ->
+      if e.which == 27
+        @onCancel(e)
 
     raiseTitleError: ->
       @trigger('error', @$titleInput, @translations.errors.noName)

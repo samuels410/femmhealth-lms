@@ -1,4 +1,21 @@
-define ['jquery'], ($) ->
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+define ['jquery', 'moment', 'compiled/util/fcUtil'], ($, moment, fcUtil) ->
 
   class TimeBlockListManager
     # takes an optional array of Date pairs
@@ -24,8 +41,7 @@ define ['jquery'], ($) ->
           continue
 
         lastBlock = consolidatedBlocks.last()
-        if lastBlock.end.getTime() == block.start.getTime() &&
-           !lastBlock.locked && !block.locked
+        if +lastBlock.end == +block.start && !lastBlock.locked && !block.locked
           lastBlock.end = block.end
         else
           consolidatedBlocks.push block
@@ -36,15 +52,13 @@ define ['jquery'], ($) ->
     split: (minutes) ->
       @consolidate()
 
-      splitBlockLength = minutes * 60 * 1000
-
       for block in @blocks
         continue if block.locked
-        while block.end - block.start > minutes * 60 * 1000
-          oldStart = block.start
-          newStart = new Date(block.start.getTime() + splitBlockLength)
-          block.start = new Date(block.start.getTime() + splitBlockLength)
-          @add(oldStart, newStart)
+        nextBreak = fcUtil.clone(block.start).add(minutes, 'minutes')
+        while block.end > nextBreak
+          @add(block.start, fcUtil.clone(nextBreak))
+          block.start = fcUtil.clone(nextBreak)
+          nextBreak.add(minutes, 'minutes')
 
       @sort()
 

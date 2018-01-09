@@ -1,10 +1,34 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'underscore'
   'compiled/models/WikiPage'
   'compiled/views/wiki/WikiPageView'
 ], (_, WikiPage, WikiPageView) ->
-  
-  module 'WikiPageView'
+
+  QUnit.module 'WikiPageView'
+
+  test 'display_show_all_pages makes it through constructor', ->
+    model = new WikiPage
+    view = new WikiPageView
+      model: model
+      display_show_all_pages: true
+    equal(true, view.display_show_all_pages)
 
   test 'model.view maintained by item view', ->
     model = new WikiPage
@@ -30,7 +54,7 @@ define [
     equal view.publishButtonView.$el.data('test-data'), 'test-is-good', 'test data preserved (by detach)'
 
 
-  module 'WikiPageView:JSON'
+  QUnit.module 'WikiPageView:JSON'
 
   test 'modules_path', ->
     model = new WikiPage
@@ -61,7 +85,7 @@ define [
     strictEqual view.toJSON().wiki_page_edit_path, '/groups/73/pages/37/revisions', 'wiki_page_history_path represented in toJSON'
 
   test 'lock_info.unlock_at', ->
-    @sandbox.useFakeTimers(new Date(2012, 0, 31).getTime())
+    clock = sinon.useFakeTimers(new Date(2012, 0, 31).getTime())
     model = new WikiPage
       locked_for_user: true
       lock_info:
@@ -69,6 +93,29 @@ define [
     view = new WikiPageView
       model: model
     ok !!view.toJSON().lock_info?.unlock_at.match('Feb'), 'lock_info.unlock_at reformatted and represented in toJSON'
+    clock.restore()
+
+  test 'useAsFrontPage for published wiki_pages_path', ->
+    model = new WikiPage
+      front_page: false
+      published: true
+    view = new WikiPageView
+      model: model
+    stub = @stub(model, 'setFrontPage')
+
+    view.useAsFrontPage()
+    ok stub.calledOnce
+
+  test 'useAsFrontPage should not work on unpublished wiki_pages_path', ->
+    model = new WikiPage
+      front_page: false
+      published: false
+    view = new WikiPageView
+      model: model
+    stub = @stub(model, 'setFrontPage')
+
+    view.useAsFrontPage()
+    notOk stub.calledOnce
 
   testRights = (subject, options) ->
     test "#{subject}", ->
@@ -160,99 +207,3 @@ define [
       DELETE: false
       READ_REVISIONS: true
       ACCESS_GEAR_MENU: true
-
-
-  module 'WikiPageView:locked'
-
-  testLockedPage = (subject, options) ->
-    test subject, ->
-      @sandbox.useFakeTimers(new Date(2012, 0, 31).getTime())
-
-      model = new WikiPage _.extend(locked_for_user: true, options?.attributes)
-      view = new WikiPageView _.extend(model: model, options?.view_options)
-      view.render()
-
-      locked_alert = view.$el.find('.locked-alert').html()
-      if options?.matches
-        for match in options.matches
-          ok locked_alert.match(match), "matched '#{match}'"
-      if options?.negative_matches
-        for match in options.negative_matches
-          ok !locked_alert.match(match), "did not match '#{match}'"
-
-  testLockedPage 'locked_for_user',
-    matches: ['locked']
-
-  testLockedPage 'unlock_at',
-    attributes:
-      lock_info:
-        unlock_at: '2012-02-15T12:00:00Z'
-    matches: ['available on']
-
-  testLockedPage 'unlock_at (in the past)',
-    attributes:
-      lock_info:
-        unlock_at: '2012-01-01T12:00:00Z'
-    negative_matches: ['available on']
-
-  testLockedPage 'module.prerequisite.name',
-    attributes:
-      lock_info:
-        context_module:
-          prerequisites: [
-            type: 'context_module'
-            name: 'context module'
-          ,
-            type: 'context_module'
-            name: 'other module'
-          ]
-    matches: ['context module', 'other module']
-
-  testLockedPage 'module.prerequisite.name, unlock_at',
-    attributes:
-      lock_info:
-        context_module:
-          prerequisites: [
-            type: 'context_module'
-            name: 'context module'
-          ,
-            type: 'context_module'
-            name: 'other module'
-          ]
-        unlock_at: '2012-02-15T12:00:00Z'
-    matches: ['context module', 'other module', 'available on']
-
-  testLockedPage 'modules_path, module.prerequisite.id, module.prerequisite.name',
-    attributes:
-      lock_info:
-        context_module:
-          prerequisites: [
-            id: 'module_id'
-            type: 'context_module'
-            name: 'context module'
-          ,
-            id: 'other_id'
-            type: 'context_module'
-            name: 'other module'
-          ]
-    view_options:
-      modules_path: 'modules_path'
-    matches: ['context module', 'other module', 'href', 'modules_path/module_id']
-
-  testLockedPage 'modules_path, module.prerequisite.id, module.prerequisite.name, unlock_at',
-    attributes:
-      lock_info:
-        context_module:
-          prerequisites: [
-            id: 'module_id'
-            type: 'context_module'
-            name: 'context module'
-          ,
-            id: 'other_id'
-            type: 'context_module'
-            name: 'other module'
-          ]
-        unlock_at: '2012-01-01T12:00:00Z'
-    view_options:
-      modules_path: 'modules_path'
-    matches: ['context module', 'other module', 'href', 'modules_path/module_id', 'available on']

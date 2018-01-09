@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,21 +21,21 @@ require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 describe MediaObject do
   context "loading with legacy support" do
     it "should load by either media_id or old_media_id" do
-      course
+      course_factory
       mo = factory_with_protected_attributes(MediaObject, :media_id => '0_abcdefgh', :old_media_id => '1_01234567', :context => @course)
-      
-      MediaObject.by_media_id('0_abcdefgh').first.should == mo
-      MediaObject.by_media_id('1_01234567').first.should == mo
+
+      expect(MediaObject.by_media_id('0_abcdefgh').first).to eq mo
+      expect(MediaObject.by_media_id('1_01234567').first).to eq mo
     end
-    
+
     it "should raise an error if someone tries to use find_by_media_id" do
-      lambda { MediaObject.find_by_media_id('fjdksl') }.should raise_error
+      expect { MediaObject.find_by_media_id('fjdksl') }.to raise_error('Do not look up MediaObjects by media_id - use the scope by_media_id instead to support migrated content.')
     end
   end
 
   describe ".build_media_objects" do
     it "should delete attachments created temporarily for import" do
-      course
+      course_factory
       folder = Folder.assert_path(CC::CCHelper::MEDIA_OBJECTS_FOLDER, @course)
       @a1 = attachment_model(:folder => folder, :uploaded_data => stub_file_data('video1.mp4', nil, 'video/mp4'))
       @a2 = attachment_model(:context => @course, :uploaded_data => stub_file_data('video1.mp4', nil, 'video/mp4'))
@@ -46,59 +46,91 @@ describe MediaObject do
         ],
       }
       MediaObject.build_media_objects(data, Account.default.id)
-      @a1.reload.file_state.should == 'deleted'
-      @a2.reload.file_state.should == 'available'
+      expect(@a1.reload.file_state).to eq 'deleted'
+      expect(@a2.reload.file_state).to eq 'available'
     end
 
     it "should build media objects from attachment_id" do
-      course
+      course_factory
       @a1 = attachment_model(:context => @course, :uploaded_data => stub_file_data('video1.mp4', nil, 'video/mp4'))
-      @a2 = attachment_model(:context => @course, :uploaded_data => stub_file_data('video1.mp4', nil, 'video/mp4'))
       @a3 = attachment_model(:context => @course, :uploaded_data => stub_file_data('video1.mp4', nil, 'video/mp4'))
+      @a4 = attachment_model(:context => @course, :uploaded_data => stub_file_data('video1.mp4', nil, 'video/mp4'))
       data = {
           :entries => [
-              { :entryId => "test", :originalId => %Q[{"context_code":"context", "attachment_id": "#{@a2.id}"} ]},
               { :entryId => "test2", :originalId => "#{@a1.id}" },
               { :entryId => "test3", :originalId => @a3.id },
+              { :entryId => "test4", :originalId => "attachment_id=#{@a4.id}" }
           ],
       }
-      MediaObject.create!(:context => user, :media_id => "test")
-      MediaObject.create!(:context => user, :media_id => "test2")
-      MediaObject.create!(:context => user, :media_id => "test3")
+      MediaObject.create!(:context => user_factory, :media_id => "test")
+      MediaObject.create!(:context => user_factory, :media_id => "test2")
+      MediaObject.create!(:context => user_factory, :media_id => "test3")
       MediaObject.build_media_objects(data, Account.default.id)
-      media_object = MediaObject.find_by_attachment_id(@a1.id)
-      media_object.should_not be_nil
-      media_object = MediaObject.find_by_attachment_id(@a2.id)
-      media_object.should_not be_nil
-      media_object = MediaObject.find_by_attachment_id(@a3.id)
-      media_object.should_not be_nil
+      media_object = MediaObject.where(attachment_id: @a1).first
+      expect(media_object).not_to be_nil
+      media_object = MediaObject.where(attachment_id: @a3).first
+      expect(media_object).not_to be_nil
+      media_object = MediaObject.where(attachment_id: @a4).first
+      expect(media_object).not_to be_nil
     end
   end
 
   describe ".ensure_media_object" do
     it "should not create if the media object exists already" do
-      MediaObject.create!(:context => user, :media_id => "test")
-      expect {
-        MediaObject.ensure_media_object("test", {})
-      }.to change { Delayed::Job.jobs_count(:future) }.by(0)
+      MediaObject.create!(:context => user_factory, :media_id => "test")
+      expect(MediaObject).to receive(:create!).never
+      MediaObject.ensure_media_object("test", {})
     end
 
     it "should not create if the media id doesn't exist in kaltura" do
-      MediaObject.expects(:media_id_exists?).with("test").returns(false)
-      expect {
-        MediaObject.ensure_media_object("test", {})
-        run_jobs
-      }.to change { Delayed::Job.jobs_count(:future) }.by(0)
+      expect(MediaObject).to receive(:media_id_exists?).with("test").and_return(false)
+      expect(MediaObject).to receive(:create!).never
+      MediaObject.ensure_media_object("test", {})
+      run_jobs
     end
 
     it "should create the media object" do
-      MediaObject.expects(:media_id_exists?).with("test").returns(true)
-      expect {
-        MediaObject.ensure_media_object("test", { :context => user })
-        run_jobs
-      }.to change { Delayed::Job.jobs_count(:future) }.by(1)
+      expect(MediaObject).to receive(:media_id_exists?).with("test").and_return(true)
+      MediaObject.ensure_media_object("test", { :context => user_factory })
+      run_jobs
       obj = MediaObject.by_media_id("test").first
-      obj.context.should == @user
+      expect(obj.context).to eq @user
+    end
+  end
+
+  describe '#transcoded_details' do
+    it 'returns the mp3 info' do
+      mo = MediaObject.create!(:context => user_factory, :media_id => "test")
+      expect(mo.transcoded_details).to be_nil
+      mo.data = { extensions: { mov: { id: "t-xxx" } } }
+      expect(mo.transcoded_details).to be_nil
+      mo.data = { extensions: { mp3: { id: "t-yyy" } } }
+      expect(mo.transcoded_details).to eq(id: "t-yyy")
+    end
+
+    it 'returns the mp4 info' do
+      mo = MediaObject.create!(:context => user_factory, :media_id => "test")
+      mo.data = { extensions: { mp4: { id: "t-yyy" } } }
+      expect(mo.transcoded_details).to eq(id: "t-yyy")
+    end
+  end
+
+  describe '#retrieve_details_ensure_codecs' do
+    it "retries later when the transcode isn't available" do
+      Timecop.freeze do
+        mo = MediaObject.create!(:context => user_factory, :media_id => "test")
+        expect(mo).to receive(:retrieve_details)
+        expect(mo).to receive(:send_at).with(5.minutes.from_now, :retrieve_details_ensure_codecs, 2)
+        mo.retrieve_details_ensure_codecs(1)
+      end
+    end
+
+    it "verifies existence of the transcoded details" do
+      mo = MediaObject.create!(:context => user_factory, :media_id => "test")
+      mo.data = { extensions: { mp4: { id: "t-yyy" } } }
+      expect(mo).to receive(:retrieve_details)
+      expect(mo).to receive(:send_at).never
+      mo.retrieve_details_ensure_codecs(1)
     end
   end
 
@@ -111,8 +143,8 @@ describe MediaObject do
         mo.user = nil
         mo.save!
 
-        mo.grants_right?(@teacher, nil, :add_captions).should == true
-        mo.grants_right?(@teacher, nil, :delete_captions).should == true
+        expect(mo.grants_right?(@teacher, :add_captions)).to eq true
+        expect(mo.grants_right?(@teacher, :delete_captions)).to eq true
       end
 
       it "should not allow course non-admin users to add_captions to userless objects" do
@@ -122,8 +154,8 @@ describe MediaObject do
         mo.user = nil
         mo.save!
 
-        mo.grants_right?(@student, nil, :add_captions).should == false
-        mo.grants_right?(@student, nil, :delete_captions).should == false
+        expect(mo.grants_right?(@student, :add_captions)).to eq false
+        expect(mo.grants_right?(@student, :delete_captions)).to eq false
       end
 
       it "should allow course non-admin users to add_captions to objects belonging to them" do
@@ -133,32 +165,35 @@ describe MediaObject do
         mo.user = @student
         mo.save!
 
-        mo.grants_right?(@student, nil, :add_captions).should == true
-        mo.grants_right?(@student, nil, :delete_captions).should == true
+        expect(mo.grants_right?(@student, :add_captions)).to eq true
+        expect(mo.grants_right?(@student, :delete_captions)).to eq true
       end
 
       it "should not allow course non-admin users to add_captions to objects not belonging to them" do
         course_with_student
         mo = media_object
-        user
+        user_factory
 
         mo.user = @user
         mo.save!
 
-        mo.grants_right?(@student, nil, :add_captions).should == false
-        mo.grants_right?(@student, nil, :delete_captions).should == false
+        expect(mo.grants_right?(@student, :add_captions)).to eq false
+        expect(mo.grants_right?(@student, :delete_captions)).to eq false
       end
     end
   end
 
   describe ".add_media_files" do
-    it "should work for user context" do
-      stub_kaltura
-      user
-      attachment_obj_with_context(@user, user: @user)
-      Kaltura::ClientV3.any_instance.stubs(:startSession).returns(nil)
-      Kaltura::ClientV3.any_instance.stubs(:bulkUploadAdd).returns({})
-      MediaObject.add_media_files(@attachment, false)
+    it "delegates to the KalturaMediaFileHandler to make a bulk upload to kaltura" do
+      kaltura_media_file_handler = double('KalturaMediaFileHandler')
+      expect(KalturaMediaFileHandler).to receive(:new).and_return(kaltura_media_file_handler)
+
+      attachments = [ Attachment.new ]
+      wait_for_completion = true
+
+      expect(kaltura_media_file_handler).to receive(:add_media_files).with(attachments, wait_for_completion).and_return(:retval)
+
+      expect(MediaObject.add_media_files(attachments, wait_for_completion)).to eq :retval
     end
   end
 end

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -32,98 +32,98 @@ describe DiscussionTopicPresenter do
   }
 
   before do
-    AssignmentOverrideApplicator.stubs(:assignment_overridden_for).
-      with(topic.assignment,user).returns assignment
+    allow(AssignmentOverrideApplicator).to receive(:assignment_overridden_for).
+      with(topic.assignment,user).and_return assignment
   end
 
   describe "#initialize" do
     context "when no arguments passed" do
       it "creates a discussion topic and current_user for you" do
         presenter = DiscussionTopicPresenter.new
-        presenter.topic.is_a?(DiscussionTopic).should == true
-        presenter.user.is_a?(User).should == true
+        expect(presenter.topic.is_a?(DiscussionTopic)).to eq true
+        expect(presenter.user.is_a?(User)).to eq true
       end
     end
 
     context "when discussion_topic and current_user args passed" do
       it "returns the overridden assignment if topic is for assignment" do
-        AssignmentOverrideApplicator.expects(:assignment_overridden_for).
-          with(topic.assignment,user).returns assignment
+        expect(AssignmentOverrideApplicator).to receive(:assignment_overridden_for).
+          with(topic.assignment,user).and_return assignment
         presenter = DiscussionTopicPresenter.new(topic,user)
-        presenter.assignment.should == assignment
+        expect(presenter.assignment).to eq assignment
       end
 
       it "will have a nil assignment if topic not for grading" do
-        DiscussionTopicPresenter.new(
+        expect(DiscussionTopicPresenter.new(
           DiscussionTopic.new(:title => "no assignment")
-        ).assignment.should be_nil
+        ).assignment).to be_nil
       end
     end
   end
 
   describe "#has_attached_rubric?" do
     it "returns true if assignment has a rubric association with a rubric" do
-      assignment.expects(:rubric_association).
-        returns stub(:try => stub(:rubric => stub))
-      presenter.has_attached_rubric?.should == true
+      expect(assignment).to receive(:rubric_association).
+        and_return double(:try => double(:rubric => double))
+      expect(presenter.has_attached_rubric?).to eq true
     end
 
     it "returns false if assignment has nil rubric association" do
-      assignment.expects(:rubric_association).returns nil
-      presenter.has_attached_rubric?.should == false
+      expect(assignment).to receive(:rubric_association).and_return nil
+      expect(presenter.has_attached_rubric?).to eq false
     end
 
     it "returns false if assignment has a rubric association but no rubric" do
-      assignment.expects(:rubric_association).returns stub(:rubric => nil)
-      presenter.has_attached_rubric?.should == false
+      expect(assignment).to receive(:rubric_association).and_return double(:rubric => nil)
+      expect(presenter.has_attached_rubric?).to eq false
     end
   end
 
   describe "#should_show_rubric?" do
     it "returns false if no assignment on the topic" do
-        DiscussionTopicPresenter.new(
+        expect(DiscussionTopicPresenter.new(
           DiscussionTopic.new(:title => "no assignment")
-        ).should_show_rubric?(user).should == false
+        ).should_show_rubric?(user)).to eq false
     end
 
     it "returns true if has_attached_rubric? is false" do
-      assignment.expects(:rubric_association).returns stub(:rubric => stub)
-      presenter.should_show_rubric?(user).should == true
+      expect(assignment).to receive(:rubric_association).and_return double(:rubric => double)
+      expect(presenter.should_show_rubric?(user)).to eq true
     end
 
     context "no rubric association or rubric for the topic's assignment" do
-      before { assignment.stubs(:rubric_association).returns nil }
+      before { allow(assignment).to receive(:rubric_association).and_return nil }
 
       it "returns true when the assignment grants the user update privs" do
-        assignment.expects(:grants_right?).with(user,nil,:update).returns true
-        presenter.should_show_rubric?(user).should == true
+        expect(assignment).to receive(:grants_right?).with(user, :update).and_return true
+        expect(presenter.should_show_rubric?(user)).to eq true
       end
 
       it "returns false when the assignment grants the user update privs" do
-        assignment.expects(:grants_right?).with(user,nil,:update).returns false
-        presenter.should_show_rubric?(user).should == false
+        expect(assignment).to receive(:grants_right?).with(user, :update).and_return false
+        expect(presenter.should_show_rubric?(user)).to eq false
       end
     end
 
   end
 
-  describe "#comments_diabled?" do
+  describe "#comments_disabled?" do
     it "only returns true when topic is assignment, its context is a course, "+
       "and the course settings lock all announcements" do
-      announcement = Announcement.new(:title => "Announcement")
-      announcement.context = Course.new(:name => "Canvas Yah Yeah")
-      announcement.context.expects(:settings).
-        returns({:lock_all_announcements => true })
-      DiscussionTopicPresenter.new(announcement).comments_disabled?.
-        should == true
+      course_factory
+      @course.lock_all_announcements = true
+      @course.save!
+      announcement = Announcement.new(:title => "Announcement", :context => @course)
+      expect(DiscussionTopicPresenter.new(announcement).comments_disabled?).
+        to eq true
     end
 
     it "returns false for announcements or other criteria not met" do
-      presenter.comments_disabled?.should == false
-      course = Course.new :name => "Canvas 101"
-      announcement = Announcement.new(:title => "b", :context => course)
-      DiscussionTopicPresenter.new(announcement).comments_disabled?.
-        should == false
+      expect(presenter.comments_disabled?).to eq false
+      course_factory
+      announcement = Announcement.new(:title => "b", :context => @course)
+      expect(DiscussionTopicPresenter.new(announcement).comments_disabled?).
+        to eq false
     end
   end
 
@@ -132,14 +132,14 @@ describe DiscussionTopicPresenter do
       "has a large roster" do
       topic.context = Course.new(:name => "Canvas")
       topic.context.large_roster = true
-      presenter.large_roster?.should == true
+      expect(presenter.large_roster?).to eq true
     end
 
     it "returns false when context responds to large roster and context " +
       "doesn't have a large roster" do
       topic.context = Course.new(:name => "Canvas")
       topic.context.large_roster = false
-      presenter.large_roster?.should == false
+      expect(presenter.large_roster?).to eq false
     end
 
     context "topic's context isn't a course" do
@@ -153,11 +153,11 @@ describe DiscussionTopicPresenter do
 
       it "returns false if topic's context's context is nil" do
         @group.context = nil
-        presenter.large_roster?.should == false
+        expect(presenter.large_roster?).to eq false
       end
 
       it "returns true if topic's context's context has large_roster?" do
-        presenter.large_roster?.should == true
+        expect(presenter.large_roster?).to eq true
       end
 
     end
@@ -168,32 +168,27 @@ describe DiscussionTopicPresenter do
     it "returns false when course is large roster" do
       topic.context = Course.new(name: 'Canvas')
       topic.context.large_roster = true
-      presenter.allows_speed_grader?.should == false
+      expect(presenter.allows_speed_grader?).to eq false
     end
 
-    context "draft state" do
+    context "with assignment" do
 
       before do
         course = topic.context = Course.create!(name: 'Canvas')
-        course.root_account.enable_feature!(:draft_state)
         assignment.context = course
         assignment.save!
         topic.assignment = assignment
       end
 
-      it "returns false when draft state enabled and assignment unpublished" do
+      it "returns false when assignment unpublished" do
         assignment.unpublish
-        presenter.allows_speed_grader?.should == false
+        expect(presenter.allows_speed_grader?).to eq false
       end
 
-      it "returns true when draft state enabled and assignment published" do
-        presenter.allows_speed_grader?.should == true
+      it "returns true when assignment published" do
+        expect(presenter.allows_speed_grader?).to eq true
       end
 
-      it "returns true when draft state disabled" do
-        topic.context.root_account.disable_feature!(:draft_state)
-        presenter.allows_speed_grader?.should == true
-      end
     end
   end
 

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,12 +17,11 @@
 #
 
 class ClonedItem < ActiveRecord::Base
-  include PolymorphicTypeOverride
-  override_polymorphic_types original_item_type: {from: 'Quiz', to: 'Quizzes::Quiz'}
-
-  belongs_to :original_item, :polymorphic => true
-  has_many :attachments, :order => 'id asc'
-  has_many :discussion_topics, :order => 'id asc'
-  has_many :wiki_pages, :order => 'id asc'
-  attr_accessible :original_item
+  belongs_to :original_item, polymorphic:
+      [:attachment, :content_tag, :folder, :assignment, :wiki_page,
+       :discussion_topic, :context_module, :calendar_event, :assignment_group,
+       :context_external_tool, { quiz: 'Quizzes::Quiz' }]
+  has_many :attachments, -> { order(:id) }
+  has_many :discussion_topics, -> { order(:id) }
+  has_many :wiki_pages, -> { order(:id) }
 end

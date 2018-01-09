@@ -1,3 +1,21 @@
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
 <% content_for :page_title do %><%= @account.name %><% end %>
 <%
   @active_tab = "courses"
@@ -8,7 +26,7 @@
 <% end %>
 
 
-<h2><%= t(:title, "Courses In This Account") %></h2>
+<h1><%= t(:title, "Courses In This Account") %></h1>
 <% if @associated_courses_count > 0 %>
   <% if @term %>
     <h3 style="margin-bottom: 1em;"><%= mt(:subtitle_term, "For the term **%{term}**", :term => @term.name) %></h3>
@@ -21,11 +39,8 @@
   <% end %>
 
   <ul class='courses' style="list-style-type: none;">
-    
     <%= render :partial => "course", :collection => @courses %>
-    <%= render :partial => "course" %>
-  </ul>  
-</div>
+  </ul>
 <% else %>
   <h3><%= @root_account.enrollment_terms.active.count > 1 ?
           t(:no_courses_term_message, "There are no courses in this term") :

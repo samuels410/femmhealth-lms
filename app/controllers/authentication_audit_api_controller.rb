@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,40 +20,50 @@
 #
 # Query audit log of authentication events (logins and logouts).
 #
-# Only available if the server has configured audit logs; will return 404 Not
-# Found response otherwise.
-#
 # For each endpoint, a compound document is returned. The primary collection of
 # event objects is paginated, ordered by date descending. Secondary collections
 # of logins, accounts, page views, and users related to the returned events
 # are also included. Refer to the Logins, Accounts, Page Views, and Users APIs
 # for descriptions of the objects in those collections.
 #
-# @object AuthenticationEvent
+# Authentication logs are stored for one year.
+#
+# @model AuthenticationEvent
 #     {
-#       // ID of the event.
-#       "id": "e2b76430-27a5-0131-3ca1-48e0eb13f29b",
-#
-#       // timestamp of the event
-#       "created_at": "2012-07-19T15:00:00-06:00",
-#
-#       // authentication event type ('login' or 'logout')
-#       "event_type": "login",
-#
-#       "links": {
-#          // ID of the login associated with the event
-#          "login_id": 9478,
-#
-#          // ID of the account associated with the event. will match the
-#          // account_id in the associated login.
-#          "account_id": 2319,
-#
-#          // ID of the user associated with the event will match the user_id in
-#          // the associated login.
-#          "user_id": 362,
-#
-#          // ID of the page view during the event if it exists.
-#          "page_view_id": "e2b76430-27a5-0131-3ca1-48e0eb13f29b"
+#       "id": "AuthenticationEvent",
+#       "description": "",
+#       "properties": {
+#         "created_at": {
+#           "description": "timestamp of the event",
+#           "example": "2012-07-19T15:00:00-06:00",
+#           "type": "datetime"
+#         },
+#         "event_type": {
+#           "description": "authentication event type ('login' or 'logout')",
+#           "example": "login",
+#           "type": "string",
+#           "allowableValues": {
+#             "values": [
+#               "login",
+#               "logout"
+#             ]
+#           }
+#         },
+#         "pseudonym_id": {
+#           "description": "ID of the pseudonym (login) associated with the event",
+#           "example": 9478,
+#           "type": "integer"
+#         },
+#         "account_id": {
+#           "description": "ID of the account associated with the event. will match the account_id in the associated pseudonym.",
+#           "example": 2319,
+#           "type": "integer"
+#         },
+#         "user_id": {
+#           "description": "ID of the user associated with the event will match the user_id in the associated pseudonym.",
+#           "example": 362,
+#           "type": "integer"
+#         }
 #       }
 #     }
 #
@@ -64,10 +74,11 @@ class AuthenticationAuditApiController < AuditorApiController
   #
   # List authentication events for a given login.
   #
-  # @argument start_time [Optional, DateTime]
+  # @argument start_time [DateTime]
   #   The beginning of the time range from which you want events.
+  #   Events are stored for one year.
   #
-  # @argument end_time [Optional, Datetime]
+  # @argument end_time [DateTime]
   #   The end of the time range from which you want events.
   #
   def for_login
@@ -84,14 +95,15 @@ class AuthenticationAuditApiController < AuditorApiController
   #
   # List authentication events for a given account.
   #
-  # @argument start_time [Optional, Datetime]
+  # @argument start_time [DateTime]
   #   The beginning of the time range from which you want events.
+  #   Events are stored for one year.
   #
-  # @argument end_time [Optional, Datetime]
+  # @argument end_time [DateTime]
   #   The end of the time range from which you want events.
   #
   def for_account
-    @account = api_find(Account.active, params[:account_id])
+    @account = api_find(Account.root_accounts.active, params[:account_id])
     if account_visible(@account) || account_visible(Account.site_admin)
       events = Auditors::Authentication.for_account(@account, query_options)
       render_events(events, @account)
@@ -104,10 +116,11 @@ class AuthenticationAuditApiController < AuditorApiController
   #
   # List authentication events for a given user.
   #
-  # @argument start_time [Optional, Datetime]
+  # @argument start_time [DateTime]
   #   The beginning of the time range from which you want events.
+  #   Events are stored for one year.
   #
-  # @argument end_time [Optional, Datetime]
+  # @argument end_time [DateTime]
   #   The end of the time range from which you want events.
   #
   def for_user
@@ -120,7 +133,7 @@ class AuthenticationAuditApiController < AuditorApiController
         Account.joins(:pseudonyms).where(:pseudonyms => {
           :user_id => @user,
           :workflow_state => 'active'
-        }).all
+        }).to_a
       end
       visible_accounts = accounts.select{ |a| account_visible(a) }
       if visible_accounts == accounts
@@ -128,7 +141,7 @@ class AuthenticationAuditApiController < AuditorApiController
         render_events(events, @user)
       elsif visible_accounts.present?
         pseudonyms = Shard.partition_by_shard(visible_accounts) do |shard_accounts|
-          Pseudonym.active.where(user_id: @user, account_id: shard_accounts).all
+          Pseudonym.active.where(user_id: @user, account_id: shard_accounts).to_a
         end
         events = Auditors::Authentication.for_pseudonyms(pseudonyms, query_options)
         render_events(events, @user)
@@ -141,7 +154,7 @@ class AuthenticationAuditApiController < AuditorApiController
   private
 
   def account_visible(account)
-    account.grants_rights?(@current_user, nil, :view_statistics, :manage_user_logins).values.any?
+    account.grants_any_right?(@current_user, :view_statistics, :manage_user_logins)
   end
 
   def render_events(events, context, route=nil)

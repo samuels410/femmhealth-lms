@@ -1,8 +1,10 @@
 {{#if multipleDueDates}}
   <strong>{{#t "due"}}Due{{/t}}</strong>
 
-  <a title class="vdd_tooltip_link"
-     aria-labelledby="vdd_tooltip_{{selector}}"
+  {{#if allDates}}
+  <a title="tooltip"
+     class="vdd_tooltip_link"
+     aria-describedby="vdd_tooltip_{{selector}}"
      data-tooltip-selector="#vdd_tooltip_{{selector}}"
      {{#if linkHref}}href="{{linkHref}}"{{/if}}
      >{{#t "multiple_dates"}}Multiple Dates{{/t}}</a>
@@ -12,15 +14,28 @@
       {{#each allDates}}
         <div class="clearfix">
           <dt>{{dueFor}}</dt>
-          <dd>{{#if dueAt}} {{strftime dueAt "%b %-d"}} {{else}} - {{/if}}</dd>
+          <dd>
+            {{#if dueAt}}
+              <span {{contextSensitiveDatetimeTitle dueAt}}>
+                {{tDateToString dueAt 'short'}}
+              </span>
+            {{else}}
+               -
+            {{/if}}
+          </dd>
         </div>
       {{/each}}
     </dl>
   </div>
-
+  {{else}}
+    {{#t "multiple_dates"}}Multiple Dates{{/t}}
+  {{/if}}
 {{else}}
   {{#if singleSectionDueDate}}
     <strong>{{#t "due_date"}}Due{{/t}}</strong>
-    {{datetimeFormatted singleSectionDueDate}}
+    <span {{contextSensitiveDatetimeTitle singleSectionDueDate}} aria-hidden="true">
+      {{datetimeFormatted singleSectionDueDate}}
+    </span>
+    <span class="screenreader-only">{{contextSensitiveDatetimeTitle singleSectionDueDate justText=true}}</span>
   {{/if}}
 {{/if}}

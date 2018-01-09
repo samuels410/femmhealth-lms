@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -33,6 +33,6 @@ require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 
 describe TaEnrollment do
   it "should subclass Enrollment" do
-    TaEnrollment.ancestors.should be_include(Enrollment)
+    expect(TaEnrollment.ancestors).to be_include(Enrollment)
   end
 end

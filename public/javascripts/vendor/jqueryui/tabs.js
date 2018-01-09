@@ -11,11 +11,9 @@
  *	jquery.ui.core.js
  *	jquery.ui.widget.js
  */
-define([
-  'jquery',
-  'jqueryui/core',
-  'jqueryui/widget'
-], function( $ ) {
+import $ from 'jquery'
+import 'jqueryui/core'
+import 'jqueryui/widget'
   
 var tabId = 0,
 	rhash = /#.*$/;
@@ -76,6 +74,22 @@ $.widget( "ui.tabs", {
 			.delegate( ".ui-tabs-anchor", "focus" + this.eventNamespace, function() {
 				if ( $( this ).closest( "li" ).is( ".ui-state-disabled" ) ) {
 					this.blur();
+				}
+			})
+			// Instructure: If a click is made on a tab, simulate a click on the anchor within the tab instead.
+			// Works around a Firefox bug effecting NVDA
+			.delegate( ".ui-tabs-nav > li", "click" + this.eventNamespace, function( event ) {
+				var $this = $(this);
+				if ($this.is(event.target)) {
+					var $anchor = $this.find(".ui-tabs-anchor:visible").first();
+					if ($anchor.length === 0) {
+						return;
+					}
+					event.preventDefault();
+					var newEvent = document.createEvent('MouseEvent');
+					newEvent.initEvent('click', true, true);
+					$anchor.focus();
+					$anchor[0].dispatchEvent(newEvent);
 				}
 			});
 
@@ -1345,4 +1359,4 @@ if ( $.uiBackCompat !== false ) {
 	});
 }
 
-});
+

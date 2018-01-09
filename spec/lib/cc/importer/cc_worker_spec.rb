@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,21 +20,21 @@ require File.expand_path(File.dirname(__FILE__) + '/../../../spec_helper.rb')
 
 describe Canvas::Migration::Worker::CCWorker do
   it "should set the worker_class on the migration" do
-    cm = ContentMigration.create!(:migration_settings => { :no_archive_file => true }, :context => course)
+    cm = ContentMigration.create!(:migration_settings => { :converter_class => CC::Importer::Canvas::Converter,
+                                                           :no_archive_file => true }, :context => course_factory)
     cm.reset_job_progress
-    Canvas::Migration::Worker.expects(:get_converter).with(anything).returns(CC::Importer::Canvas::Converter)
-    CC::Importer::Canvas::Converter.any_instance.expects(:export).returns({})
+    expect_any_instance_of(CC::Importer::Canvas::Converter).to receive(:export).and_return({})
     worker = Canvas::Migration::Worker::CCWorker.new(cm.id)
-    worker.perform().should == true
-    cm.reload.migration_settings[:worker_class].should == 'CC::Importer::Canvas::Converter'
+    expect(worker.perform()).to eq true
+    expect(cm.reload.migration_settings[:worker_class]).to eq 'CC::Importer::Canvas::Converter'
   end
 
   it "should honor skip_job_progress" do
-    cm = ContentMigration.create!(:migration_settings => { :no_archive_file => true, :skip_job_progress => true }, :context => course)
-    Canvas::Migration::Worker.expects(:get_converter).with(anything).returns(CC::Importer::Canvas::Converter)
-    CC::Importer::Canvas::Converter.any_instance.expects(:export).returns({})
+    cm = ContentMigration.create!(:migration_settings => { :converter_class => CC::Importer::Canvas::Converter,
+                                                           :no_archive_file => true, :skip_job_progress => true }, :context => course_factory)
+    expect_any_instance_of(CC::Importer::Canvas::Converter).to receive(:export).and_return({})
     worker = Canvas::Migration::Worker::CCWorker.new(cm.id)
-    worker.perform().should == true
-    cm.skip_job_progress.should be_true
+    expect(worker.perform()).to eq true
+    expect(cm.skip_job_progress).to be_truthy
   end
 end

@@ -3,45 +3,48 @@ require 'argument_view'
 
 describe ArgumentView do
   context "type splitter" do
-    let(:view) { ArgumentView.new "" }
+    let(:view) { ArgumentView.new "arg [String]" }
 
     it "accepts no type" do
-      view.split_type_desc("").should ==
+      expect(view.split_type_desc("")).to eq(
         [ArgumentView::DEFAULT_TYPE, ArgumentView::DEFAULT_DESC]
+      )
     end
 
     it "parses type with no desc" do
-      view.split_type_desc("[String]").should ==
+      expect(view.split_type_desc("[String]")).to eq(
         ["[String]", ArgumentView::DEFAULT_DESC]
+      )
     end
 
     it "parses type and desc" do
-      view.split_type_desc("[String] desc ription").should ==
+      expect(view.split_type_desc("[String] desc ription")).to eq(
         ["[String]", "desc ription"]
+      )
     end
 
     it "parses complex types" do
-      view.split_type_desc("[[String], [Date]]").should ==
+      expect(view.split_type_desc("[[String], [Date]]")).to eq(
         ["[[String], [Date]]", ArgumentView::DEFAULT_DESC]
+      )
     end
   end
 
   context "line parser" do
-    let(:view) { ArgumentView.new "" }
+    let(:view) { ArgumentView.new "arg [String]" }
 
-    it "compacts whitespace" do
-      parsed = view.parse_line("arg  \t[String] desc")
-      parsed.should == ["arg [String] desc", "arg", "[String]", "desc"]
+    it "raises on missing param name" do
+      expect { view.parse_line("") }.to raise_error(ArgumentError)
     end
 
     it "parses without desc" do
       parsed = view.parse_line("arg [String]")
-      parsed.should == ["arg [String]", "arg", "[String]", ArgumentView::DEFAULT_DESC]
+      expect(parsed).to eq ["arg [String]", "arg", "[String]", ArgumentView::DEFAULT_DESC]
     end
 
     it "parses without type or desc" do
       parsed = view.parse_line("arg")
-      parsed.should == ["arg", "arg", ArgumentView::DEFAULT_TYPE, ArgumentView::DEFAULT_DESC]
+      expect(parsed).to eq ["arg", "arg", ArgumentView::DEFAULT_TYPE, ArgumentView::DEFAULT_DESC]
     end
   end
 
@@ -49,31 +52,31 @@ describe ArgumentView do
     let(:view) { ArgumentView.new %{arg [Optional, String, "val1"|"val2"] argument} }
 
     it "has enums" do
-      view.enums.should == ["val1", "val2"]
+      expect(view.enums).to eq ["val1", "val2"]
     end
 
     it "has types" do
-      view.types.should == ["String"]
+      expect(view.types).to eq ["String"]
     end
 
     it "has a description" do
-      view.desc.should == "argument"
+      expect(view.desc).to eq "argument"
     end
   end
 
   context "with optional arg" do
-    let(:view) { ArgumentView.new %{arg [Optional, String]} }
+    let(:view) { ArgumentView.new %{arg [String]} }
 
     it "is optional" do
-      view.optional?.should be_true
+      expect(view.optional?).to be_truthy
     end
   end
 
   context "with required arg" do
-    let(:view) { ArgumentView.new %{arg [String]} }
+    let(:view) { ArgumentView.new %{arg [Required, String]} }
 
     it "is required" do
-      view.required?.should be_true
+      expect(view.required?).to be_truthy
     end
   end
 end

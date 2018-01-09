@@ -1,4 +1,5 @@
-# Copyright (C) 2012 Instructure, Inc.
+#
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -50,15 +51,15 @@ module ModelCache
       options[:key_method] ||= "#{method}_id"
       options[:key_lookup] ||= :id
       options[:type] ||= :instance
-      ModelCache.make_cacheable self, method, options
-    end
 
-    # e.g. use this to cache calls to Conversation.find_by_id
-    def cacheable_by(*keys)
-      keys.each do |key|
-        ModelCache.keys[self.name] << key
-        ModelCache.make_cacheable self, "find_by_#{key}", :key_lookup => key
+      # ensure the target class is ModelCache-aware, and set up the :id lookup
+      target_klass = reflections[method.to_s].klass
+      raise "`#{target_klass}` needs to `include ModelCache` before you can make `#{self}##{method}` cacheable" unless target_klass.included_modules.include?(ModelCache)
+      unless ModelCache.keys[target_klass.name].include?(options[:key_lookup])
+        ModelCache.keys[target_klass.name] << options[:key_lookup]
       end
+
+      ModelCache.make_cacheable self, method, options
     end
   end
 
@@ -114,14 +115,6 @@ module ModelCache
 
     orig_method = "super"
     alias_method = nil
-
-    if CANVAS_RAILS2
-      if (options[:type] == :instance ? klass.instance_methods : klass.methods).map(&:to_s).include?(method.to_s)
-        orig_method = "#{method}_without_cache(*args)"
-        alias_method = "alias_method_chain #{method.inspect}, :cache"
-        method = "#{method}_with_cache"
-      end
-    end
 
     key_value = options[:key_method] || "args.first"
     # if extra args are provided, we should clear out the current value

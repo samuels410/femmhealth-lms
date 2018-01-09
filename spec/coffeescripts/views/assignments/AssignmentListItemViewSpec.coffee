@@ -1,12 +1,35 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'Backbone'
   'compiled/models/Assignment'
   'compiled/models/Submission'
   'compiled/views/assignments/AssignmentListItemView'
   'jquery'
+  'timezone'
+  'timezone/America/Juneau'
+  'timezone/fr_FR'
+  'helpers/I18nStubber'
   'helpers/fakeENV'
+  'jsx/shared/conditional_release/CyoeHelper'
+  'helpers/assertions'
   'helpers/jquery.simulate'
-], (Backbone, Assignment, Submission, AssignmentListItemView, $, fakeENV) ->
+], (Backbone, Assignment, Submission, AssignmentListItemView, $, tz, juneau, french, I18nStubber, fakeENV, CyoeHelper, assertions) ->
   screenreaderText = null
   nonScreenreaderText = null
 
@@ -23,7 +46,7 @@ define [
       "due_at":"2013-08-28T23:59:00-06:00"
       "title":"Winter Session"
 
-    ac = new AssignmentCollection [buildAssignment(
+    buildAssignment
       "id":1
       "name":"History Quiz"
       "description":"test"
@@ -31,60 +54,45 @@ define [
       "points_possible":2
       "position":1
       "all_dates":[date1, date2]
-    )]
-    ac.at(0)
 
   assignment2 = ->
-    ac = new AssignmentCollection [buildAssignment(
+    buildAssignment
       "id":3
       "name":"Math Quiz"
       "due_at":"2013-08-23T23:59:00-06:00"
       "points_possible":10
       "position":2
-    )]
-    ac.at(0)
 
   assignment3 = ->
-    ac = new AssignmentCollection [buildAssignment(
+    buildAssignment
       "id":2
       "name":"Science Quiz"
       "points_possible":5
       "position":3
-    )]
-    ac.at(0)
 
   assignment_grade_percent = ->
-    ac = new AssignmentCollection [buildAssignment(
+    buildAssignment
       "id":2
       "name":"Science Quiz"
       "grading_type": "percent"
-    )]
-    ac.at(0)
-
 
   assignment_grade_pass_fail = ->
-    ac = new AssignmentCollection [buildAssignment(
+    buildAssignment
       "id":2
       "name":"Science Quiz"
       "grading_type": "pass_fail"
-    )]
-    ac.at(0)
 
   assignment_grade_letter_grade = ->
-    ac = new AssignmentCollection [buildAssignment(
+    buildAssignment
       "id":2
       "name":"Science Quiz"
       "grading_type": "letter_grade"
-    )]
-    ac.at(0)
 
   assignment_grade_not_graded = ->
-    ac = new AssignmentCollection [buildAssignment(
+    buildAssignment
       "id":2
       "name":"Science Quiz"
       "grading_type": "not_graded"
-    )]
-    ac.at(0)
 
   buildAssignment = (options) ->
     options ?= {}
@@ -104,12 +112,21 @@ define [
       "published":true
     $.extend base, options
 
+    ac = new AssignmentCollection [base]
+    ac.at(0)
+
   createView = (model, options) ->
-    options = $.extend {canManage: true}, options
+    options = $.extend {canManage: true, canReadGrades: false}, options
 
-    ENV.PERMISSIONS = { manage: options.canManage }
+    ENV.PERMISSIONS = {
+      manage: options.canManage
+      read_grades: options.canReadGrades
+    }
 
-    view = new AssignmentListItemView(model: model)
+    ENV.POST_TO_SIS = options.post_to_sis
+    ENV.DUPLICATE_ENABLED = options.duplicateEnabled
+
+    view = new AssignmentListItemView(model: model, userIsAdmin: options.userIsAdmin)
     view.$el.appendTo $('#fixtures')
     view.render()
 
@@ -122,8 +139,13 @@ define [
       ["First", "Second"]
 
   genSetup = (model=assignment1()) ->
-    fakeENV.setup(PERMISSIONS: {manage: false})
-
+    fakeENV.setup(
+      current_user_roles: ['teacher'],
+      PERMISSIONS: {manage: false},
+      URLS: {
+        assignment_sort_base_url : "test"
+      }
+    )
     @model = model
     @submission = new Submission
     @view = createView(@model, canManage: false)
@@ -136,20 +158,34 @@ define [
     fakeENV.teardown()
     $('#fixtures').empty()
 
-
-  module 'AssignmentListItemViewSpec',
+  QUnit.module 'AssignmentListItemViewSpec',
     setup: ->
+      fakeENV.setup({
+        current_user_roles: ['teacher'],
+        URLS: {
+          assignment_sort_base_url : "test"
+        }
+      })
       genSetup.call @
+      @snapshot = tz.snapshot()
+      I18nStubber.pushFrame()
 
     teardown: ->
+      fakeENV.teardown()
       genTeardown.call @
+      tz.restore(@snapshot)
+      I18nStubber.popFrame()
+
+  test 'should be accessible', (assert) ->
+    view = createView(@model, canManage: true)
+    done = assert.async()
+    assertions.isAccessible view, done, {'a11yReport': true}
 
   test "initializes child views if can manage", ->
     view = createView(@model, canManage: true)
     ok view.publishIconView
     ok view.dateDueColumnView
     ok view.dateAvailableColumnView
-    ok view.moveAssignmentView
     ok view.editAssignmentView
 
   test "initializes no child views if can't manage", ->
@@ -158,39 +194,116 @@ define [
     ok !view.vddTooltipView
     ok !view.editAssignmentView
 
+  test "initializes sis toggle if post to sis enabled", ->
+    @model.set('published', true)
+    view = createView(@model, canManage: true, post_to_sis: true)
+    ok view.sisButtonView
+
+  test "does not initialize sis toggle if post to sis disabled", ->
+    @model.set('published', true)
+    view = createView(@model, canManage: true, post_to_sis: false)
+    ok !view.sisButtonView
+
+  test "does not initialize sis toggle if assignment is not graded", ->
+    @model.set('submission_types', ["not_graded"])
+    view = createView(@model, canManage: true, post_to_sis: true)
+    ok !view.sisButtonView
+
+  test "does not initialize sis toggle if post to sis disabled but can't manage", ->
+    @model.set('published', true)
+    view = createView(@model, canManage: false, post_to_sis: false)
+    ok !view.sisButtonView
+
+  test "does not initialize sis toggle if sis enabled but can't manage", ->
+    @model.set('published', true)
+    view = createView(@model, canManage: false, post_to_sis: true)
+    ok !view.sisButtonView
+
+  test "does not initialize sis toggle if post to sis disabled, can't manage and is unpublished", ->
+    @model.set('published', false)
+    view = createView(@model, canManage: false, post_to_sis: false)
+    ok !view.sisButtonView
+
+  test "does not initialize sis toggle if sis enabled, can't manage and is unpublished", ->
+    @model.set('published', false)
+    view = createView(@model, canManage: false, post_to_sis: true)
+    ok !view.sisButtonView
+
+  test "does not initialize sis toggle if post to sis disabled, can manage and is unpublished", ->
+    @model.set('published', false)
+    view = createView(@model, canManage: true, post_to_sis: false)
+    ok !view.sisButtonView
+
+  test "does not initialize sis toggle if sis enabled, can manage and is unpublished", ->
+    @model.set('published', false)
+    view = createView(@model, canManage: true, post_to_sis: true)
+    ok !view.sisButtonView
+
   test "upatePublishState toggles ig-published", ->
     view = createView(@model, canManage: true)
 
     ok view.$('.ig-row').hasClass('ig-published')
     @model.set('published', false)
-    #@model.save()
     ok !view.$('.ig-row').hasClass('ig-published')
 
   test 'asks for confirmation before deleting an assignment', ->
     view = createView(@model)
 
-    confirm_stub = sinon.stub(window, "confirm", -> true )
-    delete_spy = sinon.spy view, "delete"
+    @stub(view, 'visibleAssignments').returns([])
+    @stub(window, "confirm").returns(true)
+    @spy view, "delete"
 
     view.$("#assignment_#{@model.id} .delete_assignment").click()
 
-    ok confirm_stub.called
-    ok delete_spy.called
+    ok window.confirm.called
+    ok view.delete.called
 
-    confirm_stub.restore()
-    delete_spy.restore()
+  test 'does not attempt to delete an assignment due in a closed grading period', ->
+    @model.set('in_closed_grading_period', true)
+    view = createView(@model)
+
+    @stub(window, "confirm").returns(true)
+    @spy view, "delete"
+
+    view.$("#assignment_#{@model.id} .delete_assignment").click()
+
+    ok window.confirm.notCalled
+    ok view.delete.notCalled
 
   test "delete destroys model", ->
     old_asset_string = ENV.context_asset_string
     ENV.context_asset_string = "course_1"
 
     view = createView(@model)
-    sinon.spy view.model, "destroy"
+    @spy view.model, "destroy"
 
     view.delete()
     ok view.model.destroy.called
-    view.model.destroy.restore()
 
+    ENV.context_asset_string = old_asset_string
+
+  test "delete calls screenreader message", ->
+    old_asset_string = ENV.context_asset_string
+    ENV.context_asset_string = "course_1"
+    server = sinon.fakeServer.create()
+    server.respondWith('DELETE', '/api/v1/courses/1/assignments/1',
+      [200, { 'Content-Type': 'application/json' }, JSON.stringify({
+      "description":"",
+      "due_at":null,
+      "grade_group_students_individually":false,
+      "grading_standard_id":null,
+      "grading_type":"points",
+      "group_category_id":null,
+      "id":"1",
+      "unpublishable":true,
+      "only_visible_to_overrides":false,
+      "locked_for_user":false})])
+
+    view = createView(@model)
+    view.delete()
+    @spy($, 'screenReaderFlashMessage')
+    server.respond()
+    equal $.screenReaderFlashMessage.callCount, 1
     ENV.context_asset_string = old_asset_string
 
   test "show score if score is set", ->
@@ -204,7 +317,6 @@ define [
   test 'do not show score if viewing as non-student', ->
     old_user_roles = ENV.current_user_roles
     ENV.current_user_roles = ["user"]
-
     view = createView(@model, canManage: false)
     str = view.$(".js-score:eq(0) .non-screenreader").html()
     ok str.search("2 pts") != -1
@@ -249,7 +361,6 @@ define [
     view = createView(@model, canManage: true)
     trigger = view.$("#assign_#{@model.id}_manage_link")
     ok(trigger.length, 'there is an a node with the correct id')
-    #show menu
     trigger.click()
 
     view.$("#assignment_#{@model.id}_settings_edit_item").click()
@@ -257,13 +368,33 @@ define [
 
     equal document.activeElement, trigger.get(0)
 
-  test "assignment cannot be deleted if frozen", ->
+  test "disallows deleting frozen assignments", ->
     @model.set('frozen', true)
     view = createView(@model)
-    ok !view.$("#assignment_#{@model.id} a.delete_assignment").length
+    ok view.$("#assignment_#{@model.id} a.delete_assignment.disabled").length
+
+  test "disallows deleting assignments due in closed grading periods", ->
+    @model.set('in_closed_grading_period', true)
+    view = createView(@model)
+    ok view.$("#assignment_#{@model.id} a.delete_assignment.disabled").length
+
+  test "allows deleting non-frozen assignments not due in closed grading periods", ->
+    @model.set('frozen', false)
+    @model.set('in_closed_grading_period', false)
+    view = createView(@model)
+    ok view.$("#assignment_#{@model.id} a.delete_assignment:not(.disabled)").length
+
+  test "allows deleting frozen assignments for admins", ->
+    @model.set('frozen', true)
+    view = createView(@model, userIsAdmin: true)
+    ok view.$("#assignment_#{@model.id} a.delete_assignment:not(.disabled)").length
+
+  test "allows deleting assignments due in closed grading periods for admins", ->
+    @model.set('any_assignment_in_closed_grading_period', true)
+    view = createView(@model, userIsAdmin: true)
+    ok view.$("#assignment_#{@model.id} a.delete_assignment:not(.disabled)").length
 
   test "allows publishing", ->
-    #setup fake server
     @server = sinon.fakeServer.create()
     @server.respondWith "PUT", "/api/v1/users/1/assignments/1", [
       200,
@@ -277,6 +408,7 @@ define [
     @server.respond()
 
     equal @model.get('published'), true
+    @server.restore()
 
   test "correctly displays module's name", ->
     mods = genModules(1)
@@ -292,7 +424,193 @@ define [
     ok view.$("#module_tooltip_#{@model.id}").text().search("#{mods[0]}") != -1
     ok view.$("#module_tooltip_#{@model.id}").text().search("#{mods[1]}") != -1
 
-  module 'AssignmentListItemViewSpec—alternate grading type: percent',
+  test 'render score template with permission', ->
+    spy = @spy(AssignmentListItemView.prototype, 'updateScore')
+    createView(@model, canManage: false, canReadGrades: true)
+    ok spy.called
+
+  test 'does not render score template without permission', ->
+    spy = @spy(AssignmentListItemView.prototype, 'updateScore')
+    createView(@model, canManage: false, canReadGrades: false)
+    equal spy.callCount, 0
+
+  test "renders lockAt/unlockAt with locale-appropriate format string", ->
+    tz.changeLocale(french, 'fr_FR', 'fr')
+    I18nStubber.setLocale 'fr_FR'
+    I18nStubber.stub 'fr_FR',
+      'date.formats.short': '%-d %b'
+      'date.abbr_month_names.8': 'août'
+    model = buildAssignment
+      id: 1
+      lock_at: "2113-08-28T04:00:00Z"
+      all_dates: [
+        { lock_at: "2113-08-28T04:00:00Z", title: "Summer Session" }
+        { unlock_at: "2113-08-28T04:00:00Z", title: "Winter Session" }]
+
+    view = createView(model, canManage: true)
+    $dds = view.dateAvailableColumnView.$("#vdd_tooltip_#{@model.id}_lock div")
+    equal $("span", $dds.first()).last().text().trim(), '28 août'
+    equal $("span", $dds.last()).last().text().trim(), '28 août'
+
+  test "renders lockAt/unlockAt in appropriate time zone", ->
+    tz.changeZone(juneau, 'America/Juneau')
+    I18nStubber.stub 'en',
+      'date.formats.short': '%b %-d'
+      'date.abbr_month_names.8': 'Aug'
+
+    model = buildAssignment
+      id: 1
+      lock_at: "2113-08-28T04:00:00Z"
+      all_dates: [
+        { lock_at: "2113-08-28T04:00:00Z", title: "Summer Session" }
+        { unlock_at: "2113-08-28T04:00:00Z", title: "Winter Session" }]
+
+    view = createView(model, canManage: true)
+    $dds = view.dateAvailableColumnView.$("#vdd_tooltip_#{@model.id}_lock div")
+    equal $("span", $dds.first()).last().text().trim(), 'Aug 27'
+    equal $("span", $dds.last()).last().text().trim(), 'Aug 27'
+
+  test 'renders lockAt/unlockAt for multiple due dates', ->
+    now = new Date()
+    model = buildAssignment
+      id: 1
+      all_dates: [
+        { due_at: new Date().toISOString() }
+        { due_at: new Date().toISOString() }
+      ]
+    view = createView(model)
+    json = view.toJSON()
+    equal json.showAvailability, true
+
+  test 'renders lockAt/unlockAt when locked', ->
+    future = new Date()
+    future.setDate(future.getDate() + 10)
+    model = buildAssignment
+      id: 1
+      unlock_at: future.toISOString()
+    view = createView(model)
+    json = view.toJSON()
+    equal json.showAvailability, true
+
+  test 'renders lockAt/unlockAt when locking in future', ->
+    past = new Date()
+    past.setDate(past.getDate() - 10)
+    future = new Date()
+    future.setDate(future.getDate() + 10)
+    model = buildAssignment
+      id: 1
+      unlock_at: past,
+      lock_at: future.toISOString()
+    view = createView(model)
+    json = view.toJSON()
+    equal json.showAvailability, true
+
+  test 'does not render lockAt/unlockAt when not locking in future', ->
+    past = new Date()
+    past.setDate(past.getDate() - 10)
+    model = buildAssignment
+      id: 1
+      unlock_at: past.toISOString()
+    view = createView(model)
+    json = view.toJSON()
+    equal json.showAvailability, false
+
+  test "renders due date column with locale-appropriate format string", ->
+    tz.changeLocale(french, 'fr_FR', 'fr')
+    I18nStubber.setLocale 'fr_FR'
+    I18nStubber.stub 'fr_FR',
+      'date.formats.short': '%-d %b'
+      'date.abbr_month_names.8': 'août'
+    view = createView(@model, canManage: true)
+    equal view.dateDueColumnView.$("#vdd_tooltip_#{@model.id}_due div dd").first().text().trim(), '29 août'
+
+  test "renders due date column in appropriate time zone", ->
+    tz.changeZone(juneau, 'America/Juneau')
+    I18nStubber.stub 'en',
+      'date.formats.short': '%b %-d'
+      'date.abbr_month_names.8': 'Aug'
+    view = createView(@model, canManage: true)
+    equal view.dateDueColumnView.$("#vdd_tooltip_#{@model.id}_due div dd").first().text().trim(), 'Aug 28'
+
+  test 'can duplicate when assignment is simple', ->
+    model = buildAssignment
+      id: 1
+      title: 'Foo'
+      is_quiz_assignment: false
+    view = createView(model, userIsAdmin: true, canManage: true, duplicateEnabled: true)
+    json = view.toJSON()
+    ok json.canDuplicate
+    equal view.$('.duplicate_assignment').length, 1
+
+  test 'cannot duplicate when user is not admin', ->
+    model = buildAssignment
+      id: 1
+      title: 'Foo'
+      is_quiz_assignment: false
+    view = createView(model, userIsAdmin: false, canManage: false, duplicateEnabled: true)
+    json = view.toJSON()
+    notOk json.canDuplicate
+    equal view.$('.duplicate_assignment').length, 0
+
+  test 'cannot duplicate when assignment is quiz', ->
+    model = buildAssignment
+      id: 1
+      title: 'Foo'
+      is_quiz_assignment: true
+    view = createView(model, userIsAdmin: true, canManage: true, duplicateEnabled: true)
+    json = view.toJSON()
+    notOk json.canDuplicate
+    equal view.$('.duplicate_assignment').length, 0
+
+  test 'can duplicate when assignment is discussion topic', ->
+    model = buildAssignment
+      id: 1
+      title: 'Foo'
+      submission_types: ['discussion_topic']
+
+    view = createView(model, userIsAdmin: true, canManage: true, duplicateEnabled: true)
+    json = view.toJSON()
+    ok json.canDuplicate
+    equal view.$('.duplicate_assignment').length, 1
+
+  test 'can duplicate when assignment is wiki page', ->
+    model = buildAssignment
+      id: 1
+      title: 'Foo'
+      submission_types: ['wiki_page']
+    view = createView(model, userIsAdmin: true, canManage: true, duplicateEnabled: true)
+    json = view.toJSON()
+    ok json.canDuplicate
+    equal view.$('.duplicate_assignment').length, 1
+
+  test 'can move when userIsAdmin is true', ->
+    view = createView(@model, userIsAdmin: true, canManage: false)
+    json = view.toJSON()
+    ok json.canMove
+    notOk view.className().includes('sort-disabled')
+
+  test 'can move when canManage is true and the assignment group id is not locked', ->
+    @stub(@model, 'canMove').returns(true)
+    view = createView(@model, userIsAdmin: false, canManage: true)
+    json = view.toJSON()
+    ok json.canMove
+    notOk view.className().includes('sort-disabled')
+
+  test 'cannot move when canManage is true but the assignment group id is locked', ->
+    @stub(@model, 'canMove').returns(false)
+    view = createView(@model, userIsAdmin: false, canManage: true)
+    json = view.toJSON()
+    notOk json.canMove
+    ok view.className().includes('sort-disabled')
+
+  test 'cannot move when canManage is false but the assignment group id is not locked', ->
+    @stub(@model, 'canMove').returns(true)
+    view = createView(@model, userIsAdmin: false, canManage: false)
+    json = view.toJSON()
+    notOk json.canMove
+    ok view.className().includes('sort-disabled')
+
+  QUnit.module 'AssignmentListItemViewSpec—alternate grading type: percent',
     setup: ->
       genSetup.call @, assignment_grade_percent()
 
@@ -309,8 +627,15 @@ define [
     ok nonScreenreaderText().match('1.56/5 pts')[0], 'sets non-screenreader screen text'
     ok nonScreenreaderText().match('90%')[0], 'sets non-screenreader grade text'
 
+  test "excused score and grade outputs", ->
+    @submission.set 'excused': true
+    @model.set 'submission', @submission
+    @model.trigger 'change:submission'
 
-  module 'AssignmentListItemViewSpec—alternate grading type: pass_fail',
+    ok screenreaderText().match('This assignment has been excused.')
+    ok nonScreenreaderText().match('Excused')
+
+  QUnit.module 'AssignmentListItemViewSpec—alternate grading type: pass_fail',
     setup: ->
       genSetup.call @, assignment_grade_pass_fail()
 
@@ -327,8 +652,7 @@ define [
     ok nonScreenreaderText().match('1.56/5 pts')[0], 'sets non-screenreader score text'
     ok nonScreenreaderText().match('Complete')[0], 'sets non-screenreader grade text'
 
-
-  module 'AssignmentListItemViewSpec—alternate grading type: letter_grade',
+  QUnit.module 'AssignmentListItemViewSpec—alternate grading type: letter_grade',
     setup: ->
       genSetup.call @, assignment_grade_letter_grade()
 
@@ -345,8 +669,7 @@ define [
     ok nonScreenreaderText().match('1.56/5 pts')[0], 'sets non-screenreader score text'
     ok nonScreenreaderText().match('B')[0], 'sets non-screenreader grade text'
 
-
-  module 'AssignmentListItemViewSpec—alternate grading type: not_graded',
+  QUnit.module 'AssignmentListItemViewSpec—alternate grading type: not_graded',
     setup: ->
       genSetup.call @, assignment_grade_not_graded()
 
@@ -361,4 +684,186 @@ define [
     equal screenreaderText(), 'This assignment will not be assigned a grade.', 'sets screenreader text'
     equal nonScreenreaderText(), '', 'sets non-screenreader text'
 
+  QUnit.module 'AssignListItemViewSpec - mastery paths menu option',
+    setup: ->
+      fakeENV.setup({
+        current_user_roles: ['teacher'],
+        CONDITIONAL_RELEASE_SERVICE_ENABLED: true,
+        URLS: {
+          assignment_sort_base_url : "test"
+        }
+      })
+    teardown: ->
+      fakeENV.teardown()
 
+  test 'does not render for assignment if cyoe off', ->
+    ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED = false
+    model = buildAssignment
+      id: 1
+      title: 'Foo'
+      can_update: true
+      submission_types: ['online_text_entry']
+    view = createView(model)
+    equal view.$('.ig-admin .al-options .icon-mastery-path').length, 0
+
+  test 'renders for assignment if cyoe on', ->
+    model = buildAssignment
+      id: 1
+      title: 'Foo'
+      can_update: true
+      submission_types: ['online_text_entry']
+    view = createView(model)
+    equal view.$('.ig-admin .al-options .icon-mastery-path').length, 1
+
+  test 'does not render for ungraded assignment if cyoe on', ->
+    model = buildAssignment
+      id: 1
+      title: 'Foo'
+      can_update: true
+      submission_types: ['not_graded']
+    view = createView(model)
+    equal view.$('.ig-admin .al-options .icon-mastery-path').length, 0
+
+  test 'renders for assignment quiz if cyoe on', ->
+    model = buildAssignment
+      id: 1
+      title: 'Foo'
+      can_update: true
+      is_quiz_assignment: true
+      submission_types: ['online_quiz']
+    view = createView(model)
+    equal view.$('.ig-admin .al-options .icon-mastery-path').length, 1
+
+  test 'does not render for non-assignment quiz if cyoe on', ->
+    model = buildAssignment
+      id: 1
+      title: 'Foo'
+      can_update: true
+      is_quiz_assignment: false
+      submission_types: ['online_quiz']
+    view = createView(model)
+    equal view.$('.icon-mastery-path').length, 0
+
+  test 'renders for graded discussion if cyoe on', ->
+    model = buildAssignment
+      id: 1
+      title: 'Foo'
+      can_update: true
+      submission_types: ['discussion_topic']
+    view = createView(model)
+    equal view.$('.ig-admin .al-options .icon-mastery-path').length, 1
+
+  test 'does not render for graded page if cyoe on', ->
+    model = buildAssignment
+      id: 1
+      title: 'Foo'
+      can_update: true
+      submission_types: ['wiki_page']
+    view = createView(model)
+    equal view.$('.ig-admin .al-options .icon-mastery-path').length, 0
+
+  QUnit.module 'AssignListItemViewSpec - mastery paths link',
+    setup: ->
+      fakeENV.setup({
+        current_user_roles: ['teacher'],
+        CONDITIONAL_RELEASE_SERVICE_ENABLED: true,
+        CONDITIONAL_RELEASE_ENV: {
+          active_rules: [{
+            trigger_assignment: '1',
+            scoring_ranges: [
+              {
+                assignment_sets: [
+                  { assignments: [{ assignment_id: '2' }] },
+                ],
+              },
+            ],
+          }],
+        },
+        URLS: {
+          assignment_sort_base_url : "test"
+        }
+      })
+      CyoeHelper.reloadEnv()
+    teardown: ->
+      fakeENV.teardown()
+
+  test 'does not render for assignment if cyoe off', ->
+    ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED = false
+    model = buildAssignment
+      id: '1'
+      title: 'Foo'
+      can_update: true
+      submission_types: ['online_text_entry']
+    view = createView(model)
+    equal view.$('.ig-admin > a[href$="#mastery-paths-editor"]').length, 0
+
+  test 'does not render for assignment if assignment does not have a rule', ->
+    model = buildAssignment
+      id: '2'
+      title: 'Foo'
+      can_update: true
+      submission_types: ['online_text_entry']
+    view = createView(model)
+    equal view.$('.ig-admin > a[href$="#mastery-paths-editor"]').length, 0
+
+  test 'renders for assignment if assignment has a rule', ->
+    model = buildAssignment
+      id: '1'
+      title: 'Foo'
+      can_update: true
+      submission_types: ['online_text_entry']
+    view = createView(model)
+    equal view.$('.ig-admin > a[href$="#mastery-paths-editor"]').length, 1
+
+  QUnit.module 'AssignListItemViewSpec - mastery paths icon',
+    setup: ->
+      fakeENV.setup({
+        current_user_roles: ['teacher'],
+        CONDITIONAL_RELEASE_SERVICE_ENABLED: true,
+        CONDITIONAL_RELEASE_ENV: {
+          active_rules: [{
+            trigger_assignment: '1',
+            scoring_ranges: [
+              {
+                assignment_sets: [
+                  { assignments: [{ assignment_id: '2' }] },
+                ],
+              },
+            ],
+          }],
+        },
+        URLS: {
+          assignment_sort_base_url : "test"
+        }
+      })
+      CyoeHelper.reloadEnv()
+    teardown: ->
+      fakeENV.teardown()
+
+  test 'does not render for assignment if cyoe off', ->
+    ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED = false
+    model = buildAssignment
+      id: '2'
+      title: 'Foo'
+      can_update: true
+      submission_types: ['online_text_entry']
+    view = createView(model)
+    equal view.$('.mastery-path-icon').length, 0
+
+  test 'does not render for assignment if assignment is not released by a rule', ->
+    model = buildAssignment
+      id: '1'
+      title: 'Foo'
+      can_update: true
+      submission_types: ['online_text_entry']
+    view = createView(model)
+    equal view.$('.mastery-path-icon').length, 0
+
+  test 'renders for assignment if assignment is released by a rule', ->
+    model = buildAssignment
+      id: '2'
+      title: 'Foo'
+      can_update: true
+      submission_types: ['online_text_entry']
+    view = createView(model)
+    equal view.$('.mastery-path-icon').length, 1

@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'compiled/models/Quiz'
@@ -7,14 +24,12 @@ define [
   'jquery.ajaxJSON'
 ], ($, Quiz, Assignment, DateGroup, AssignmentOverrideCollection) ->
 
-  module 'Quiz',
+  QUnit.module 'Quiz',
     setup: ->
       @quiz = new Quiz(id: 1, html_url: 'http://localhost:3000/courses/1/quizzes/24')
-      @ajaxStub = sinon.stub $, 'ajaxJSON'
+      @ajaxStub = @stub $, 'ajaxJSON'
 
     teardown: ->
-      $.ajaxJSON.restore()
-
 
   # Initialize
 
@@ -25,7 +40,6 @@ define [
     assign = id: 1, title: 'Foo Bar'
     @quiz = new Quiz(assignment: assign)
     equal @quiz.get('assignment').constructor, Assignment
-
 
   test '#initialize ignores assignment_overrides if not given', ->
     ok !@quiz.get('assignment_overrides')
@@ -46,7 +60,6 @@ define [
   test '#initialize should set unpublish_url from html url', ->
     equal @quiz.get('unpublish_url'), 'http://localhost:3000/courses/1/quizzes/unpublish'
 
-
   test '#initialize should set title_label from title', ->
     @quiz = new Quiz(title: 'My Quiz!', readable_type: 'Quiz')
     equal @quiz.get('title_label'), 'My Quiz!'
@@ -54,7 +67,6 @@ define [
   test '#initialize should set title_label from readable_type', ->
     @quiz = new Quiz(readable_type: 'Quiz')
     equal @quiz.get('title_label'), 'Quiz'
-
 
   test '#initialize defaults unpublishable to true', ->
     ok @quiz.get('unpublishable')
@@ -67,14 +79,12 @@ define [
     @quiz = new Quiz(can_unpublish: false, published: true)
     ok !@quiz.get('unpublishable')
 
-
   test "#initialize sets question count", ->
     @quiz = new Quiz(question_count: 1, published: true)
     equal @quiz.get('question_count_label'), "1 Question"
 
     @quiz = new Quiz(question_count: 2, published: true)
     equal @quiz.get('question_count_label'), "2 Questions"
-
 
   test "#initialize sets possible points count with no points", ->
     @quiz = new Quiz()
@@ -92,6 +102,9 @@ define [
     @quiz = new Quiz(points_possible: 2)
     equal @quiz.get('possible_points_label'), "2 pts"
 
+  test "#initialize points possible to null if ungraded survey", ->
+    @quiz = new Quiz(points_possible: 5, quiz_type: "survey")
+    equal @quiz.get('possible_points_label'), ""
 
   # Publishing
 
@@ -111,10 +124,9 @@ define [
     @quiz.unpublish()
     ok !@quiz.get('published')
 
-
   # multiple due dates
 
-  module "Quiz#multipleDueDates"
+  QUnit.module "Quiz#multipleDueDates"
 
   test "checks for multiple due dates from assignment overrides", ->
     quiz = new Quiz all_dates: [{title: "Winter"}, {title: "Summer"}]
@@ -124,7 +136,7 @@ define [
     quiz = new Quiz
     ok !quiz.multipleDueDates()
 
-  module "Quiz#allDates"
+  QUnit.module "Quiz#allDates"
 
   test "gets the due dates from the assignment overrides", ->
     dueAt = new Date("2013-08-20T11:13:00Z")
@@ -151,10 +163,8 @@ define [
       {due_at: null, title: "Everyone"},
       {due_at: dueAt, title: "Summer"}
     ]
-    false_stub = sinon.stub quiz, "multipleDueDates"
-    false_stub.returns false
+    @stub(quiz, "multipleDueDates").returns(false)
     deepEqual quiz.singleSectionDueDate(), dueAt.toISOString()
-    false_stub.restore()
 
   test "returns due_at when only one date/section are present", ->
     date = Date.now()
@@ -164,7 +174,7 @@ define [
 
   # toView
 
-  module "Quiz#toView"
+  QUnit.module "Quiz#toView"
 
   test "returns the quiz's dueAt", ->
     date = Date.now()
@@ -208,9 +218,6 @@ define [
       {due_at: null, title: "Everyone"},
       {due_at: dueAt, title: "Summer"}
     ]
-    false_stub = sinon.stub quiz, "multipleDueDates"
-    false_stub.returns false
+    @stub(quiz, "multipleDueDates").returns(false)
     json = quiz.toView()
     equal json.singleSectionDueDate, dueAt.toISOString()
-    false_stub.restore()
-

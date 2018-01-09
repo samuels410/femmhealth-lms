@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   '../start_app'
   'underscore'
@@ -9,13 +26,13 @@ define [
 
   App = null
 
-  fixtures.create()
-
-  module 'global settings',
+  QUnit.module 'global settings',
     setup: ->
+      fixtures.create()
       App = startApp()
       visit('/').then =>
         @controller = App.__container__.lookup('controller:screenreader_gradebook')
+        @controller.set 'hideStudentNames', false
     teardown: ->
       Ember.run App, 'destroy'
 
@@ -29,13 +46,16 @@ define [
 
   test 'secondary id says hidden', ->
     Ember.run =>
-      @controller.set('selectedStudent', @controller.get('students').objectAt(0))
+      student = @controller.get('students.firstObject')
+      Ember.setProperties student,
+        isLoaded: true
+        isLoading: false
+      @controller.set('selectedStudent', student)
 
-    reg = /^\s*$/ #all whitespace
-    ok reg.test $("#secondary_id").text()
-    click("#hide_names_checkbox").then =>
-      reg = /hidden/
-      ok reg.test $("#secondary_id").text()
+    equal Ember.$.trim(find(".secondary_id").text()), ''
+    click("#hide_names_checkbox")
+    andThen =>
+      equal $.trim(find(".secondary_id:first").text()), 'hidden'
 
   test 'view concluded enrollments', ->
     enrollments = @controller.get('enrollments')
@@ -54,4 +74,3 @@ define [
       click("#concluded_enrollments").then =>
         enrollments = @controller.get('enrollments')
         ok enrollments.content.length > 1
-

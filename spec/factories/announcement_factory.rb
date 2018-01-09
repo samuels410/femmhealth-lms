@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,14 +16,16 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-def announcement_model(opts={})
-  @context ||= course_model(:reusable => true)
-  @a = @context.announcements.create!(valid_announcement_attributes.merge(opts))
-end
+module Factories
+  def announcement_model(opts={})
+    @context = opts[:context] || @context || course_model(:reusable => true)
+    @a = @context.announcements.create!(valid_announcement_attributes.merge(opts))
+  end
 
-def valid_announcement_attributes
-  {
-    :title => "value for title",
-    :message => "value for message"
-  }
+  def valid_announcement_attributes
+    {
+      :title => "value for title",
+      :message => "value for message"
+    }
+  end
 end

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -22,7 +22,8 @@ module SIS
   class BaseImporter
     def initialize(root_account, opts)
       @root_account = root_account
-      @batch_id = opts[:batch_id]
+      @batch = opts[:batch]
+      @batch_user = opts[:batch_user]
       @logger = opts[:logger] || Rails.logger
       @sis_options = {
           :override_sis_stickiness => opts[:override_sis_stickiness],

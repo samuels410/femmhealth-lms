@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,18 +21,18 @@ require 'lib/data_fixup/resanitize_assignments_allowed_extensions.rb'
 
 describe 'DataFixup::ResanitizeAssignmentsAllowedExtensions' do
   it "should correct only assignments that aren't sanitized" do
-    course(:active_course => true)
+    course_factory(active_course: true)
     a1 = Assignment.create!(context: @course, title: 'hi1')
     a2 = Assignment.create!(context: @course, title: 'hi2')
     a3 = Assignment.create!(context: @course, title: 'hi3')
 
-    Assignment.where(id: a2.id).update_all(allowed_extensions: ['doc', 'xsl'].to_yaml)
-    Assignment.where(id: a3.id).update_all(allowed_extensions: ['.DOC', ' .XSL'].to_yaml)
+    ActiveRecord::Base.connection.execute("UPDATE #{Assignment.quoted_table_name} SET allowed_extensions = '#{['doc', 'xsl'].to_yaml}' WHERE id = #{a2.id}")
+    ActiveRecord::Base.connection.execute("UPDATE #{Assignment.quoted_table_name} SET allowed_extensions = '#{['.DOC', ' .XSL'].to_yaml}' WHERE id = #{a3.id}")
 
     DataFixup::ResanitizeAssignmentsAllowedExtensions.run
 
-    a1.reload.allowed_extensions.should be_nil
-    a2.reload.allowed_extensions.should == ['doc', 'xsl']
-    a3.reload.allowed_extensions.should == ['doc', 'xsl']
+    expect(a1.reload.allowed_extensions).to eq []
+    expect(a2.reload.allowed_extensions).to eq ['doc', 'xsl']
+    expect(a3.reload.allowed_extensions).to eq ['doc', 'xsl']
   end
 end

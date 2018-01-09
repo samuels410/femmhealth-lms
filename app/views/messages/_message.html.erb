@@ -1,6 +1,24 @@
+<%
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
 <li class="message list-view border border-trbl"
     data-message-id="<%= message.id %>"
-    data-secure-id="<%= ReplyToAddress.new(message).secure_id %>">
+    data-secure-id="<%= IncomingMail::ReplyToAddress.new(message).secure_id %>">
     <header>
         <span class="h6"><%= message.subject %></span>
 
@@ -16,7 +34,7 @@
             <li><a href="#tabs-plain-html-<%= message.id %>">HTML</a></li>
         </ul>
         <div id="meta-data-<%= message.id %>">
-            <table class="table table-condensed grid">
+            <table class="ic-Table ic-Table--condensed grid">
                 <tbody>
                 <% unless Rails.env.production? %>
                 <tr>
@@ -38,7 +56,7 @@
                 </tr>
                 <tr>
                     <td class="td-label"><div><%= t('titles.reply_to', 'Reply to') %></div></td>
-                    <td><span class="message-reply"><%= ReplyToAddress.new(message).address %></span>
+                    <td><span class="message-reply"><%= IncomingMail::ReplyToAddress.new(message).address %></span>
                         (<a class="reply-button" href="#" role="button"><%= t('actions.reply', 'Reply') %></a>)</td>
                 </tr>
                 <tr>
@@ -68,7 +86,7 @@
             <pre class="message-body"><%= message.body %></pre>
         </div>
         <div id="tabs-plain-html-<%= message.id %>">
-            <iframe class="message-html-body" src="<%= user_message_html_message_path(message.user, message) %>"></iframe>
+            <iframe class="message-html-body" src="<%= user_message_html_message_path(message.user, message) %>" title="<%= t('Message Body') %>"></iframe>
             <% if message.html_body.present? %>
               <%= link_to "Open in new window", user_message_html_message_path(message.user, message), :target => "_blank", :class => "icon-off small" %>
             <% end %>

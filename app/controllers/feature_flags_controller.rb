@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,103 +17,132 @@
 
 # @API Feature Flags
 #
-# Manage optional features in Canvas
+# Manage optional features in Canvas.
 #
-# @object Feature
-#    {
-#      // The symbolic name of the feature, used in FeatureFlags
-#      "name": "fancy_wickets",
+#  _Deprecated_[2016-01-15] FeatureFlags previously had a locking_account_id field;
+#  it was never used, and has been removed. It is still included in API responses
+#  for backwards compatibility reasons. Its value is always null.
 #
-#      // The user-visible name of the feature
-#      "display_name": "Fancy Wickets",
-#
-#      // The user-visible description of the feature
-#      "description": "This feature makes all Wickets 38% fancier",
-#
-#      // The type of object the feature applies to (RootAccount, Account, Course, or User):
-#      // * RootAccount features may only be controlled by flags on root accounts.
-#      // * Account features may be controlled by flags on accounts and their parent accounts.
-#      // * Course features may be controlled by flags on courses and their parent accounts.
-#      // * User features may be controlled by flags on users and site admin only.
-#      "applies_to": "Course",
-#
-#      // The date this feature will be globally enabled, or null if this is not planned.
-#      // (This information is subject to change.)
-#      "enable_at": "2014-01-01T00:00:00Z",
-#
-#      // The FeatureFlag that applies to the caller
-#      "feature_flag": {
-#        "feature": "fancy_wickets",
-#        "state": "allowed",
-#        "locked": false,
-#        "locking_account_id": null,
-#        "transitions": { "on": { "locked": false }, "off": { "locked": false } }
-#      },
-#
-#      // If true, a feature that is "allowed" globally will be "off" by default in root accounts.
-#      // Otherwise, root accounts inherit the global "allowed" setting, which allows sub-accounts
-#      // and courses to turn features on with no root account action.
-#      "root_opt_in": true,
-#
-#      // Whether the feature is a beta feature
-#      "beta": false,
-#
-#      // Whether the feature is in development
-#      "development": false,
-#
-#      // A URL to the release notes describing the feature
-#      "release_notes_url": "http://canvas.example.com/release_notes#fancy_wickets"
-#    }
-#
-# @object FeatureFlag
-#    {
-#      // The type of object to which this flag applies (Account, Course, or User).
-#      // (This field is not present if this FeatureFlag represents the global Canvas default)
-#      "context_type": "Account",
-#
-#      // The id of the object to which this flag applies
-#      // (This field is not present if this FeatureFlag represents the global Canvas default)
-#      "context_id": 1038,
-#
-#      // The feature this flag controls
-#      "feature": "fancy_wickets",
-#
-#      // The policy for the feature at this context.  can be "off", "allowed", or "on".
-#      "state": "allowed",
-#
-#      // If set, this feature flag cannot be changed in the caller's context
-#      // because the flag is set "off" or "on" in a higher context, or the flag is locked
-#      // by an account the caller does not have permission to administer
-#      "locked": false,
-#
-#      // If set, this FeatureFlag can only be modified by someone with administrative rights
-#      // in the specified account
-#      "locking_account_id": null,
-#
-#      // Information about the available state transitions for this flag
-#      "transitions": {
-#        "off": {
-#          // If set, the calling user does not have permission to change to this state
-#          "locked": false,
-#
-#          // An optional message describing the transition to this state
-#          "message": "Disabling Fancy Wickets mid-semester may be harmful to student morale."
-#        },
-#        "on": {
-#          "locked": true,
-#          "message": "This feature may only be enabled in individual courses at this time"
-#        }
-#      }
-#    }
+# @model Feature
+#     {
+#       "id": "Feature",
+#       "description": "",
+#       "properties": {
+#         "name": {
+#           "description": "The symbolic name of the feature, used in FeatureFlags",
+#           "example": "fancy_wickets",
+#           "type": "string"
+#         },
+#         "display_name": {
+#           "description": "The user-visible name of the feature",
+#           "example": "Fancy Wickets",
+#           "type": "string"
+#         },
+#         "applies_to": {
+#           "description": "The type of object the feature applies to (RootAccount, Account, Course, or User):\n * RootAccount features may only be controlled by flags on root accounts.\n * Account features may be controlled by flags on accounts and their parent accounts.\n * Course features may be controlled by flags on courses and their parent accounts.\n * User features may be controlled by flags on users and site admin only.",
+#           "example": "Course",
+#           "type": "string",
+#           "allowableValues": {
+#             "values": [
+#               "Course",
+#               "RootAccount",
+#               "Account",
+#               "User"
+#             ]
+#           }
+#         },
+#         "enable_at": {
+#           "description": "The date this feature will be globally enabled, or null if this is not planned. (This information is subject to change.)",
+#           "example": "2014-01-01T00:00:00Z",
+#           "type": "datetime"
+#         },
+#         "feature_flag": {
+#           "description": "The FeatureFlag that applies to the caller",
+#           "example": {"feature": "fancy_wickets", "state": "allowed"},
+#           "$ref": "FeatureFlag"
+#         },
+#         "root_opt_in": {
+#           "description": "If true, a feature that is 'allowed' globally will be 'off' by default in root accounts. Otherwise, root accounts inherit the global 'allowed' setting, which allows sub-accounts and courses to turn features on with no root account action.",
+#           "example": true,
+#           "type": "boolean"
+#         },
+#         "beta": {
+#           "description": "Whether the feature is a beta feature. If true, the feature may not be fully polished and may be subject to change in the future.",
+#           "example": true,
+#           "type": "boolean"
+#         },
+#         "autoexpand": {
+#           "description": "Whether the details of the feature are autoexpanded on page load vs. the user clicking to expand.",
+#            "example": true,
+#            "type": "boolean"
+#          },
+#         "development": {
+#           "description": "Whether the feature is in active development. Features in this state are only visible in test and beta instances and are not yet available for production use.",
+#           "example": false,
+#           "type": "boolean"
+#         },
+#         "release_notes_url": {
+#           "description": "A URL to the release notes describing the feature",
+#           "example": "http://canvas.example.com/release_notes#fancy_wickets",
+#           "type": "string"
+#         }
+#       }
+#     }
+# @model FeatureFlag
+#     {
+#       "id": "FeatureFlag",
+#       "description": "",
+#       "properties": {
+#         "context_type": {
+#           "description": "The type of object to which this flag applies (Account, Course, or User). (This field is not present if this FeatureFlag represents the global Canvas default)",
+#           "example": "Account",
+#           "type": "string",
+#           "allowableValues": {
+#             "values": [
+#               "Course",
+#               "Account",
+#               "User"
+#             ]
+#           }
+#         },
+#         "context_id": {
+#           "description": "The id of the object to which this flag applies (This field is not present if this FeatureFlag represents the global Canvas default)",
+#           "example": 1038,
+#           "type": "integer"
+#         },
+#         "feature": {
+#           "description": "The feature this flag controls",
+#           "example": "fancy_wickets",
+#           "type": "string"
+#         },
+#         "state": {
+#           "description": "The policy for the feature at this context.  can be 'off', 'allowed', or 'on'.",
+#           "example": "allowed",
+#           "type": "string",
+#           "allowableValues": {
+#             "values": [
+#               "off",
+#               "allowed",
+#               "on"
+#             ]
+#           }
+#         },
+#         "locked": {
+#           "description": "If set, this feature flag cannot be changed in the caller's context because the flag is set 'off' or 'on' in a higher context",
+#           "type": "boolean",
+#           "example": false
+#         }
+#       }
+#     }
 #
 class FeatureFlagsController < ApplicationController
   include Api::V1::FeatureFlag
 
-  before_filter :get_context
+  before_action :get_context
 
   # @API List features
   #
-  # List all features that apply to a given Account, Course, or User.
+  # A paginated list of all features that apply to a given Account, Course, or User.
   #
   # @example_request
   #
@@ -135,7 +164,7 @@ class FeatureFlagsController < ApplicationController
 
   # @API List enabled features
   #
-  # List all features that are enabled on a given Account, Course, or User.
+  # A paginated list of all features that are enabled on a given Account, Course, or User.
   # Only the feature names are returned.
   #
   # @example_request
@@ -182,16 +211,11 @@ class FeatureFlagsController < ApplicationController
   # Set a feature flag for a given Account, Course, or User. This call will fail if a parent account sets
   # a feature flag for the same feature in any state other than "allowed".
   #
-  # @argument state [Optional, String, "off"|"allowed"|"on"]
+  # @argument state [String, "off"|"allowed"|"on"]
   #   "off":: The feature is not available for the course, user, or account and sub-accounts.
   #   "allowed":: (valid only on accounts) The feature is off in the account, but may be enabled in
   #               sub-accounts and courses by setting a feature flag on the sub-account or course.
   #   "on":: The feature is turned on unconditionally for the user, course, or account and sub-accounts.
-  #
-  # @argument locking_account_id [Optional, Integer]
-  #   If set, this FeatureFlag may only be modified by someone with administrative rights
-  #   in the specified account. The locking account must be above the target object in the
-  #   account chain.
   #
   # @example_request
   #
@@ -208,48 +232,38 @@ class FeatureFlagsController < ApplicationController
       return render json: { message: "invalid feature" }, status: :bad_request unless feature_def
 
       # check whether the feature is locked
+      @context.feature_flag_cache.delete(@context.feature_flag_cache_key(params[:feature]))
       current_flag = @context.lookup_feature_flag(params[:feature])
       if current_flag
-        return render json: { message: "higher account disallows setting feature flag" }, status: :forbidden if current_flag.locked?(@context, @current_user)
+        return render json: { message: "higher account disallows setting feature flag" }, status: :forbidden if current_flag.locked?(@context)
         prior_state = current_flag.state
       end
 
       # if this is a hidden feature, require site admin privileges to create (but not update) a root account flag
       if !current_flag && feature_def.hidden?
-        return render json: { message: "invalid feature" }, status: :bad_request unless @context.is_a?(Account) && @context.root_account? && Account.site_admin.grants_right?(@current_user, session, :read)
+        return render json: { message: "invalid feature" }, status: :bad_request unless ((@context.is_a?(Account) && @context.root_account?) || @context.is_a?(User)) && Account.site_admin.grants_right?(@current_user, session, :read)
         prior_state = 'hidden'
       end
 
-      # create or update flag
-      new_flag = current_flag if current_flag && !current_flag.default? && current_flag.context_type == @context.class.name && current_flag.context_id == @context.id
-      new_flag ||= @context.feature_flags.build
-
-      new_flag.feature = params[:feature]
-      new_flag.state = params[:state] if params.has_key?(:state)
+      new_attrs = { feature: params[:feature] }
 
       # check transition
-      transitions = Feature.transitions(new_flag.feature, @current_user, @context, prior_state)
-      if transitions[new_flag.state] && transitions[new_flag.state]['locked']
-        return render json: { message: "state change not allowed" }, status: :forbidden
-      end
-
-      # check locking account
-      if params.has_key?(:locking_account_id)
-        unless params[:locking_account_id].blank?
-          locking_account = api_find(Account, params[:locking_account_id])
-          return render json: { message: "locking account not found" }, status: :bad_request unless locking_account
-          return render json: { message: "locking account access denied" }, status: :forbidden unless locking_account.grants_right?(@current_user, session, :manage_feature_flags)
+      if params[:state].present?
+        transitions = Feature.transitions(params[:feature], @current_user, @context, prior_state)
+        if transitions[params[:state]] && transitions[params[:state]]['locked']
+          return render json: { message: "state change not allowed" }, status: :forbidden
         end
-        new_flag.locking_account = locking_account
+        new_attrs[:state] = params[:state]
       end
 
-      if new_flag.save
+      new_flag, saved = create_or_update_feature_flag(new_attrs, current_flag)
+      if saved
         if prior_state != new_flag.state && feature_def.after_state_change_proc.is_a?(Proc)
-          feature_def.after_state_change_proc.call(@context, prior_state, new_flag.state)
+          feature_def.after_state_change_proc.call(@current_user, @context, prior_state, new_flag.state)
         end
         render json: feature_flag_json(new_flag, @context, @current_user, session)
       else
-        render json: new_flag.errors.to_json, status: :bad_request
+        render json: new_flag.errors, status: :bad_request
       end
     end
   end
@@ -270,10 +284,24 @@ class FeatureFlagsController < ApplicationController
   def delete
     if authorized_action(@context, @current_user, :manage_feature_flags)
       return render json: { message: "must specify feature" }, status: :bad_request unless params[:feature].present?
-      flag = @context.feature_flags.find_by_feature!(params[:feature])
-      return render json: { message: "flag is locked" }, status: :forbidden if flag.locked?(@context, @current_user)
+      flag = @context.feature_flags.where(feature: params[:feature]).first!
+      return render json: { message: "flag is locked" }, status: :forbidden if flag.locked?(@context)
       flag.destroy
       render json: feature_flag_json(flag, @context, @current_user, session)
+    end
+  end
+
+  private
+
+  def create_or_update_feature_flag(attributes, current_flag = nil)
+    FeatureFlag.unique_constraint_retry do
+      new_flag = @context.feature_flags.find(current_flag.id) if current_flag &&
+          !current_flag.default? && !current_flag.new_record? &&
+          current_flag.context_type == @context.class.name && current_flag.context_id == @context.id
+      new_flag ||= @context.feature_flags.build
+      new_flag.assign_attributes(attributes)
+      result = new_flag.save
+      [new_flag, result]
     end
   end
 

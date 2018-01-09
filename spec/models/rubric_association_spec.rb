@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -33,7 +33,7 @@ describe RubricAssociation do
   end
 
   context "assignment rubrics" do
-    before :each do
+    before :once do
       # Create a course, 2 students and enroll them
       course_with_teacher(:active_course => true, :active_user => true)
       @student_1 = student_in_course(:active_user => true).user
@@ -68,7 +68,7 @@ describe RubricAssociation do
         end
 
         it "should have 2 assessment_requests" do
-          @rubric_assoc.assessment_requests.count.should == 2
+          expect(@rubric_assoc.assessment_requests.count).to eq 2
         end
       end
     end
@@ -95,7 +95,7 @@ describe RubricAssociation do
           end
 
           it "should have 2 assessment_requests" do
-            @rubric_assoc.assessment_requests.count.should == 2
+            expect(@rubric_assoc.assessment_requests.count).to eq 2
           end
         end
       end
@@ -110,7 +110,7 @@ describe RubricAssociation do
           :context => @course,
           :purpose => 'bookmark'
         )
-        LearningOutcome.expects(:update_alignments).never
+        expect(LearningOutcome).to receive(:update_alignments).never
         ra.update_alignments
       end
 
@@ -126,10 +126,10 @@ describe RubricAssociation do
           :context => @course,
           :purpose => 'grading'
         )
-        assignment.reload.learning_outcome_alignments.count.should == 1
+        expect(assignment.reload.learning_outcome_alignments.count).to eq 1
 
         ra.destroy
-        assignment.reload.learning_outcome_alignments.count.should == 0
+        expect(assignment.reload.learning_outcome_alignments.count).to eq 0
       end
     end
 
@@ -156,10 +156,22 @@ describe RubricAssociation do
           }
         }
       })
-      
-      assess.should_not be_nil
+
+      expect(assess).not_to be_nil
       ra.destroy
-      assess.reload.should_not be_nil
+      expect(assess.reload).not_to be_nil
+    end
+
+    it "should let account admins without manage_courses do things" do
+      @rubric = @course.rubrics.create! { |r| r.user = @teacher }
+      ra_params = rubric_association_params_for_assignment(@assignment)
+      ra = RubricAssociation.generate(@teacher, @rubric, @course, ra_params)
+
+      admin = account_admin_user_with_role_changes(:active_all => true, :role_changes => {:manage_courses => false})
+
+      [:manage, :delete].each do |permission|
+        expect(ra.grants_right?(admin, permission)).to be_truthy
+      end
     end
   end
 
@@ -172,7 +184,7 @@ describe RubricAssociation do
       rubric_params = HashWithIndifferentAccess.new({"title"=>"Some Rubric", "criteria"=>{"0"=>{"learning_outcome_id"=>"", "ratings"=>{"0"=>{"points"=>"5", "id"=>"blank", "description"=>"Full Marks"}, "1"=>{"points"=>"0", "id"=>"blank_2", "description"=>"No Marks"}}, "points"=>"5", "long_description"=>"", "id"=>"", "description"=>"Description of criterion"}}, "points_possible"=>"5", "free_form_criterion_comments"=>"0"})
       rubric_association_params = HashWithIndifferentAccess.new({:association_object=>@account, :hide_score_total=>"0", :use_for_grading=>"0", :purpose=>"bookmark"})
       #8864: the below raised a MethodNotFound error by trying to call @account.submissions
-      lambda { @rubric.update_with_association(@user, rubric_params, @account, rubric_association_params) }.should_not raise_error
+      expect { @rubric.update_with_association(@user, rubric_params, @account, rubric_association_params) }.not_to raise_error
     end
   end
 
@@ -182,8 +194,51 @@ describe RubricAssociation do
       @rubric = @course.rubrics.build
       rubric_params = HashWithIndifferentAccess.new({"title"=>"Some Rubric", "criteria"=>{"0"=>{"learning_outcome_id"=>"", "ratings"=>{"0"=>{"points"=>"5", "id"=>"blank", "description"=>"Full Marks"}, "1"=>{"points"=>"0", "id"=>"blank_2", "description"=>"No Marks"}}, "points"=>"5", "long_description"=>"", "id"=>"", "description"=>"Description of criterion"}}, "points_possible"=>"5", "free_form_criterion_comments"=>"0"})
       rubric_association_params = HashWithIndifferentAccess.new({:association_object=>@course, :hide_score_total=>"0", :use_for_grading=>"0", :purpose=>"bookmark"})
-      @course.any_instantiation.expects(:submissions).never
+      expect_any_instantiation_of(@course).to receive(:submissions).never
       @rubric.update_with_association(@user, rubric_params, @course, rubric_association_params)
+    end
+  end
+
+  describe "#assess" do
+    let(:course) { Course.create! }
+    let!(:first_teacher) { course_with_teacher(course: course, active_all: true).user }
+    let!(:second_teacher) { course_with_teacher(course: course, active_all: true).user }
+    let(:student) { student_in_course(course: course, active_all: true).user }
+    let(:assignment) { course.assignments.create!(submission_types: 'online_text_entry') }
+    let(:rubric) do
+      course.rubrics.create! do |r|
+        r.title = "rubric"
+        r.user = first_teacher
+        r.data = [{
+                    id: "stuff",
+                    description: "stuff",
+                    long_description: "",
+                    points: 1.0,
+                    ratings: [
+                      { description: "Full Marks", points: 1.0, id: "blank" },
+                      { description: "No Marks", points: 0.0, id: "blank_2" }
+                    ]
+                  }]
+      end
+    end
+    let!(:rubric_association) do
+      params = rubric_association_params_for_assignment(assignment)
+      RubricAssociation.generate(first_teacher, rubric, course, params)
+    end
+    let(:submission) { assignment.submit_homework(student) }
+    let(:assessment_params) { { assessment_type: 'grading', criterion_stuff: { points: 1 } } }
+
+    it "updates the assessor/grader if the second assessor is different than the first" do
+      rubric_association.assess(user: student, assessor: first_teacher, artifact: submission,
+                                assessment: assessment_params)
+
+      assessment_params[:criterion_stuff][:points] = 0
+      assessment = rubric_association.assess(user: student, assessor: second_teacher, artifact: submission,
+                                             assessment: assessment_params)
+      submission.reload
+
+      expect(assessment.assessor).to eq(second_teacher)
+      expect(submission.grader).to eq(second_teacher)
     end
   end
 end

@@ -1,5 +1,23 @@
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
 <div id="pageviews">
-  <table data-user-id="<%= @user.id %>" class="table table-hover table-condensed table-bordered table-striped">
+  <table data-user-id="<%= @user.id %>" class="ic-Table ic-Table--hover-row ic-Table--condensed ic-Table--striped">
     <thead class='ui-widget-header'>
       <tr>
         <th><%= t('headers.url', "URL") %></th>
@@ -8,7 +26,7 @@
         <th><%= t('headers.time', "Time") %></th>
         <th>
           <div style="float:right; margin-right: 4px">
-            <%= link_to("csv", user_page_views_path(@user, :format => :csv), :class => 'xls') %>
+            <%= link_to("csv", user_page_views_path(@user, :format => :csv), :class => 'icon-ms-excel') %>
           </div>
           <%= t('headers.user_agent', "User Agent") %>
         </th>
@@ -18,5 +36,5 @@
     </tbody>
   </table>
 </div>
-<% jammit_css :page_views %>
+<% css_bundle :page_views %>
 <% js_bundle  :page_views %>

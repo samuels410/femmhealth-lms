@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define ['compiled/models/progressable', 'Backbone'], (progressable, {Model}) ->
 
   progressUrl = '/progress'
@@ -8,7 +25,7 @@ define ['compiled/models/progressable', 'Backbone'], (progressable, {Model}) ->
   class QuizCSV extends Model
     @mixin progressable
 
-  module 'progressable',
+  QUnit.module 'progressable',
     setup: ->
       clock = sinon.useFakeTimers()
       model = new QuizCSV
@@ -29,26 +46,23 @@ define ['compiled/models/progressable', 'Backbone'], (progressable, {Model}) ->
       clock.restore()
 
   test 'set progress_url', ->
-    spy = sinon.spy()
+    spy = @spy()
     model.progressModel.on 'complete', spy
     model.on 'progressResolved', spy
     model.set progress_url: progressUrl
-    server.respond()
-    server.respond()
+    server.respond() # respond to progress, which queues model fetch
+    server.respond() # respond to model fetch
     ok spy.calledTwice, 'complete and progressResolved handlers called'
     equal model.progressModel.get('workflow_state'), 'completed'
     equal model.get('csv'), 'one,two,three'
 
   test 'set progress.url', ->
-    spy = sinon.spy()
+    spy = @spy()
     model.progressModel.on 'complete', spy
     model.on 'progressResolved', spy
     model.progressModel.set url: progressUrl, workflow_state: 'queued'
-    server.respond()
+    server.respond() # respond to progress, which queues model fetch
+    server.respond() # respond to model fetch
     ok spy.calledTwice, 'complete and progressResolved handlers called'
-    server.respond()
-    server.respond()
     equal model.progressModel.get('workflow_state'), 'completed'
     equal model.get('csv'), 'one,two,three'
-
-

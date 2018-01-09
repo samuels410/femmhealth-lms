@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -24,7 +24,7 @@ describe 'ReassociateConversationAttachments' do
     it "should work" do
       c = Conversation.create!
 
-      u1 = user
+      u1 = user_factory
       cm1 = c.conversation_messages.build
       cm1.author_id = u1.id
       cm1.body = ''
@@ -34,9 +34,9 @@ describe 'ReassociateConversationAttachments' do
 
       # this will set up the conversation attachments folder (and my files folder)
       u1.conversation_attachments_folder
-      u1.folders.map(&:name).sort.should eql ["conversation attachments", "my files"]
+      expect(u1.folders.map(&:name).sort).to eql ["conversation attachments", "my files"]
 
-      u2 = user
+      u2 = user_factory
       cm2 = c.conversation_messages.build
       cm2.author_id = u2.id
       cm2.body = ''
@@ -45,32 +45,32 @@ describe 'ReassociateConversationAttachments' do
       a2.save_without_touching_context
       a3 = attachment_obj_with_context(cm2)
       a3.save_without_touching_context
-      u2.folders.should be_empty
+      expect(u2.folders).to be_empty
 
       ReassociateConversationAttachments.up
 
       u1.reload
-      u1.folders.map(&:name).sort.should eql ["conversation attachments", "my files"]
-      u1.conversation_attachments_folder.attachments.should eql [a1]
+      expect(u1.folders.map(&:name).sort).to eql ["conversation attachments", "my files"]
+      expect(u1.conversation_attachments_folder.attachments.to_a).to match_array [a1]
       cm1.reload
       a1.reload
-      cm1.attachment_ids.should eql a1.id.to_s
-      cm1.attachments.should eql [a1]
-      a1.context.should eql u1
-      a1.folder.should eql u1.conversation_attachments_folder
+      expect(cm1.attachment_ids).to eql [a1.id]
+      expect(cm1.attachments.to_a).to match_array [a1]
+      expect(a1.context).to eql u1
+      expect(a1.folder).to eql u1.conversation_attachments_folder
 
       u2.reload
-      u2.folders.map(&:name).sort.should eql ["conversation attachments", "my files"]
-      u2.conversation_attachments_folder.attachments.map(&:id).sort.should eql [a2.id, a3.id]
+      expect(u2.folders.map(&:name).sort).to eql ["conversation attachments", "my files"]
+      expect(u2.conversation_attachments_folder.attachments.map(&:id).sort).to eql [a2.id, a3.id]
       cm2.reload
       a2.reload
       a3.reload
-      cm2.attachment_ids.split(',').map(&:to_i).sort.should eql [a2.id, a3.id]
-      cm2.attachments.should eql [a2, a3]
-      a2.context.should eql u2
-      a2.folder.should eql u2.conversation_attachments_folder
-      a3.context.should eql u2
-      a3.folder.should eql u2.conversation_attachments_folder
+      expect(cm2.attachment_ids.sort).to eql [a2.id, a3.id]
+      expect(cm2.attachments.to_a).to match_array [a2, a3]
+      expect(a2.context).to eql u2
+      expect(a2.folder).to eql u2.conversation_attachments_folder
+      expect(a3.context).to eql u2
+      expect(a3.folder).to eql u2.conversation_attachments_folder
     end
   end
 end

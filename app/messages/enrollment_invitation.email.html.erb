@@ -1,26 +1,22 @@
 <% define_content :link do %>
-  <%= HostUrl.protocol %>://<%= HostUrl.context_host(asset.course) %>/<%= asset.course.class.to_s.downcase.pluralize %>/<%= asset.course_id %>?invitation=<%= asset.uuid %>
+  <%= course_url(asset.course, invitation: asset.uuid) %>
 <% end %>
+
 <% define_content :subject do %>
   <%= t :subject, "Course Invitation" %>
 <% end %>
+
+<% define_content :footer_link do %>
+  <a href="<%= content(:link) %>">
+    <%= t(:link, "Click here to view the course page") %>
+  </a>
+<% end %>
+
 <% email = asset.user.email; login = (asset.user.pseudonym.unique_id rescue "none") %>
 
 <p>
-    <%=
-        case asset.type
-          when 'TeacherEnrollment'
-            t :body_teacher, "You've been invited to participate in the course, %{course}, as a teacher.", :course => asset.course.name
-          when 'TaEnrollment'
-            t :body_ta, "You've been invited to participate in the course, %{course}, as a TA.", :course => asset.course.name
-          when 'ObserverEnrollment'
-            t :body_observer, "You've been invited to participate in the course, %{course}, as an observer.", :course => asset.course.name
-          when 'DesignerEnrollment'
-            t :body_designer, "You've been invited to participate in the course, %{course}, as a designer.", :course => asset.course.name
-          else
-            t :body_student, "You've been invited to participate in the course, %{course}, as a student.", :course => asset.course.name
-        end
-    %>
+  <%= t "You've been invited to participate in the course, %{course}. Course role: %{role_type}",
+      :course => asset.course.name, :role_type => asset.readable_role_name %>
 </p>
 
 <table border="0" style="font-size: 14px; color: #444444;
@@ -42,6 +38,14 @@
     <% end %>
 </table>
 
-<p><a href="<%= content(:link) %>"><%= t(:link, "Click here to view the course page") %></a></p>
+<br><br>
 
-
+<table width="100%" border="0" style="text-align:center;">
+  <tr>
+    <td>
+      <a href="<%= content(:link) %>" style="color: #FFFFFF; background-color: #008EE2; padding: 8px 40px; border-radius: 3px; text-decoration: none; font-weight: bold;">
+        <%= t('Get Started') %>
+      </a>
+    </td>
+  </tr>
+</table>

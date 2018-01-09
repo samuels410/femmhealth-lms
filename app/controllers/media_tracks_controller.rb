@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,7 +20,7 @@
 class MediaTracksController < ApplicationController
   include Api::V1::MediaObject
 
-  TRACK_SETTABLE_ATTRIBUTES = [:kind, :locale, :content]
+  TRACK_SETTABLE_ATTRIBUTES = [:kind, :locale, :content].freeze
 
   # @{not an}API Create a media track
   #
@@ -37,17 +37,17 @@ class MediaTracksController < ApplicationController
   #
   # @example_request
   #     curl https://<canvas>/media_objects/<media_object_id>/media_tracks \
-  #         -F kind='subtitles' \ 
-  #         -F locale='es' \ 
-  #         -F content='0\n00:00:00,000 --> 00:00:01,000\nInstructor…This is the first sentance\n\n\n1\n00:00:01,000 --> 00:00:04,000\nand a second...' \ 
+  #         -F kind='subtitles' \
+  #         -F locale='es' \
+  #         -F content='0\n00:00:00,000 --> 00:00:01,000\nInstructor…This is the first sentance\n\n\n1\n00:00:01,000 --> 00:00:04,000\nand a second...' \
   #         -H 'Authorization: Bearer <token>'
   #
   # @returns MediaObject
   def create
     @media_object = MediaObject.active.by_media_id(params[:media_object_id]).first
     if authorized_action(@media_object, @current_user, :add_captions)
-      track = @media_object.media_tracks.find_or_initialize_by_user_id_and_locale(@current_user.id, params[:locale])
-      track.update_attributes! params.slice(*TRACK_SETTABLE_ATTRIBUTES)
+      track = @media_object.media_tracks.where(user_id: @current_user.id, locale: params[:locale]).first_or_initialize
+      track.update_attributes! params.permit(*TRACK_SETTABLE_ATTRIBUTES)
       render :json => media_object_api_json(@media_object, @current_user, session)
     end
   end
@@ -63,7 +63,7 @@ class MediaTracksController < ApplicationController
   def show
     @media_track = MediaTrack.find params[:id]
     if stale? :etag => @media_track, :last_modified => @media_track.updated_at.utc
-      render :text => @media_track.content
+      render :plain => @media_track.content
     end
   end
 

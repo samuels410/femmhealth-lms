@@ -1,8 +1,26 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'underscore'
   'Backbone'
   'jquery'
   'jst/accounts/admin_tools/autocomplete'
+  'jqueryui/autocomplete'
 ], (_, Backbone, $, template) ->
   class AutocompleteView extends Backbone.View
     template: template
@@ -20,6 +38,7 @@ define [
       @options.valueProperty ||= 'id'
       @options.fieldName ||= @options.valueProperty
       @options.placeholder ||= @options.fieldName
+      @options.sourceParameters ||= {}
 
     toJSON: ->
       @options
@@ -33,8 +52,8 @@ define [
 
     autocompleteSource: (request, response) ->
       @$searchTerm.addClass("loading")
-      params = data:
-        search_term: request.term
+      params = data: @options.sourceParameters
+      params.data.search_term = request.term
       labelProperty = @options.labelProperty
       success = ->
         items = @collection.map (item) ->

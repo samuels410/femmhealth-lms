@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,384 +16,331 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+require 'net-ldap'
+require 'net_ldap_extensions'
+
 class AccountAuthorizationConfig < ActiveRecord::Base
-  cattr_accessor :saml_enabled
-  begin
-    require 'onelogin/saml'
-    self.saml_enabled = true
-  rescue LoadError
-    self.saml_enabled = false
+  include Workflow
+  validates :auth_filter, length: {maximum: maximum_text_length, allow_nil: true, allow_blank: true}
+
+  workflow do
+    state :active
+    state :deleted
   end
 
-  belongs_to :account
-  acts_as_list :scope => :account
+  self.inheritance_column = :auth_type
 
-  attr_accessible :account, :auth_port, :auth_host, :auth_base, :auth_username,
-                  :auth_password, :auth_password_salt, :auth_type, :auth_over_tls,
-                  :log_in_url, :log_out_url, :identifier_format,
-                  :certificate_fingerprint, :entity_id, :change_password_url,
-                  :login_handle_name, :ldap_filter, :auth_filter, :requested_authn_context,
-                  :login_attribute, :idp_entity_id
-
-  before_validation :set_saml_defaults, :if => Proc.new { |aac| aac.saml_authentication? }
-  validates_presence_of :account_id
-  validates_presence_of :entity_id, :if => Proc.new{|aac| aac.saml_authentication?}
-  after_create :disable_open_registration_if_delegated
-  after_destroy :enable_canvas_authentication
-  # if the config changes, clear out last_timeout_failure so another attempt can be made immediately
-  before_save :clear_last_timeout_failure
-
-  def self.recognized_params(auth_type)
-    case auth_type
-    when 'cas'
-      [ :auth_type, :auth_base, :log_in_url, :login_handle_name ]
-    when 'ldap'
-      [ :auth_type, :auth_host, :auth_port, :auth_over_tls, :auth_base,
-        :auth_filter, :auth_username, :auth_password, :change_password_url,
-        :identifier_format, :login_handle_name, :position ]
-    when 'saml'
-      [ :auth_type, :log_in_url, :log_out_url, :change_password_url, :requested_authn_context,
-        :certificate_fingerprint, :identifier_format, :login_handle_name,
-        :login_attribute, :idp_entity_id, :position]
-    else
-      []
-    end
-  end
-
-  def self.auth_over_tls_setting(value)
-    case value
-      when nil, '', false, 'false', 'f', 0, '0'
-        nil
-      when true, 'true', 't', 1, '1', 'simple_tls', :simple_tls
-        'simple_tls'
-      when 'start_tls', :start_tls
-        'start_tls'
-      else
-        raise ArgumentError("invalid auth_over_tls setting: #{value}")
-    end
-  end
-
-  def auth_over_tls
-    self.class.auth_over_tls_setting(read_attribute(:auth_over_tls))
-  end
-
-  def ldap_connection
-    raise "Not an LDAP config" unless self.auth_type == 'ldap'
-    require 'net/ldap'
-    ldap = Net::LDAP.new(:encryption => self.auth_over_tls.try(:to_sym))
-    ldap.host = self.auth_host
-    ldap.port = self.auth_port
-    ldap.base = self.auth_base
-    ldap.auth self.auth_username, self.auth_decrypted_password
-    ldap
-  end
-  
-  def set_saml_defaults
-    self.entity_id ||= saml_default_entity_id
-    self.requested_authn_context = nil if self.requested_authn_context.blank?
-  end
-  
-  def self.saml_login_attributes
-    {
-      'NameID' => 'nameid',
-      'eduPersonPrincipalName' => 'eduPersonPrincipalName',
-      t(:saml_eppn_domain_stripped, "%{eppn} (domain stripped)", :eppn => "eduPersonPrincipalName") =>'eduPersonPrincipalName_stripped'
-    }
-  end
-  
-  def sanitized_ldap_login(login)
-    [ [ '\\', '\5c' ], [ '*', '\2a' ], [ '(', '\28' ], [ ')', '\29' ], [ "\00", '\00' ] ].each do |re|
-      login.gsub!(re[0], re[1])
-    end
-    login
-  end
-  
-  def ldap_filter(login = nil)
-    filter = self.auth_filter
-    filter = filter.gsub(/\{\{login\}\}/, sanitized_ldap_login(login)) if login
-    filter
-  end
-  
-  def change_password_url
-    read_attribute(:change_password_url).blank? ? nil : read_attribute(:change_password_url)
-  end
-  
-  def ldap_filter=(new_filter)
-    self.auth_filter = new_filter
-  end
-
-  def ldap_ip
-    begin
-      return Socket::getaddrinfo(self.auth_host, 'http', nil, Socket::SOCK_STREAM)[0][3]
-    rescue SocketError
-      return nil
-    end
-  end
-  
-  def auth_password=(password)
-    return if password.nil? or password == ''
-    self.auth_crypted_password, self.auth_password_salt = Canvas::Security.encrypt_password(password, 'instructure_auth')
-  end
-  
-  def auth_decrypted_password
-    return nil unless self.auth_password_salt && self.auth_crypted_password
-    Canvas::Security.decrypt_password(self.auth_crypted_password, self.auth_password_salt, 'instructure_auth')
-  end
-  
-  def self.saml_default_entity_id_for_account(account)
-    "http://#{HostUrl.context_host(account)}/saml2"
-  end
-  
-  def saml_default_entity_id
-    AccountAuthorizationConfig.saml_default_entity_id_for_account(self.account)
-  end
-
-  def login_attribute
-    return 'nameid' unless read_attribute(:login_attribute)
-    super
-  end
-
-  def saml_settings(current_host=nil)
-    return nil unless self.auth_type == 'saml'
-
-    unless @saml_settings
-      @saml_settings = AccountAuthorizationConfig.saml_settings_for_account(self.account, current_host)
-
-      @saml_settings.idp_sso_target_url = self.log_in_url
-      @saml_settings.idp_slo_target_url = self.log_out_url
-      @saml_settings.idp_cert_fingerprint = self.certificate_fingerprint
-      @saml_settings.name_identifier_format = self.identifier_format
-      @saml_settings.requested_authn_context = self.requested_authn_context
-    end
-    
-    @saml_settings
-  end
-  
-  def self.saml_settings_for_account(account, current_host=nil)
-    app_config = Setting.from_config('saml') || {}
-    domains = HostUrl.context_hosts(account, current_host)
-    
-    settings = Onelogin::Saml::Settings.new
-    settings.sp_slo_url = "#{HostUrl.protocol}://#{domains.first}/saml_logout"
-    settings.assertion_consumer_service_url = domains.map { |domain| "#{HostUrl.protocol}://#{domain}/saml_consume" }
-    settings.tech_contact_name = app_config[:tech_contact_name] || 'Webmaster'
-    settings.tech_contact_email = app_config[:tech_contact_email] || ''
-    
-    if account.saml_authentication?
-      settings.issuer = account.account_authorization_config.entity_id 
-    else
-      settings.issuer = saml_default_entity_id_for_account(account)
-    end
-    
-    encryption = app_config[:encryption]
-    if encryption.is_a?(Hash)
-      settings.xmlsec_certificate = resolve_saml_key_path(encryption[:certificate])
-      settings.xmlsec_privatekey = resolve_saml_key_path(encryption[:private_key])
-
-      settings.xmlsec_additional_privatekeys = Array(encryption[:additional_private_keys]).map { |apk| resolve_saml_key_path(apk) }.compact
-    end
-    
-    settings
-  end
-
-  def self.resolve_saml_key_path(path)
-    return nil unless path
-
-    path = Pathname(path)
-
-    if path.relative?
-      path = Rails.root.join 'config', path
-    end
-
-    path.exist? ? path.to_s : nil
-  end
-  
-  def email_identifier?
-    if self.saml_authentication?
-      return self.identifier_format == Onelogin::Saml::NameIdentifiers::EMAIL
-    end
-    
+  def self.subclass_from_attributes?(attrs)
     false
   end
-  
-  def password_authentication?
-    !['cas', 'ldap', 'saml'].member?(self.auth_type)
+
+  # we have a lot of old data that didn't actually use STI,
+  # so we shim it
+  def self.find_sti_class(type_name)
+    return self if type_name.blank? # super no longer does this in Rails 4
+    case type_name
+    when 'cas', 'ldap', 'saml'
+      const_get(type_name.upcase)
+    when 'clever', 'facebook', 'google', 'microsoft', 'twitter'
+      const_get(type_name.classify)
+    when 'canvas'
+      Canvas
+    when 'github'
+      GitHub
+    when 'linkedin'
+      LinkedIn
+    when 'openid_connect'
+      OpenIDConnect
+    else
+      super
+    end
   end
 
-  def delegated_authentication?
-    ['cas', 'saml'].member?(self.auth_type)
+  def self.sti_name
+    display_name.try(:underscore)
   end
 
-  def cas_authentication?
-    self.auth_type == 'cas'
+  def self.singleton?
+    false
   end
-  
-  def ldap_authentication?
-    self.auth_type == 'ldap'
+
+  def self.enabled?
+    true
   end
-  
-  def saml_authentication?
-    self.auth_type == 'saml'
+
+  def self.display_name
+    name.try(:demodulize)
   end
-  
+
+  scope :active, ->{ where("workflow_state <> 'deleted'") }
+  belongs_to :account
+  has_many :pseudonyms, foreign_key: :authentication_provider_id
+  acts_as_list scope: { account: self, workflow_state: [nil, 'active'] }
+
+  VALID_AUTH_TYPES = %w[canvas cas clever facebook github google ldap linkedin microsoft openid_connect saml twitter].freeze
+  validates_inclusion_of :auth_type, in: VALID_AUTH_TYPES, message: "invalid auth_type, must be one of #{VALID_AUTH_TYPES.join(',')}"
+  validates_presence_of :account_id
+  validate :validate_federated_attributes
+
+  # create associate model find to accept auth types, and just return the first one of that
+  # type
+  module FindWithType
+    def find(*args)
+      if VALID_AUTH_TYPES.include?(args.first)
+        where(auth_type: args.first).first!
+      else
+        super
+      end
+    end
+  end
+
+  def self.recognized_params
+    [].freeze
+  end
+
+  def self.deprecated_params
+    [].freeze
+  end
+
+  SENSITIVE_PARAMS = [].freeze
+
+  def self.login_button?
+    Rails.root.join("public/images/sso_buttons/sso-#{sti_name}.svg").exist?
+  end
+
+  def destroy
+    self.send(:remove_from_list_for_destroy)
+    self.workflow_state = 'deleted'
+    self.save!
+    enable_canvas_authentication
+    send_later_if_production(:soft_delete_pseudonyms)
+    true
+  end
+  alias_method :destroy_permanently!, :destroy
+
+  def auth_password=(password)
+    return if password.blank?
+    self.auth_crypted_password, self.auth_password_salt = ::Canvas::Security.encrypt_password(password, 'instructure_auth')
+  end
+
+  def auth_decrypted_password
+    return nil unless self.auth_password_salt && self.auth_crypted_password
+    ::Canvas::Security.decrypt_password(self.auth_crypted_password, self.auth_password_salt, 'instructure_auth')
+  end
+
+  def auth_provider_filter
+    self
+  end
+
   def self.default_login_handle_name
     t(:default_login_handle_name, "Email")
   end
-  
+
   def self.default_delegated_login_handle_name
     t(:default_delegated_login_handle_name, "Login")
   end
-  
+
   def self.serialization_excludes; [:auth_crypted_password, :auth_password_salt]; end
 
-  def test_ldap_connection
-    begin
-      timeout(5) do
-        TCPSocket.open(self.auth_host, self.auth_port)
+  # allowable attributes for federated_attributes setting; nil means anything
+  # is allowed
+  def self.recognized_federated_attributes
+    [].freeze
+  end
+
+  def settings
+    read_attribute(:settings) || {}
+  end
+
+  def federated_attributes=(value)
+    value = {} unless value.is_a?(Hash)
+    settings_will_change! unless value == federated_attributes
+    settings['federated_attributes'] = value
+  end
+
+  def federated_attributes
+    settings['federated_attributes'] ||= {}
+  end
+
+  def federated_attributes_for_api
+    if jit_provisioning?
+      federated_attributes
+    else
+      result = {}
+      federated_attributes.each do |(canvas_attribute_name, provider_attribute_config)|
+        next if provider_attribute_config['provisioning_only']
+        result[canvas_attribute_name] = provider_attribute_config['attribute']
       end
-      return true
-    rescue SocketError
-      self.errors.add(:ldap_connection_test, t(:test_host_unknown, "Unknown host: %{host}", :host => self.auth_host))
-    rescue Timeout::Error
-      self.errors.add(:ldap_connection_test, t(:test_connection_timeout, "Timeout when connecting"))
-    rescue => e
-      self.errors.add(:ldap_connection_test, e.message)
+      result
     end
-    false
   end
 
-  def test_ldap_bind
-    begin
-      conn = self.ldap_connection
-      unless res = conn.bind
-        error = conn.get_operation_result
-        self.errors.add(:ldap_bind_test, "Error #{error.code}: #{error.message}")
+  CANVAS_ALLOWED_FEDERATED_ATTRIBUTES = %w{
+    admin_roles
+    display_name
+    email
+    given_name
+    integration_id
+    locale
+    name
+    sis_user_id
+    sortable_name
+    surname
+    time_zone
+  }.freeze
+
+  def provision_user(unique_id, provider_attributes = {})
+    User.transaction(requires_new: true) do
+      pseudonym = account.pseudonyms.build
+      pseudonym.user = User.create!(name: unique_id) { |u| u.workflow_state = 'registered' }
+      pseudonym.authentication_provider = self
+      pseudonym.unique_id = unique_id
+      pseudonym.save!
+      apply_federated_attributes(pseudonym, provider_attributes, purpose: :provisioning)
+      pseudonym
+    end
+  rescue ActiveRecord::RecordNotUnique
+    uncached do
+      pseudonyms.active.by_unique_id(unique_id).first!
+    end
+  end
+
+  def apply_federated_attributes(pseudonym, provider_attributes, purpose: :login)
+    user = pseudonym.user
+
+    canvas_attributes = translate_provider_attributes(provider_attributes,
+                                                      purpose: purpose)
+    given_name = canvas_attributes.delete('given_name')
+    surname = canvas_attributes.delete('surname')
+    if given_name || surname
+      user.name = "#{given_name} #{surname}"
+      user.sortable_name = if given_name.present? && surname.present?
+                             "#{surname}, #{given_name}"
+                           else
+                             "#{given_name}#{surname}"
+                           end
+    end
+
+    canvas_attributes.each do |(attribute, value)|
+      case attribute
+      when 'admin_roles'
+        role_names = value.is_a?(String) ? value.split(',').map(&:strip) : value
+        account = pseudonym.account
+        existing_account_users = account.account_users.merge(user.account_users).preload(:role).to_a
+        roles = role_names.map do |role_name|
+          account.get_account_role_by_name(role_name)
+        end.compact
+        roles_to_add = roles - existing_account_users.map(&:role)
+        account_users_to_delete = existing_account_users.select { |au| au.active? && !roles.include?(au.role) }
+        account_users_to_activate = existing_account_users.select { |au| au.deleted? && roles.include?(au.role) } 
+        roles_to_add.each do |role|
+          account.account_users.create!(user: user, role: role)
+        end
+        account_users_to_delete.each(&:destroy)
+        account_users_to_activate.each(&:reactivate)
+      when 'sis_user_id', 'integration_id'
+        pseudonym[attribute] = value
+      when 'display_name'
+        user.short_name = value
+      when 'email'
+        cc = user.communication_channels.email.by_path(value).first
+        cc ||= user.communication_channels.email.new(path: value)
+        cc.workflow_state = 'active'
+        cc.save! if cc.changed?
+      when 'locale'
+        # convert _ to -, be lenient about case, and perform fallbacks
+        value = value.tr('_', '-')
+        lowercase_locales = I18n.available_locales.map(&:to_s).map(&:downcase)
+        while value.include?('-')
+          break if lowercase_locales.include?(value.downcase)
+          value = value.sub(/(?:x-)?-[^-]*$/, '')
+        end
+        if (i = lowercase_locales.index(value.downcase))
+          user.locale = I18n.available_locales[i].to_s
+        end
+      else
+        user.send("#{attribute}=", value)
       end
-      return res
-    rescue => e
-      self.errors.add(:ldap_bind_test, t(:test_bind_failed, "Failed to bind with the following error: %{error}", :error => e.message))
-      return false
     end
-  end
-
-  def test_ldap_search
-    begin
-      conn = self.ldap_connection
-      filter = self.ldap_filter("canvas_ldap_test_user")
-      Net::LDAP::Filter.construct(filter)
-      unless res = conn.search {|s| break s}
-        error = conn.get_operation_result
-        self.errors.add(:ldap_search_test, "Error #{error.code}: #{error.message}")
+    if pseudonym.changed?
+      unless pseudonym.save
+        Rails.logger.warn("Unable to save federated pseudonym: #{pseudonym.errors}")
       end
-      return res.present?
-    rescue
-      self.errors.add(
-        :ldap_search_test,
-        t(:test_search_failed, "Search failed with the following error: %{error}", :error => $!)
-      )
-      return false
+    end
+    if user.changed?
+      unless user.save
+        Rails.logger.warn("Unable to save federated user: #{user.errors}")
+      end
     end
   end
 
-  def test_ldap_login(username, password)
-    ldap = self.ldap_connection
-    filter = self.ldap_filter(username)
-    begin
-      res = ldap.bind_as(:base => ldap.base, :filter => filter, :password => password)
-      return true if res
-      self.errors.add(
-        :ldap_login_test,
-        t(:test_login_auth_failed, "Authentication failed")
-      )
-    rescue Net::LDAP::LdapError
-      self.errors.add(
-        :ldap_login_test,
-        t(:test_login_auth_exception, "Exception on login: %{error}", :error => $!)
-      )
-    end
-    false
+  protected
+
+  def statsd_prefix
+    "auth.account_#{Shard.global_id_for(account_id)}.config_#{self.global_id}"
   end
 
-  def disable_open_registration_if_delegated
-    if self.delegated_authentication? && self.account.open_registration?
-      self.account.settings = { :open_registration => false, :self_registration => false }
-      self.account.save!
+  private
+
+  def validate_federated_attributes
+    bad_keys = federated_attributes.keys - CANVAS_ALLOWED_FEDERATED_ATTRIBUTES
+    unless bad_keys.empty?
+      errors.add(:federated_attributes, "#{bad_keys.join(', ')} is not an attribute that can be federated")
+      return
     end
+
+    # normalize values to { attribute: <attribute>, provisioning_only: true|false }
+    federated_attributes.keys.each do |key|
+      case federated_attributes[key]
+      when String
+        federated_attributes[key] = { 'attribute' => federated_attributes[key], 'provisioning_only' => false }
+      when Hash
+        bad_keys = federated_attributes[key].keys - ['attribute', 'provisioning_only']
+        unless bad_keys.empty?
+          errors.add(:federated_attributes, "unrecognized key #{bad_keys.join(', ')} in #{key} attribute definition")
+          return
+        end
+        federated_attributes[key]['provisioning_only'] =
+            ::Canvas::Plugin.value_to_boolean(federated_attributes[key]['provisioning_only'])
+      else
+        errors.add(:federated_attributes, "invalid attribute definition for #{key}")
+        return
+      end
+    end
+
+    return if self.class.recognized_federated_attributes.nil?
+    bad_values = federated_attributes.values.map { |v| v['attribute'] } - self.class.recognized_federated_attributes
+    unless bad_values.empty?
+      errors.add(:federated_attributes, "#{bad_values.join(', ')} is not a valid attribute")
+    end
+  end
+
+  def translate_provider_attributes(provider_attributes, purpose:)
+    result = {}
+    federated_attributes.each do |(canvas_attribute_name, provider_attribute_config)|
+      next if purpose != :provisioning && provider_attribute_config['provisioning_only']
+      provider_attribute_name = provider_attribute_config['attribute']
+
+      if provider_attributes.key?(provider_attribute_name)
+        result[canvas_attribute_name] = provider_attributes[provider_attribute_name]
+      end
+    end
+    result
+  end
+
+  def soft_delete_pseudonyms
+    pseudonyms.find_each(&:destroy)
   end
 
   def enable_canvas_authentication
-    if self.account.settings[:canvas_authentication] == false
-      self.account.settings[:canvas_authentication] = true
-      self.account.save!
-    end
-  end
-
-  def debugging?
-    !!Rails.cache.fetch(debug_key(:debugging))
-  end
-  
-  def debugging_keys
-    [:debugging, :request_id, :to_idp_url, :to_idp_xml, :idp_response_encoded, 
-     :idp_in_response_to, :fingerprint_from_idp, :idp_response_xml_encrypted,
-     :idp_response_xml_decrypted, :idp_login_destination, :is_valid_login_response,
-     :login_response_validation_error, :login_to_canvas_success, :canvas_login_fail_message, 
-     :logged_in_user_id, :logout_request_id, :logout_to_idp_url, :logout_to_idp_xml, 
-     :idp_logout_response_encoded, :idp_logout_in_response_to, 
-     :idp_logout_response_xml_encrypted, :idp_logout_destination]
-  end
-  
-  def finish_debugging
-    debugging_keys.each { |key| Rails.cache.delete(debug_key(key)) }
-  end
-  
-  def start_debugging
-    finish_debugging # clear old data
-    debug_set(:debugging, t('debug.wait_for_login', "Waiting for attempted login"))
-  end
-  
-  def debug_get(key)
-    Rails.cache.fetch(debug_key(key))
-  end
-  
-  def debug_set(key, value)
-    Rails.cache.write(debug_key(key), value, :expires_in => debug_expire)
-  end
-  
-  def debug_key(key)
-    ['aac_debugging', self.id, key.to_s].cache_key
-  end
-  
-  def debug_expire
-    Setting.get('aac_debug_expire_minutes', 30).minutes
-  end
-
-  def self.ldap_failure_wait_time
-    Setting.get('ldap_failure_wait_time', 1.minute.to_s).to_i
-  end
-
-  def ldap_bind_result(unique_id, password_plaintext)
-    return nil if password_plaintext.blank?
-
-    default_timeout = Setting.get('ldap_timelimit', 5.seconds.to_s).to_f
-
-    Canvas.timeout_protection("ldap:#{self.global_id}",
-                              raise_on_timeout: true,
-                              fallback_timeout_length: default_timeout) do
-      ldap = self.ldap_connection
-      filter = self.ldap_filter(unique_id)
-      ldap.bind_as(:base => ldap.base, :filter => filter, :password => password_plaintext)
-    end
-  rescue => e
-    ErrorReport.log_exception(:ldap, e, :account => self.account)
-    if e.is_a?(Timeout::Error)
-      self.update_attribute(:last_timeout_failure, Time.now)
-    end
-    return nil
-  end
-
-  def clear_last_timeout_failure
-    unless self.last_timeout_failure_changed?
-      self.last_timeout_failure = nil
-    end
+    return if account.non_canvas_auth_configured?
+    account.enable_canvas_authentication
   end
 end
+
+# so it doesn't get mixed up with ::CAS, ::LinkedIn and ::Twitter
+require_dependency 'account_authorization_config/canvas'
+require_dependency 'account_authorization_config/cas'
+require_dependency 'account_authorization_config/google'
+require_dependency 'account_authorization_config/linked_in'
+require_dependency 'account_authorization_config/twitter'

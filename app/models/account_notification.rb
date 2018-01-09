@@ -1,10 +1,23 @@
-class AccountNotification < ActiveRecord::Base
-  attr_accessible :subject, :icon, :message,
-    :account, :account_notification_roles, :user, :start_at, :end_at,
-    :required_account_service, :months_in_display_cycle
+#
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 
-  validates_presence_of :start_at, :end_at, :account_id
-  before_validation :infer_defaults
+class AccountNotification < ActiveRecord::Base
+  validates_presence_of :start_at, :end_at, :subject, :message, :account_id
+  validate :validate_dates
   belongs_to :account, :touch => true
   belongs_to :user
   has_many :account_notification_roles, dependent: :destroy
@@ -16,37 +29,58 @@ class AccountNotification < ActiveRecord::Base
 
   validates_inclusion_of :months_in_display_cycle, in: 1..48, allow_nil: true
 
-  def infer_defaults
-    self.start_at ||= Time.now.utc
-    self.end_at ||= self.start_at + 2.weeks
-    self.end_at = [self.end_at, self.start_at].max
+  def validate_dates
+    if self.start_at && self.end_at
+      errors.add(:end_at, t('errors.invalid_account_notification_end_at', "Account notification end time precedes start time")) if self.end_at < self.start_at
+    end
   end
 
   def self.for_user_and_account(user, account)
-    current = self.for_account(account)
-    preload_associations(current, [:account, :account_notification_roles])
-    user_role_types = {}
+    if account.site_admin?
+      current = self.for_account(account)
+    else
+      sub_account_ids = user.enrollments.active.shard(user).
+        joins(:course).where(courses: {workflow_state: 'available'}).
+        distinct.pluck(:account_id, :root_account_id).flatten.uniq
+      sub_account_ids += user.account_users.active.shard(user).
+        joins(:account).where(accounts: {workflow_state: 'active'}).
+        distinct.pluck(:account_id).uniq
+      sub_account_ids = Account.multi_account_chain_ids(sub_account_ids) # get all parent sub-accounts too
+      current = self.for_account(account, sub_account_ids)
+    end
+
+    user_role_ids = {}
 
     current.select! do |announcement|
-      role_types = announcement.account_notification_roles.map(&:role_type)
-      unless user_role_types.key?(announcement.account_id)
+      # use role.id instead of role_id to trigger Role#id magic for built in
+      # roles. try(:id) because the AccountNotificationRole may have an
+      # explicitly nil role_id to indicate the announcement's intended for
+      # users not enrolled in any courses
+      role_ids = announcement.account_notification_roles.map { |anr| anr.role&.role_for_shard&.id }
+
+      unless role_ids.empty? || user_role_ids.key?(announcement.account_id)
+        # choose enrollments and account users to inspect
         if announcement.account.site_admin?
-          # roles user holds with respect to courses
-          user_role_types[announcement.account_id] = user.enrollments.with_each_shard{ |scope| scope.active.select(:type).uniq.map(&:type) }.uniq
-          # announcements intended for users not enrolled in any courses have the NilEnrollment role type
-          user_role_types[announcement.account_id] = ["NilEnrollment"] if user_role_types[announcement.account_id].empty?
-          # roles user holds with respect to accounts
-          user_role_types[announcement.account_id] |= user.account_users.with_each_shard{ |scope| scope.select(:membership_type).uniq.map(&:type) }.uniq
-        else #if announcement.account == account
-          # roles user holds with respect to courses
-          user_role_types[account.id] = user.enrollments_for_account_and_sub_accounts(account).map(&:type)
-          # announcements intended for users not enrolled in any courses have the NilEnrollment role type
-          user_role_types[account.id] = ["NilEnrollment"] if user_role_types[account.id].empty?
-          # roles user holds with respect to accounts
-          user_role_types[account.id] |= account.all_account_users_for(user).map(&:membership_type)
+          enrollments = user.enrollments.shard(user).active.distinct.select(:role_id)
+          account_users = user.account_users.shard(user).distinct.select(:role_id)
+        else
+          enrollments = user.enrollments_for_account_and_sub_accounts(account).select(:role_id)
+          account_users = account.all_account_users_for(user)
         end
+
+        # preload role objects for those enrollments and account users
+        ActiveRecord::Associations::Preloader.new.preload(enrollments, [:role])
+        ActiveRecord::Associations::Preloader.new.preload(account_users, [:role])
+
+        # map to role ids. user role.id instead of role_id to trigger Role#id
+        # magic for built in roles. announcements intended for users not
+        # enrolled in any courses have the NilEnrollment role type
+        user_role_ids[announcement.account_id] = enrollments.map{ |e| e.role.role_for_shard.id }
+        user_role_ids[announcement.account_id] = [nil] if user_role_ids[announcement.account_id].empty?
+        user_role_ids[announcement.account_id] |= account_users.map{ |au| au.role.role_for_shard.id }
       end
-      role_types.empty? || (role_types & user_role_types[announcement.account_id]).present?
+
+      role_ids.empty? || (role_ids & user_role_ids[announcement.account_id]).present?
     end
 
     user.shard.activate do
@@ -68,23 +102,36 @@ class AccountNotification < ActiveRecord::Base
           !self.display_for_user?(user.id, months_in_period)
         end
       end
+
+      roles = user.enrollments.shard(user).active.distinct.pluck(:type)
+
+      if roles == ['StudentEnrollment'] && !account.include_students_in_global_survey?
+        current.reject! { |announcement| announcement.required_account_service == 'account_survey_notifications' }
+      end
     end
 
     current
   end
 
-  def self.for_account(account)
+  def self.for_account(account, sub_account_ids=nil)
     # Refreshes every 10 minutes at the longest
-    Rails.cache.fetch(['account_notifications2', account].cache_key, :expires_in => 10.minutes) do
+    sub_account_ids_hash = Digest::MD5.hexdigest sub_account_ids.try(:sort).to_s
+    Rails.cache.fetch(['account_notifications3', account, sub_account_ids_hash].cache_key, expires_in: 10.minutes) do
       now = Time.now.utc
       # we always check the given account for the flag, even if the announcement is from the site_admin account
       # this allows us to make a global announcement that is filtered to only accounts with this flag
       enabled_flags = ACCOUNT_SERVICE_NOTIFICATION_FLAGS & account.allowed_services_hash.keys.map(&:to_s)
+      account_ids = account.account_chain(include_site_admin: true).map(&:id)
+      if sub_account_ids
+        account_ids += sub_account_ids
+        account_ids.uniq!
+      end
 
-      Shard.partition_by_shard([Account.site_admin, account]) do |accounts|
-        AccountNotification.where("account_id IN (?) AND start_at <? AND end_at>?", accounts, now, now).
+      Shard.partition_by_shard(account_ids) do |a|
+        AccountNotification.where("account_id IN (?) AND start_at <? AND end_at>?", a, now, now).
           where("required_account_service IS NULL OR required_account_service IN (?)", enabled_flags).
-          order('start_at DESC').all
+          order('start_at DESC').
+          preload(:account, account_notification_roles: :role)
       end
     end
   end

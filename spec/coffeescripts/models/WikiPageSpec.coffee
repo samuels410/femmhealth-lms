@@ -1,9 +1,26 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'compiled/models/WikiPage'
   'underscore'
 ], (WikiPage, _) ->
-  wikiPageObj = (options={}) -> 
-    defaults = 
+  wikiPageObj = (options={}) ->
+    defaults =
               body: "<p>content for the uploading of content</p>"
               created_at: "2013-05-10T13:18:27-06:00"
               editing_roles: "teachers"
@@ -18,7 +35,7 @@ define [
     _.extend defaults, options
 
 
-  module 'WikiPage'
+  QUnit.module 'WikiPage'
   test 'latestRevision is only available when a url is provided', ->
     wikiPage = new WikiPage
     equal wikiPage.latestRevision(), null, 'not provided without url'
@@ -42,7 +59,7 @@ define [
     equal wikiPage.latestRevision().summary, true, 'defaulted to summary'
 
 
-  module 'WikiPage:Publishable'
+  QUnit.module 'WikiPage:Publishable'
   test 'publishable', ->
     wikiPage = new WikiPage
       front_page: false
@@ -62,23 +79,7 @@ define [
     strictEqual wikiPage.get('deletable'), false, 'deletable set when front_page changed'
 
 
-  module 'WikiPage:Sync'
-  test 'sets the id during construction', ->
-    wikiPage = new WikiPage wikiPageObj()
-    equal wikiPage.get('url'), 'front-page-2'
-    equal wikiPage.get('id'), wikiPage.get('url'), 'Sets id to url'
-
-  test 'sets the id during parse', ->
-    wikiPage = new WikiPage
-    parseResponse = wikiPage.parse(wikiPageObj())
-    equal parseResponse.url, 'front-page-2'
-    equal parseResponse.id, parseResponse.url, 'Sets id to url'
-
-  test 'removes the id during toJSON', ->
-    wikiPage = new WikiPage wikiPageObj()
-    json = wikiPage.toJSON()
-    equal json.id, undefined, 'Removes id from serialized json'
-
+  QUnit.module 'WikiPage:Sync'
   test 'parse removes wiki_page namespace added by api', ->
     wikiPage = new WikiPage
     namespacedObj = {}
@@ -95,7 +96,7 @@ define [
 
   test 'publish convenience method', 3, ->
     wikiPage = new WikiPage wikiPageObj()
-    sinon.stub wikiPage, 'save', (attributes, options) ->
+    @stub(wikiPage, 'save').callsFake (attributes, options) ->
       ok attributes, 'attributes present'
       ok attributes.wiki_page, 'wiki_page present'
       strictEqual attributes.wiki_page.published, true, 'published provided correctly'
@@ -103,7 +104,7 @@ define [
 
   test 'unpublish convenience method', 3, ->
     wikiPage = new WikiPage wikiPageObj()
-    sinon.stub wikiPage, 'save', (attributes, options) ->
+    @stub(wikiPage, 'save').callsFake (attributes, options) ->
       ok attributes, 'attributes present'
       ok attributes.wiki_page, 'wiki_page present'
       strictEqual attributes.wiki_page.published, false, 'published provided correctly'
@@ -111,7 +112,7 @@ define [
 
   test 'setFrontPage convenience method', 3, ->
     wikiPage = new WikiPage wikiPageObj()
-    sinon.stub wikiPage, 'save', (attributes, options) ->
+    @stub(wikiPage, 'save').callsFake (attributes, options) ->
       ok attributes, 'attributes present'
       ok attributes.wiki_page, 'wiki_page present'
       strictEqual attributes.wiki_page.front_page, true, 'front_page provided correctly'
@@ -119,7 +120,7 @@ define [
 
   test 'unsetFrontPage convenience method', 3, ->
     wikiPage = new WikiPage wikiPageObj()
-    sinon.stub wikiPage, 'save', (attributes, options) ->
+    @stub(wikiPage, 'save').callsFake (attributes, options) ->
       ok attributes, 'attributes present'
       ok attributes.wiki_page, 'wiki_page present'
       strictEqual attributes.wiki_page.front_page, false, 'front_page provided correctly'

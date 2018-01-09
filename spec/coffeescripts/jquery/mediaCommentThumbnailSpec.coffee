@@ -1,22 +1,38 @@
-require [
+#
+# Copyright (C) 2014 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+define [
   'jquery'
   'underscore'
   'compiled/jquery/mediaCommentThumbnail'
 ], ($, _)->
   # fragile spec
 
-  module 'mediaCommentThumbnail',
+  QUnit.module 'mediaCommentThumbnail',
     setup: ->
       # flop out the _.defer function to just call directly down to the passed
       # function reference. this helps the tests run in a synchronous order
       # internally so asserts can work like we expect.
-      @stub = sinon.stub _, 'defer', (func, args...) ->
-        func(args...)
+      @stub(_, 'defer').callsFake((func, args...) -> func(args...))
       @$fixtures = $('#fixtures')
 
     teardown: ->
-      _.defer.restore()
       window.INST.kalturaSettings = null
+      $("#fixtures").empty()
 
   test "creates a thumbnail span with a background image URL generated from kaltura settings and media id", ->
     resourceDomain = 'resources.example.com'

@@ -1,4 +1,23 @@
-class AddDelayedJobsNextInStrand < ActiveRecord::Migration
+#
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+class AddDelayedJobsNextInStrand < ActiveRecord::Migration[4.2]
+  tag :predeploy
+
   def self.connection
     Delayed::Backend::ActiveRecord::Job.connection
   end
@@ -13,7 +32,7 @@ class AddDelayedJobsNextInStrand < ActiveRecord::Migration
     # create the new index
     case connection.adapter_name
     when 'PostgreSQL'
-      connection.execute("CREATE INDEX get_delayed_jobs_index ON delayed_jobs (priority, run_at) WHERE locked_at IS NULL AND queue = 'canvas_queue' AND next_in_strand = 't'")
+      connection.execute("CREATE INDEX get_delayed_jobs_index ON #{Delayed::Backend::ActiveRecord::Job.quoted_table_name} (priority, run_at) WHERE locked_at IS NULL AND queue = 'canvas_queue' AND next_in_strand = 't'")
     else
       add_index :delayed_jobs, %w(priority run_at locked_at queue next_in_strand), :name => 'get_delayed_jobs_index'
     end
@@ -22,7 +41,7 @@ class AddDelayedJobsNextInStrand < ActiveRecord::Migration
     case connection.adapter_name
     when 'PostgreSQL'
       execute(<<-CODE)
-      CREATE FUNCTION delayed_jobs_before_insert_row_tr_fn () RETURNS trigger AS $$
+      CREATE FUNCTION #{connection.quote_table_name('delayed_jobs_before_insert_row_tr_fn')} () RETURNS trigger AS $$
       BEGIN
         LOCK delayed_jobs IN SHARE ROW EXCLUSIVE MODE;
         IF (SELECT 1 FROM delayed_jobs WHERE strand = NEW.strand LIMIT 1) = 1 THEN
@@ -32,7 +51,7 @@ class AddDelayedJobsNextInStrand < ActiveRecord::Migration
       END;
       $$ LANGUAGE plpgsql;
       CODE
-      execute("CREATE TRIGGER delayed_jobs_before_insert_row_tr BEFORE INSERT ON delayed_jobs FOR EACH ROW WHEN (NEW.strand IS NOT NULL) EXECUTE PROCEDURE delayed_jobs_before_insert_row_tr_fn()")
+      execute("CREATE TRIGGER delayed_jobs_before_insert_row_tr BEFORE INSERT ON #{Delayed::Backend::ActiveRecord::Job.quoted_table_name} FOR EACH ROW WHEN (NEW.strand IS NOT NULL) EXECUTE PROCEDURE #{connection.quote_table_name('delayed_jobs_before_insert_row_tr_fn')}()")
     when 'MySQL', 'Mysql2'
       execute(<<-CODE)
       CREATE TRIGGER delayed_jobs_before_insert_row_tr BEFORE INSERT ON delayed_jobs
@@ -56,65 +75,24 @@ class AddDelayedJobsNextInStrand < ActiveRecord::Migration
     end
 
     # create the delete trigger
-    case connection.adapter_name
-    when 'PostgreSQL'
-      execute(<<-CODE)
-      CREATE FUNCTION delayed_jobs_after_delete_row_tr_fn () RETURNS trigger AS $$
-      BEGIN
-        UPDATE delayed_jobs SET next_in_strand = 't' WHERE id = (SELECT id FROM delayed_jobs j2 WHERE j2.strand = OLD.strand ORDER BY j2.strand, j2.id ASC LIMIT 1);
-        RETURN OLD;
-      END;
-      $$ LANGUAGE plpgsql;
-      CODE
-      execute("CREATE TRIGGER delayed_jobs_after_delete_row_tr AFTER DELETE ON delayed_jobs FOR EACH ROW WHEN (OLD.strand IS NOT NULL AND OLD.next_in_strand = 't') EXECUTE PROCEDURE delayed_jobs_after_delete_row_tr_fn()")
-    when 'MySQL', 'Mysql2'
-      # mysql doesn't support modifying the underlying table inside a trigger,
-      # so we can't do this here -- we have to use a rails after_destroy
-      # callback :/
-      # this means that deleting the first job from a strand from
-      # outside rails is *not* safe when using mysql for the queue.
-      # execute(<<-CODE)
-      # CREATE TRIGGER delayed_jobs_after_delete_row_tr AFTER DELETE ON delayed_jobs
-      # FOR EACH ROW
-      # BEGIN
-      #   IF OLD.strand IS NOT NULL THEN
-      #     UPDATE delayed_jobs SET next_in_strand = 1 WHERE id = (SELECT id FROM delayed_jobs j2 WHERE j2.strand = OLD.strand ORDER BY j2.strand, j2.id ASC LIMIT 1);
-      #   END IF;
-      # END;
-      # CODE
-    when 'SQLite'
-      execute(<<-CODE)
-      CREATE TRIGGER delayed_jobs_after_delete_row_tr AFTER DELETE ON delayed_jobs
-      FOR EACH ROW WHEN (OLD.strand IS NOT NULL AND OLD.next_in_strand = 1)
-      BEGIN
-        UPDATE delayed_jobs SET next_in_strand = 1 WHERE id = (SELECT id FROM delayed_jobs j2 WHERE j2.strand = OLD.strand ORDER BY j2.strand, j2.id ASC LIMIT 1);
-      END;
-      CODE
-    end
+    execute(<<-CODE)
+    CREATE FUNCTION #{connection.quote_table_name('delayed_jobs_after_delete_row_tr_fn')} () RETURNS trigger AS $$
+    BEGIN
+      UPDATE delayed_jobs SET next_in_strand = 't' WHERE id = (SELECT id FROM delayed_jobs j2 WHERE j2.strand = OLD.strand ORDER BY j2.strand, j2.id ASC LIMIT 1);
+      RETURN OLD;
+    END;
+    $$ LANGUAGE plpgsql;
+    CODE
+    execute("CREATE TRIGGER delayed_jobs_after_delete_row_tr AFTER DELETE ON #{Delayed::Backend::ActiveRecord::Job.quoted_table_name} FOR EACH ROW WHEN (OLD.strand IS NOT NULL AND OLD.next_in_strand = 't') EXECUTE PROCEDURE #{connection.quote_table_name('delayed_jobs_after_delete_row_tr_fn')}()")
 
-    if %w{MySQL Mysql2}.include?(connection.adapter_name)
-      # use temp tables to work around subselect limitations in mysql
-      execute(%{CREATE TEMPORARY TABLE dj_20110831210257 (strand varchar(255), next_job_id bigint) SELECT strand, min(id) as next_job_id FROM delayed_jobs WHERE strand IS NOT NULL GROUP BY strand})
-      execute(%{UPDATE delayed_jobs SET next_in_strand = #{Delayed::Backend::ActiveRecord::Job.quote_value(false)} WHERE strand IS NOT NULL AND id <> (SELECT t.next_job_id FROM dj_20110831210257 t WHERE t.strand = delayed_jobs.strand)})
-      execute(%{DROP TABLE dj_20110831210257})
-    else
-      execute(%{UPDATE delayed_jobs SET next_in_strand = #{Delayed::Backend::ActiveRecord::Job.quote_value(false)} WHERE strand IS NOT NULL AND id <> (SELECT id FROM delayed_jobs j2 WHERE j2.strand = delayed_jobs.strand ORDER BY j2.strand, j2.id ASC LIMIT 1)})
-    end
+    update(%{UPDATE #{Delayed::Backend::ActiveRecord::Job.quoted_table_name} SET next_in_strand = 'f' WHERE strand IS NOT NULL AND id <> (SELECT id FROM #{Delayed::Backend::ActiveRecord::Job.quoted_table_name} j2 WHERE j2.strand = delayed_jobs.strand ORDER BY j2.strand, j2.id ASC LIMIT 1)})
   end
 
   def self.down
-    case connection.adapter_name
-    when 'PostgreSQL'
-      execute %{DROP TRIGGER delayed_jobs_before_insert_row_tr ON delayed_jobs}
-      execute %{DROP FUNCTION delayed_jobs_before_insert_row_tr_fn()}
-      execute %{DROP TRIGGER delayed_jobs_after_delete_row_tr ON delayed_jobs}
-      execute %{DROP FUNCTION delayed_jobs_after_delete_row_tr_fn()}
-    when 'MySQL', 'Mysql2'
-      execute %{DROP TRIGGER delayed_jobs_before_insert_row_tr}
-    when 'SQLite'
-      execute %{DROP TRIGGER delayed_jobs_after_insert_row_tr}
-      execute %{DROP TRIGGER delayed_jobs_after_delete_row_tr}
-    end
+    execute %{DROP TRIGGER delayed_jobs_before_insert_row_tr ON #{Delayed::Backend::ActiveRecord::Job.quoted_table_name}}
+    execute %{DROP FUNCTION #{connection.quote_table_name('delayed_jobs_before_insert_row_tr_fn')}()}
+    execute %{DROP TRIGGER delayed_jobs_after_delete_row_tr ON #{Delayed::Backend::ActiveRecord::Job.quoted_table_name}}
+    execute %{DROP FUNCTION #{connection.quote_table_name('delayed_jobs_after_delete_row_tr_fn')}()}
 
     remove_column :delayed_jobs, :next_in_strand
     remove_index :delayed_jobs, :name => 'get_delayed_jobs_index'

@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'underscore'
@@ -9,7 +26,7 @@ define [
   class MessageParticipantsDialog
     constructor: (@opts) ->
       if @opts.timeslot
-        @recipients = _(@opts.timeslot.child_events).map (e) -> e.user or e.group
+        @recipients = @opts.timeslot.child_events.map (e) -> e.user or e.group
         participantType = if @recipients[0].short_name == undefined then 'Group' else 'User'
 
         @$form = $(messageParticipantsTemplate participant_type: participantType)
@@ -82,6 +99,13 @@ define [
       return if @loading
       data = @$form.getFormData()
       return unless data['recipients[]'] and data['body']
+
+      if data['recipients[]'].length > ENV.CALENDAR.MAX_GROUP_CONVERSATION_SIZE
+        data['group_conversation'] = true
+        data['bulk_message'] = true
+
+      if @group
+        data['tags'] = @group.context_codes
 
       deferred = $.ajaxJSON '/conversations', 'POST', data, @messageSent, @messageFailed
       @$form.disableWhileLoading(deferred, buttons: ['[data-text-while-loading] .ui-button-text'])

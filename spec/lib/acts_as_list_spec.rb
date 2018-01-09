@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -27,15 +27,15 @@ describe "acts_as_list" do
       a4 = attachment_model
       list = a1.list_scope
       a1.update_order([a2.id, a3.id, a1.id])
-      list.pluck(:id).should == [a2.id, a3.id, a1.id, a4.id]
+      expect(list.pluck(:id)).to eq [a2.id, a3.id, a1.id, a4.id]
       a1.update_order(["SELECT now()", a3.id, "evil stuff"])
-      list.pluck(:id).should == [a3.id, a2.id, a1.id, a4.id]
+      expect(list.pluck(:id)).to eq [a3.id, a2.id, a1.id, a4.id]
     end
   end
 
   describe "#insert_at" do
     before :each do
-      course
+      course_factory
       @module_1 = @course.context_modules.create!(:name => "another module")
       @module_2 = @course.context_modules.create!(:name => "another module")
       @module_3 = @course.context_modules.create!(:name => "another module")
@@ -44,40 +44,40 @@ describe "acts_as_list" do
     end
 
     it "should insert in the position correctly" do
-      @modules.map(&:position).should == [1, 2, 3]
+      expect(@modules.map(&:position)).to eq [1, 2, 3]
 
-      @module_1.insert_at(3).should == true
+      expect(@module_1.insert_at(3)).to eq true
       @modules.each{|m| m.reload}
-      @modules.map(&:position).should == [3, 1, 2]
+      expect(@modules.map(&:position)).to eq [3, 1, 2]
 
-      @module_2.insert_at(2).should == true
+      expect(@module_2.insert_at(2)).to eq true
       @modules.each{|m| m.reload}
-      @modules.map(&:position).should == [3, 2, 1]
+      expect(@modules.map(&:position)).to eq [3, 2, 1]
 
-      @module_3.insert_at(3).should == true
+      expect(@module_3.insert_at(3)).to eq true
       @modules.each{|m| m.reload}
-      @modules.map(&:position).should == [2, 1, 3]
+      expect(@modules.map(&:position)).to eq [2, 1, 3]
 
-      @module_1.insert_at(1).should == true
+      expect(@module_1.insert_at(1)).to eq true
       @modules.each{|m| m.reload}
-      @modules.map(&:position).should == [1, 2, 3]
+      expect(@modules.map(&:position)).to eq [1, 2, 3]
     end
   end
 
   describe "#fix_position_conflicts" do
     it "should order null positions last" do
-      course
+      course_factory
       module_1 = @course.context_modules.create :name => 'one'
       ContextModule.where(id: module_1).update_all(position: nil)
       module_2 = @course.context_modules.create :name => 'two'
       module_2.position = 1
       module_2.save!
       module_1.fix_position_conflicts
-      @course.context_modules.map{|m| [m.id, m.position]}.should eql [[module_2.id, 1], [module_1.id, 2]]
+      expect(@course.context_modules.map{|m| [m.id, m.position]}).to eql [[module_2.id, 1], [module_1.id, 2]]
     end
 
     it "should break ties by object id" do
-      course
+      course_factory
       module_1 = @course.context_modules.create :name => 'one'
       module_1.position = 1
       module_1.save!
@@ -85,11 +85,11 @@ describe "acts_as_list" do
       module_2.position = 1
       module_2.save!
       module_1.fix_position_conflicts
-      @course.context_modules.map{|m| [m.id, m.position]}.should eql [[module_1.id, 1], [module_2.id, 2]]
+      expect(@course.context_modules.map{|m| [m.id, m.position]}).to eql [[module_1.id, 1], [module_2.id, 2]]
     end
 
     it "should consolidate gaps" do
-      course
+      course_factory
       module_1 = @course.context_modules.create :name => 'one'
       module_1.position = 1
       module_1.save!
@@ -97,7 +97,14 @@ describe "acts_as_list" do
       module_2.position = 3
       module_2.save!
       module_1.fix_position_conflicts
-      @course.context_modules.map{|m| [m.id, m.position]}.should eql [[module_1.id, 1], [module_2.id, 2]]
+      expect(@course.context_modules.map{|m| [m.id, m.position]}).to eql [[module_1.id, 1], [module_2.id, 2]]
+    end
+  end
+
+  describe "base scope" do
+    it "scopes by the base class rather then the STI class" do
+      scope = AccountAuthorizationConfig::CAS.new.list_scope_base
+      expect(scope.to_sql).to_not(match(/auth_type/))
     end
   end
 end

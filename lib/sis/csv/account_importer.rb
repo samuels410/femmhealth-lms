@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,8 +20,12 @@ module SIS
   module CSV
     class AccountImporter < CSVBaseImporter
 
-      def self.is_account_csv?(row)
+      def self.account_csv?(row)
         row.include?('account_id') && row.include?('parent_account_id')
+      end
+
+      def self.identifying_fields
+        %w[account_id].freeze
       end
 
       # expected columns

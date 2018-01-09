@@ -1,26 +1,56 @@
 <div id="assignment_group_{{id}}" data-id="{{id}}" class="assignment_group">
+
   <div class="ig-header" style="position:relative;">
     {{#if ENV.PERMISSIONS.manage}}
       <span class="sortable-handle">
-        <a href="#" class="icon-drag-handle"></a>
+        <i class="icon-drag-handle" aria-hidden="true"></i>
       </span>
     {{/if}}
-    <h2
-      class="ig-header-title element_toggler"
-      aria-controls="assignment_group_{{id}}_assignments"
-      aria-expanded="true"
-      aria-label="{{name}} {{toggleMessage}}"
-      role="button"
-    >
-      <i class="icon-mini-arrow-down"></i>
-      {{name}}
-    </h2>
+    {{#if course_home}}
+      <h3 class="ig-header-title">
+        <a
+        class="element_toggler accessible-toggler"
+        aria-controls="assignment_group_{{id}}_assignments"
+        aria-expanded="true"
+        aria-label="{{name}} {{toggleMessage}}"
+        tabindex="0"
+        href="#"
+        role="button"
+        >
+          <i class="icon-mini-arrow-down"></i>
+          {{name}}
+        </a>
+        {{#if hasIntegrationData}}
+          <i class="icon-sis-imported" aria-hidden="true" title='{{#t}}Imported from {{postToSISName}}{{/t}}'></i>
+          <span class="screenreader-only">{{#t}}Imported from {{postToSISName}}{{/t}}</span>
+        {{/if}}
+      </h3>
+    {{else}}
+      <h2 class="ig-header-title">
+        <a
+        class="element_toggler accessible-toggler"
+        aria-controls="assignment_group_{{id}}_assignments"
+        aria-expanded="true"
+        aria-label="{{name}} {{toggleMessage}}"
+        tabindex="0"
+        href="#"
+        role="button"
+        >
+          <i class="icon-mini-arrow-down" aria-hidden="true"></i>
+          {{name}}
+        </a>
+        {{#if hasIntegrationData}}
+          <i class="icon-sis-imported" aria-hidden="true" title='{{#t}}Imported from {{postToSISName}}{{/t}}'></i>
+          <span class="screenreader-only">{{#t}}Imported from {{postToSISName}}{{/t}}</span>
+        {{/if}}
+      </h2>
+    {{/if}}
 
     <div class="ag-header-controls">
       {{#ifAny showWeight showRules}}
         <ul class="pill">
           {{#if showWeight}}
-            <li>{{#t "group_weight"}}{{groupWeight}}% of Total{{/t}}</li>
+            <li>{{#t}}{{n groupWeight percentage=true}} of Total{{/t}}</li>
           {{/if}}
           {{#if showRules}}
             <li>
@@ -44,53 +74,68 @@
         <a
           href="#"
           class="btn add_assignment"
-          title='{{#t "add_assignment_to"}}Add Assignment to {{name}}{{/t}}'
+          title='{{#t}}Add Assignment to {{name}}{{/t}}'
         >
           {{! icon is separate from <a> tag because it is the only visible content in the button }}
-          <span class="screenreader-only">{{#t "add_assignment_to"}}Add Assignment to {{name}}{{/t}}</span>
+          <span class="screenreader-only">{{#t}}Add Assignment to {{name}}{{/t}}</span>
           <i class="icon-plus"></i>
         </a>
 
-        <a id="ag_{{id}}_manage_link" class="al-trigger btn" href="#" tabindex="0">
-          <span class="screenreader-only">{{#t "manage"}}Manage{{/t}}</span>
-          <i class="icon-settings"></i><i class="icon-mini-arrow-down"></i>
-        </a>
-        <ul class="al-options">
-          <li>
-            <a
-              href="#"
-              class="edit_group icon-edit"
-              aria-label="{{#t 'assignment_group_edit'}}Edit Assignment Group{{/t}}"
-              data-focus-returns-to="ag_{{id}}_manage_link"
-            >{{#t "edit"}}Edit{{/t}}</a>
-          </li>
-          {{#unless hasFrozenAssignments}}
+        <div class="inline-block">
+          <a id="ag_{{id}}_manage_link" class="al-trigger btn" href="#" tabindex="0" role="button">
+            <span class="screenreader-only">{{#t}}Manage {{name}}{{/t}}</span>
+            <i class="icon-settings"></i><i class="icon-mini-arrow-down"></i>
+          </a>
+          <ul class="al-options">
             <li>
               <a
-                href="#"
-                class="delete_group icon-trash"
-                aria-label='{{#t "assignment_group_delete"}}Delete Assignment Group{{/t}}'
+                class="edit_group icon-edit"
+                aria-label="{{#t}}Edit Assignment Group{{/t}}"
                 data-focus-returns-to="ag_{{id}}_manage_link"
-              >{{#t "delete"}}Delete{{/t}}</a>
+              >{{#t}}Edit{{/t}}</a>
             </li>
-          {{/unless}}
-          {{#if canMove}}
-          <li>
-            <a
-              href="#"
-              class="move_group icon-updown"
-              aria-label='{{#t "assignment_group_move"}}Move Assignment Group{{/t}}'
-              data-focus-returns-to="ag_{{id}}_manage_link"
-            >{{#t "move"}}Move To&hellip;{{/t}}</a>
-          </li>
-          {{/if}}
-        </ul>
+            {{#if canDelete}}
+            <li>
+              <a
+                class="delete_group icon-trash"
+                aria-label='{{#t}}Delete Assignment Group{{/t}}'
+                data-focus-returns-to="ag_{{id}}_manage_link"
+              >{{#t}}Delete{{/t}}</a>
+            </li>
+            {{else}}
+            <li>
+              <a
+                class="delete_group icon-trash disabled"
+                aria-label='{{#t}}Delete Assignment Group{{/t}}'
+                aria-disabled=true
+              >{{#t}}Delete{{/t}}</a>
+            </li>
+            {{/if}}
+            {{#if canMove}}
+            <li>
+              <a
+                class="move_contents icon-move-down"
+                aria-label='{{#t}}Move Assignment Contents{{/t}}'
+                data-focus-returns-to="ag_{{id}}_manage_link"
+              >{{#t}}Move Contents…{{/t}}</a>
+            </li>
+            <li>
+              <a
+                class="move_group icon-updown"
+                aria-label='{{#t}}Move Assignment Group{{/t}}'
+                data-focus-returns-to="ag_{{id}}_manage_link"
+              >{{#t}}Move Group…{{/t}}</a>
+            </li>
+            {{/if}}
+          </ul>
+        </div>
       {{/if}}
     </div>
 
+
   </div>
 
-  <div id="assignment_group_{{id}}_assignments" >
+  <div id="assignment_group_{{id}}_assignments" class="assignment-list" >
     <ul class="collectionViewItems ig-list draggable"></ul>
   </div>
 
@@ -98,6 +143,5 @@
     <form data-view="createAssignment" class="form-dialog"></form>
     <form data-view="editAssignmentGroup" class="form-dialog"></form>
     <form data-view="deleteAssignmentGroup" class="form-dialog"></form>
-    <form data-view="moveAssignmentGroup" class="form-dialog"></form>
   {{/if}}
 </div>

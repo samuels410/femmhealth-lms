@@ -1,9 +1,25 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 require 'db/migrate/20130122193536_remove_multiple_root_folders'
 
 
 describe 'DataFixup::RemoveMultipleRootFolders' do
-  self.use_transactional_fixtures = false
 
   def get_root_folder_name(context)
     if context.is_a? Course
@@ -24,9 +40,9 @@ describe 'DataFixup::RemoveMultipleRootFolders' do
     12.times do |x|
       case x % 4
         when 0
-          context = course
+          context = course_factory
         when 1
-          context = user
+          context = user_factory
         when 2
           context = group
         when 3
@@ -47,9 +63,10 @@ describe 'DataFixup::RemoveMultipleRootFolders' do
         subfolders = subfolders.map(&:sub_folders).flatten
         folders.concat(subfolders)
       end
-      folders.reverse.each { |f| Folder.where(id: f).delete_all }
-      c.enrollment_terms.scoped.delete_all if c.is_a?(Account)
-      c.course_account_associations.scoped.delete_all if c.is_a?(Course)
+      folders.reverse_each { |f| Folder.where(id: f).delete_all }
+      c.enrollment_terms.scope.delete_all if c.is_a?(Account)
+      c.course_account_associations.scope.delete_all if c.is_a?(Course)
+      c.authentication_providers.scope.delete_all if c.is_a?(Account)
       c.delete
     end
     RemoveMultipleRootFolders.up
@@ -67,19 +84,19 @@ describe 'DataFixup::RemoveMultipleRootFolders' do
       scope = Folder.where(:context_type => context.class.to_s, :context_id => context)
       scope.update_all(:parent_folder_id => nil)
 
-      scope.where("workflow_state<>'deleted' AND parent_folder_id IS NULL").count.should == 4
+      expect(scope.where("workflow_state<>'deleted' AND parent_folder_id IS NULL").count).to eq 4
     end
 
     DataFixup::RemoveMultipleRootFolders.run(:limit => 2)
 
     @contexts.each do |c|
-      Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
-        c.class.to_s, c).count.should == 1
+      expect(Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
+        c.class.to_s, c).count).to eq 1
     end
 
     empty_folders.each do |folder|
       folder.reload
-      folder.workflow_state.should == 'deleted'
+      expect(folder.workflow_state).to eq 'deleted'
     end
   end
 
@@ -101,21 +118,21 @@ describe 'DataFixup::RemoveMultipleRootFolders' do
 
       Folder.where(:id => [extra_folder1, extra_folder2]).update_all(:parent_folder_id => nil)
 
-      Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
-        context.class.to_s, context).count.should == 3
+      expect(Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
+        context.class.to_s, context).count).to eq 3
     end
 
     DataFixup::RemoveMultipleRootFolders.run(:limit => 2)
 
     @contexts.each do |c|
-      Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
-        c.class.to_s, c).count.should == 1
+      expect(Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
+        c.class.to_s, c).count).to eq 1
     end
 
     extra_folders.each do |folder|
       folder.reload
-      folder.workflow_state.should_not == 'deleted'
-      folder.parent_folder_id.should == Folder.root_folders(folder.context).first.id
+      expect(folder.workflow_state).not_to eq 'deleted'
+      expect(folder.parent_folder_id).to eq Folder.root_folders(folder.context).first.id
     end
   end
 
@@ -148,23 +165,23 @@ describe 'DataFixup::RemoveMultipleRootFolders' do
 
       Folder.where(:id => [extra_folder1, extra_folder2]).update_all(:parent_folder_id => nil)
 
-      Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
-                                   context.class.to_s, context).count.should == 4
+      expect(Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
+                                   context.class.to_s, context).count).to eq 4
     end
 
     DataFixup::RemoveMultipleRootFolders.run(:limit => 2)
 
     @contexts.each do |c|
-      Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
-                                   c.class.to_s, c).count.should == 1
+      expect(Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
+                                   c.class.to_s, c).count).to eq 1
     end
 
     extra_folders.each do |folder|
       folder.reload
-      folder.workflow_state.should_not == 'deleted'
-      folder.parent_folder_id.should == Folder.root_folders(folder.context).first.id
-      empty_root_folder_ids.include?(folder.parent_folder_id).should be_false
-      root_folder_ids_with_content.include?(folder.parent_folder_id).should be_true
+      expect(folder.workflow_state).not_to eq 'deleted'
+      expect(folder.parent_folder_id).to eq Folder.root_folders(folder.context).first.id
+      expect(empty_root_folder_ids.include?(folder.parent_folder_id)).to be_falsey
+      expect(root_folder_ids_with_content.include?(folder.parent_folder_id)).to be_truthy
     end
   end
 
@@ -185,30 +202,30 @@ describe 'DataFixup::RemoveMultipleRootFolders' do
 
       root_folder_name = get_root_folder_name(context)
       Folder.where(:id => [extra_folder1, extra_folder2]).update_all(:parent_folder_id => nil)
-      context.folders.find_by_name(root_folder_name).delete
-      context.folders.find_by_name(root_folder_name).should be_nil
+      context.folders.where(name: root_folder_name).first.delete
+      expect(context.folders.where(name: root_folder_name).first).to be_nil
 
-      Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
-                                   context.class.to_s, context).count.should == 2
+      expect(Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
+                                   context.class.to_s, context).count).to eq 2
     end
 
     DataFixup::RemoveMultipleRootFolders.run(:limit => 2)
 
     @contexts.each do |c|
-      Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
-                                   c.class.to_s, c).count.should == 1
+      expect(Folder.where("context_type=? AND context_id=? AND workflow_state<>'deleted' AND parent_folder_id IS NULL",
+                                   c.class.to_s, c).count).to eq 1
 
       root_folder_name = get_root_folder_name(c)
-      c.folders.find_by_name(root_folder_name).should_not be_nil
+      expect(c.folders.where(name: root_folder_name).first).not_to be_nil
     end
 
     extra_folders.each do |folder|
       folder.reload
-      folder.workflow_state.should_not == 'deleted'
-      folder.parent_folder_id.should_not be_nil
+      expect(folder.workflow_state).not_to eq 'deleted'
+      expect(folder.parent_folder_id).not_to be_nil
 
       root_folder_name = get_root_folder_name(folder.context)
-      folder.parent_folder.name.should == root_folder_name
+      expect(folder.parent_folder.name).to eq root_folder_name
     end
   end
 end

@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!course_settings'
   'jquery'
@@ -5,7 +22,6 @@ define [
   'compiled/views/DialogBaseView'
   'compiled/views/courses/roster/RosterDialogMixin'
   'jst/courses/roster/LinkToStudentsView'
-  'compiled/jquery.whenAll'
   'jquery.disableWhileLoading'
 ], (I18n, $, _, DialogBaseView, RosterDialogMixin, linkToStudentsViewTemplate) ->
 
@@ -28,6 +44,7 @@ define [
         placeholder: I18n.t 'link_students_placeholder', 'Enter a student name'
         change: (tokens) =>
           @students = tokens
+        onNewToken: @onNewToken
         selector:
           baseData:
             type: 'user'
@@ -38,7 +55,7 @@ define [
           browser:
             data:
               per_page: 100
-              type: 'user'
+              types: ['user']
       input = @$('#student_input').data('token_input')
       input.$fakeInput.css('width', '100%')
 
@@ -51,8 +68,16 @@ define [
 
       this
 
+    onNewToken: ($token) =>
+      $link = $token.find('a')
+      $link.attr('href', '#')
+      $link.attr('title', I18n.t("Remove linked student %{name}", name: $token.find('div').attr('title')))
+      $screenreader_span = $('<span class="screenreader-only"></span>').text(
+        I18n.t("Remove linked student %{name}", name: $token.find('div').attr('title')))
+      $link.append($screenreader_span)
+
     getUserData: (id) ->
-      $.get("/api/v1/courses/#{ENV.course.id}/users/#{id}", include:['enrollments'])
+      $.getJSON("/api/v1/courses/#{ENV.course.id}/users/#{id}", include:['enrollments'])
 
     update: (e) =>
       e.preventDefault()
@@ -85,7 +110,7 @@ define [
                 type: enrollment.type
                 limit_privileges_to_course_section: enrollment.limit_priveleges_to_course_section
             if enrollment.role != enrollment.type
-              data.enrollment.role = enrollment.role
+              data.enrollment.role_id = enrollment.role_id
             udfds.push $.ajaxJSON url, 'POST', data, (newEnrollment) =>
               newEnrollment.observed_user = user
               newEnrollments.push newEnrollment

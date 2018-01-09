@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,25 +21,25 @@ require File.expand_path(File.dirname(__FILE__) + '/../views_helper')
 
 describe "/users/admin_merge" do
   it "should only list accounts that the user can merge users in" do
-    user
+    user_factory
     @account = Account.create!(:name => "My Root Account")
     @account2 = @account.sub_accounts.create!(:name => "Sub-Account")
-    @account.add_user(@user)
+    @account.account_users.create!(user: @user)
     @course1 = Course.create!(:account => Account.default)
     @course2 = Course.create!(:account => @account2)
     @course1.enroll_teacher(@user)
     @course2.enroll_teacher(@user)
 
-    @user.associated_accounts.map(&:id).sort.should == [@account.id, @account2.id, Account.default.id].sort
+    expect(@user.associated_accounts.map(&:id).sort).to eq [@account.id, @account2.id, Account.default.id].sort
 
-    assigns[:current_user] = @user
-    user
-    assigns[:user] = @user
+    assign(:current_user, @user)
+    user_factory
+    assign(:user, @user)
 
     render "users/admin_merge"
-    response.should_not be_nil
-    response.body.should match /My Root Account/
-    response.body.should match /Sub-Account/
-    response.body.should_not match /Default Account/
+    expect(response).not_to be_nil
+    expect(response.body).to match /My Root Account/
+    expect(response.body).to match /Sub-Account/
+    expect(response.body).not_to match /Default Account/
   end
 end

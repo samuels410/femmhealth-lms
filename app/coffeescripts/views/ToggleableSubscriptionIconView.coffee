@@ -1,8 +1,27 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!discussions'
   'jquery'
   'compiled/fn/preventDefault'
   'Backbone'
+  'jqueryui/tooltip'
+  'compiled/jquery.rails_flash_notifications'
 ], (I18n, $, preventDefault, {View}) ->
 
   class ToggleableSubscriptionIconView extends View
@@ -19,13 +38,16 @@ define [
       initial_post_required: I18n.t('initial_post_required_to_subscribe', 'You must post a reply before subscribing')
       not_in_group_set: I18n.t('cant_subscribe_not_in_group_set', 'You must be in an associated group to subscribe')
       not_in_group: I18n.t('cant_subscribe_not_in_group', 'You must be in this group to subscribe')
+      toggle_on: I18n.t('You are subscribed to this topic. Click to unsubscribe.')
+      toggle_off: I18n.t('You are not subscribed to this topic. Click to subscribe.')
+
 
     tooltipOptions:
       items: '*'
       position: my: 'center bottom', at: 'center top-10', collision: 'none'
       tooltipClass: 'center bottom vertical'
 
-    events: { 'click', 'hover' }
+    events: { 'click', 'keyclick' : 'click', 'hover', 'focus', 'blur' }
 
     initialize: ->
       @model.on('change:subscribed', @render)
@@ -34,18 +56,23 @@ define [
       super
 
     hover: ({type}) ->
-      @hovering = type is 'mouseenter'
+      @hovering = type in [ 'mouseenter', 'focus' ]
       @displayStateDuringHover = false
       @render()
+
+    blur: @::hover
+    focus: @::hover
 
     click: (e) ->
       e.preventDefault()
       if @subscribed()
         @model.topicUnsubscribe()
         @displayStateDuringHover = true
+        $.screenReaderFlashMessage(@messages['toggle_off'])
       else if @canSubscribe()
         @model.topicSubscribe()
         @displayStateDuringHover = true
+        $.screenReaderFlashMessage(@messages['toggle_on'])
       @render()
 
     subscribed: -> @model.get('subscribed') && @canSubscribe()
@@ -91,9 +118,16 @@ define [
       @$el.tooltip('option', content: -> tooltipText)
       @$el.tooltip('open')
 
+    setScreenreaderText: ->
+      if (@model.get('subscribed'))
+        @$el.attr('aria-label',@messages['toggle_on'])
+      else
+        @$el.attr('aria-label', @messages['toggle_off'])
+
     afterRender: ->
       [newClass, tooltipText] = @classAndTextForTooltip()
       @resetTooltipText(tooltipText)
       @$el.removeClass('icon-discussion icon-discussion-x icon-discussion-check')
       @$el.addClass(newClass)
+      @setScreenreaderText()
       this

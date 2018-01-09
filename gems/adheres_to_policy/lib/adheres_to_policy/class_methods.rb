@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -33,7 +33,7 @@ module AdheresToPolicy #:nodoc:
     def policy
       return superclass.policy if @_policy_blocks.nil? || @_policy_blocks.empty?
       return @_policy if @_policy
-      @_policy = Policy.new(*@_policy_blocks)
+      @_policy = Policy.new(nil, nil, *@_policy_blocks)
     end
   end
 end

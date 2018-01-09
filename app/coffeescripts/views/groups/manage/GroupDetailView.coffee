@@ -1,10 +1,31 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!GroupDetailView'
+  'jquery'
   'Backbone'
   'compiled/views/groups/manage/GroupEditView'
+  'compiled/views/groups/manage/GroupCategoryCloneView'
   'jst/groups/manage/groupDetail'
+  'compiled/util/groupHasSubmissions'
   'compiled/jquery.rails_flash_notifications'
-], (I18n, {View}, GroupEditView, template) ->
+  'jsx/context_cards/StudentContextCardTrigger'
+], (I18n, $, {View}, GroupEditView, GroupCategoryCloneView, template, groupHasSubmissions) ->
 
   class GroupDetailView extends View
 
@@ -26,10 +47,16 @@ define [
 
     summary: ->
       count = @model.usersCount()
-      if ENV.group_user_type is 'student'
-        I18n.t "student_count", "student", count: count
+      if @model.theLimit()
+        if ENV.group_user_type is 'student'
+          I18n.t "%{count} / %{max} students", count: count, max: @model.theLimit()
+        else
+          I18n.t "%{count} / %{max} users", count: count, max: @model.theLimit()
       else
-        I18n.t "user_count", "user", count: count
+        if ENV.group_user_type is 'student'
+          I18n.t "student_count", "student", count: count
+        else
+          I18n.t "user_count", "user", count: count
 
     editGroup: (e) =>
       e.preventDefault()
@@ -39,9 +66,25 @@ define [
 
     deleteGroup: (e) =>
       e.preventDefault()
-      unless confirm I18n.t('delete_confirm', 'Are you sure you want to remove this group?')
+      if confirm I18n.t('delete_confirm', 'Are you sure you want to remove this group?')
+        if groupHasSubmissions @model
+          @cloneCategoryView = new GroupCategoryCloneView
+            model: @model.collection.category
+            openedFromCaution: true
+          @cloneCategoryView.open()
+          @cloneCategoryView.on "close", =>
+            if @cloneCategoryView.cloneSuccess
+              window.location.reload()
+            else if @cloneCategoryView.changeGroups
+              @performDeleteGroup()
+            else
+              @$groupActions.focus()
+        else
+          @performDeleteGroup()
+      else
         @$groupActions.focus()
-        return
+
+    performDeleteGroup: ->
       @model.destroy
         success: -> $.flashMessage I18n.t('flash.removed', 'Group successfully removed.')
         error: -> $.flashError I18n.t('flash.removeError', 'Unable to remove the group. Please try again later.')
@@ -49,8 +92,12 @@ define [
     closeMenu: ->
       @$groupActions.data('kyleMenu')?.$menu.popup 'close'
 
+    course_id: ->
+      @model.get('course_id')
+
     toJSON: ->
       json = @model.toJSON()
+      json.leader = @model.get('leader')
       json.canAssignUsers = ENV.IS_LARGE_ROSTER and not @model.isLocked()
       json.canEdit = not @model.isLocked()
       json.summary = @summary()

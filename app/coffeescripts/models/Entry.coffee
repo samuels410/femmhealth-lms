@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 ####
 # TODO: consolidate this into DiscussionEntry
 #
@@ -7,15 +24,15 @@ define [
   'jquery'
   'underscore'
   'Backbone'
+  'str/stripTags'
   'jquery.ajaxJSON'
-], (I18n, $, _, Backbone) ->
+], (I18n, $, _, Backbone, stripTags) ->
 
   ##
   # Model representing an entry in discussion topic
   class Entry extends Backbone.Model
 
-    defaults:
-
+    defaults: ->
       ##
       # Attributes persisted with the server
       id: null
@@ -45,6 +62,8 @@ define [
     computedAttributes: [
       'canModerate'
       'canReply'
+      'hiddenName'
+      'canRate'
       'speedgraderUrl'
       'inlineReplyLink'
       { name: 'allowsSideComments', deps: ['parent_id', 'deleted'] }
@@ -75,7 +94,13 @@ define [
       ENV.DISCUSSION.DELETE_URL.replace /:id/, @get 'id'
 
     sync: (method, model, options = {}) ->
+      replies = @get('replies')
+      @set('replies', [])
       options.url = @[method]()
+      oldComplete = options.complete
+      options.complete = =>
+        @set('replies', replies)
+        oldComplete() if oldComplete?
       Backbone.sync method, this, options
 
     parse: (data) ->
@@ -102,6 +127,25 @@ define [
         'replies'
         'author'
 
+    hiddenName: ->
+      if ENV.DISCUSSION.HIDE_STUDENT_NAMES
+        isGradersEntry = @get('user_id')+'' is ENV.DISCUSSION.CURRENT_USER.id
+        isStudentsEntry = @get('user_id')+'' is ENV.DISCUSSION.STUDENT_ID
+
+        if isGradersEntry
+          @get('author').display_name
+        else if isStudentsEntry
+          I18n.t('this_student', "This Student")
+        else
+          I18n.t('discussion_participant', "Discussion Participant")
+
+    ratingString: ->
+      return '' unless sum = @get('rating_sum')
+      I18n.t 'like_count', {
+        one: '(%{count} like)'
+        other: '(%{count} likes)'
+      }, count: sum
+
     ##
     # Computed attribute to determine if the entry can be moderated
     # by the current user
@@ -116,6 +160,12 @@ define [
       return no if @get 'deleted'
       return no unless ENV.DISCUSSION.PERMISSIONS.CAN_REPLY
       yes
+
+    ##
+    # Computed attribute to determine if the entry can be liked
+    # by the current user
+    canRate: ->
+      ENV.DISCUSSION.PERMISSIONS.CAN_RATE
 
     ##
     # Computed attribute to determine if an inlineReplyLink should be
@@ -154,13 +204,12 @@ define [
       # ENV.DISCUSSION.SPEEDGRADER_URL_TEMPLATE will only exist if I have permission to grade
       # and this thing is an assignment
       if ENV.DISCUSSION.SPEEDGRADER_URL_TEMPLATE
-        ENV.DISCUSSION.SPEEDGRADER_URL_TEMPLATE.replace /%22%3Astudent_id%22/, @get('user_id')
+        ENV.DISCUSSION.SPEEDGRADER_URL_TEMPLATE.replace /%22:student_id%22/, @get('user_id')
 
     ##
     # Computed attribute
     summary: ->
-      @escapeDiv ||= $('<div/>')
-      @escapeDiv.html(@get('message')).text()
+      stripTags @get('message')
 
     ##
     # Not familiar enough with Backbone.sync to do this, using ajaxJSON
@@ -176,6 +225,21 @@ define [
       url = ENV.DISCUSSION.MARK_UNREAD_URL.replace /:id/, @get 'id'
       $.ajaxJSON url, 'DELETE', forced_read_state: true
 
+    toggleLike: ->
+      rating = if @get('rating') then 0 else 1
+      @set(rating: rating)
+      sum = (@get('rating_sum') || 0) + (if rating then 1 else -1)
+      @set('rating_sum', sum)
+      url = ENV.DISCUSSION.RATE_URL.replace /:id/, @get 'id'
+      $.ajaxJSON url, 'POST', rating: rating
+
+    _hasActiveReplies: (replies) ->
+      return true if _.some(replies, (reply) -> !reply.deleted)
+      return true if _.some(replies, (reply) => @_hasActiveReplies(reply.replies))
+      false
+
+    hasActiveReplies: ->
+      @_hasActiveReplies(@get('replies'))
+
     hasChildren: ->
       @get('replies').length > 0
-

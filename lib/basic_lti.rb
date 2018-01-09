@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,7 +18,4 @@
 module BasicLTI
 end
 
-require_dependency 'basic_lti/basic_lti'
-require_dependency 'basic_lti/tool_launch'
 require_dependency 'basic_lti/basic_outcomes'
-require_dependency 'basic_lti/variable_substitutor'

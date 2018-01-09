@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -42,13 +42,15 @@ class SubAccountsController < ApplicationController
     end
   end
 
-  before_filter :require_context, :require_account_management
+  before_action :require_context, :require_account_management
   def index
     @query = params[:account] && params[:account][:name] || params[:term]
     if @query
       @accounts = []
       if @context && @context.is_a?(Account)
-        @accounts = @context.all_accounts.active.name_like(@query).limit(100)
+        @accounts = @context.all_accounts.active.name_like(@query).limit(100).to_a
+        @accounts << @context if value_to_boolean(params[:include_self]) && @context.name.downcase.include?(@query.downcase)
+        @accounts.sort_by!{|a| Canvas::ICU.collation_key(a.name)}
       end
       respond_to do |format|
         format.html {
@@ -78,35 +80,40 @@ class SubAccountsController < ApplicationController
     counts = Course.
         joins(:course_account_associations).
         group('course_account_associations.account_id').
-        where("course_account_associations.account_id IN (?) AND " +
-                    "course_account_associations.depth=0 AND courses.workflow_state<>'deleted'", @accounts[:all_account_ids]).
-        count(:id, :distinct => true)
+        where("course_account_associations.account_id IN (?) AND course_account_associations.course_section_id IS NULL AND
+                 course_account_associations.depth=0 AND courses.workflow_state<>'deleted'", @accounts[:all_account_ids]).
+        distinct.count(:id)
     counts.each do |account_id, count|
       @accounts[account_id][:course_count] = count
     end
   end
-  
+
   def show
     @sub_account = subaccount_or_self(params[:id])
-    render :json => @sub_account.as_json(:include => [:sub_accounts, :courses], :methods => [:course_count, :sub_account_count])
+    ActiveRecord::Associations::Preloader.new.preload(@sub_account, [{:sub_accounts => [:parent_account, :root_account]}])
+    render :json => @sub_account.as_json(:only => [:id, :name], :methods => [:course_count, :sub_account_count],
+                                         :include => [:sub_accounts => {:only => [:id, :name], :methods => [:course_count, :sub_account_count]}])
   end
-  
+
   # @API Create a new sub-account
   # Add a new sub-account to a given account.
   #
-  # @argument account[name] [String]
+  # @argument account[name] [Required, String]
   #   The name of the new sub-account.
   #
-  # @argument account[default_storage_quota_mb] [Optional, Integer]
+  # @argument account[sis_account_id] [String]
+  #   The account's identifier in the Student Information System.
+  #
+  # @argument account[default_storage_quota_mb] [Integer]
   #   The default course storage quota to be used, if not otherwise specified.
   #
-  # @argument account[default_user_storage_quota_mb] [Optional, Integer]
+  # @argument account[default_user_storage_quota_mb] [Integer]
   #   The default user storage quota to be used, if not otherwise specified.
   #
-  # @argument account[default_group_storage_quota_mb] [Optional, Integer]
+  # @argument account[default_group_storage_quota_mb] [Integer]
   #   The default group storage quota to be used, if not otherwise specified.
   #
-  # @returns [Account]
+  # @returns Account
   def create
     if params[:account][:parent_account_id]
       parent_id = params[:account].delete(:parent_account_id)
@@ -115,29 +122,52 @@ class SubAccountsController < ApplicationController
     end
     @parent_account = subaccount_or_self(parent_id)
     return unless authorized_action(@parent_account, @current_user, :manage_account_settings)
-    @sub_account = @parent_account.sub_accounts.build(params[:account])
+
+    @sub_account = @parent_account.sub_accounts.build(account_params)
     @sub_account.root_account = @context.root_account
+    if params[:account][:sis_account_id]
+      can_manage_sis = @account.grants_right?(@current_user, :manage_sis)
+      if can_manage_sis
+        @sub_account.sis_source_id = params[:account][:sis_account_id]
+      else
+        return render json: { message: I18n.t("user not authorized to manage SIS data - account[sis_account_id]") }, status: 401
+      end
+    end
     if @sub_account.save
       render :json => account_json(@sub_account, @current_user, session, [])
     else
       render :json => @sub_account.errors
     end
   end
-  
+
   def update
     @sub_account = subaccount_or_self(params[:id])
     params[:account].delete(:parent_account_id)
-    if @sub_account.update_attributes(params[:account])
+    if @sub_account.update_attributes(account_params)
       render :json => account_json(@sub_account, @current_user, session, [])
     else
       render :json => @sub_account.errors
     end
   end
-  
+
+  # @API Delete a sub-account
+  # Cannot delete an account with active courses or active sub_accounts.
+  # Cannot delete a root_account
+  #
+  # @returns Account
   def destroy
     @sub_account = subaccount_or_self(params[:id])
+    if @sub_account.associated_courses.not_deleted.exists?
+      return render json: {message: I18n.t("You can't delete a sub-account that has courses in it.")}, status: 409
+    end
+    if @sub_account.sub_accounts.exists?
+      return render json: {message: I18n.t("You can't delete a sub-account that has sub-accounts in it.")}, status: 409
+    end
+    if @sub_account.root_account?
+      return render json: {message: I18n.t("You can't delete a root_account.")}, status: 401
+    end
     @sub_account.destroy
-    render :json => @sub_account
+    render json: account_json(@sub_account, @current_user, session, [])
   end
 
   protected
@@ -151,5 +181,9 @@ class SubAccountsController < ApplicationController
     else
       @account.find_child(account_id)
     end
+  end
+
+  def account_params
+    params.require(:account).permit(:name, :default_storage_quota_mb, :default_user_storage_quota_mb, :default_group_storage_quota_mb)
   end
 end

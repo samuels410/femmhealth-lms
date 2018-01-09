@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,13 +17,14 @@
 #
 
 define [
+  'jquery'
   'underscore'
   'Backbone'
   'compiled/models/Group'
   'compiled/models/User'
   'compiled/collections/CollaboratorCollection'
   'jst/collaborations/collaborator'
-], ({extend, filter, map}, {View}, Group, User, CollaboratorCollection, collaboratorTemplate) ->
+], ($, {extend, filter, map}, {View}, Group, User, CollaboratorCollection, collaboratorTemplate) ->
 
   class MemberListView extends View
     events:
@@ -55,19 +56,20 @@ define [
     # Returns nothing.
     attachEvents: ->
       @collection.on('add remove reset', @render)
-                 .on('reset',  @onFetch)
+                 .on('reset sync',  @onFetch)
                  .on('remove', @deselectCollaborator)
 
     render: =>
-      @removeCurrentUser() if @options.currentUser
       @updateElementVisibility()
-      collaborators = @collection.map (c) =>
+      collaboratorsHtml = @collection.map (c) =>
         collaboratorTemplate(extend(c.toJSON(),
-                                    type: c.modelType or c.get('type'),
-                                    id: c.get('collaborator_id') or c.get('id')
+                                    type: c.modelType or c.get('type')
+                                    collaborator_id: c.get('collaborator_id')
+                                    id: c.get('id')
                                     name: c.get('sortable_name') or c.get('name')
                                     selected: true))
-      @$list.html(collaborators.join(''))
+      collaboratorsHtml = collaboratorsHtml.join('')
+      @$list.html(collaboratorsHtml)
       @updateFocus() if @currentIndex? && @hasFocus
       @hasFocus = false
 
@@ -87,7 +89,7 @@ define [
     # Returns nothing.
     removeCollaborator: (e) ->
       e.preventDefault()
-      id = $(e.currentTarget).data('id')
+      id = $(e.currentTarget).attr('data-id')
       @currentIndex = $(e.target).parent().index()
       @hasFocus     = true
       @collection.remove(id)
@@ -100,6 +102,8 @@ define [
     removeAll: (e) ->
       e.preventDefault()
       @collection.remove(@collection.models)
+      @currentIndex = 0
+      @updateFocus()
 
     # Internal: Show/hide the remove all btn based on collection size.
     #
@@ -151,10 +155,3 @@ define [
     getNextPage: (header) ->
       nextPage = filter(header.split(','), (l) -> l.match(/next/))[0]
       return if nextPage then nextPage.match(/http[^>]+/)[0] else false
-
-    # Internal: Filter out the current user from the collection.
-    #
-    # Returns nothing.
-    removeCurrentUser: ->
-      @collection.remove(@options.currentUser, silent: true)
-

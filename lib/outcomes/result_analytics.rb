@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,7 +20,7 @@ module Outcomes
   module ResultAnalytics
 
     Rollup = Struct.new(:context, :scores)
-    RollupScore = Struct.new(:outcome, :score)
+    Result = Struct.new(:learning_outcome, :score, :count)
 
     # Public: Queries learning_outcome_results for rollup.
     #
@@ -35,11 +35,10 @@ module Outcomes
       required_opts = [:users, :context, :outcomes]
       required_opts.each { |p| raise "#{p} option is required" unless opts[p] }
       users, context, outcomes = opts.values_at(*required_opts)
-
-      order_results_for_rollup LearningOutcomeResult.where(
+      order_results_for_rollup LearningOutcomeResult.active.where(
         context_code:        context.asset_string,
         user_id:             users.map(&:id),
-        learning_outcome_id: outcomes.map(&:id),
+        learning_outcome_id: outcomes.map(&:id)
       )
     end
 
@@ -63,6 +62,7 @@ module Outcomes
     #
     # Returns an Array of Rollup objects.
     def outcome_results_rollups(results, users=[])
+      ActiveRecord::Associations::Preloader.new.preload(results, :learning_outcome)
       rollups = results.chunk(&:user_id).map do |_, user_results|
         Rollup.new(user_results.first.user, rollup_user_results(user_results))
       end
@@ -79,13 +79,14 @@ module Outcomes
     def aggregate_outcome_results_rollup(results, context)
       rollups = outcome_results_rollups(results)
       rollup_scores = rollups.map(&:scores).flatten
-      outcome_scores = rollup_scores.group_by(&:outcome)
-
-      aggregate_scores = outcome_scores.map do |outcome, scores|
-        aggregate_score = scores.map(&:score).sum.to_f / scores.size
-        RollupScore.new(outcome, aggregate_score)
+      outcome_results = rollup_scores.group_by(&:outcome).values
+      aggregate_results = outcome_results.map do |scores|
+        scores.map{|score| Result.new(score.outcome, score.score, score.count)}
       end
-      Rollup.new(context, aggregate_scores)
+      aggregate_rollups = aggregate_results.map do |result|
+        RollupScore.new(result,{aggregate_score: true})
+      end
+      Rollup.new(context, aggregate_rollups)
     end
 
     # Internal: Generates a rollup of the outcome results, Assuming all the
@@ -96,9 +97,9 @@ module Outcomes
     #
     # Returns an Array of RollupScore objects
     def rollup_user_results(user_results)
-      outcome_scores = user_results.chunk(&:learning_outcome_id).map do |_, outcome_results|
-        user_rollup_score = outcome_results.map(&:score).max
-        RollupScore.new(outcome_results.first.learning_outcome, user_rollup_score)
+      filtered_results = user_results.select{|r| !r.score.nil?}
+      filtered_results.group_by(&:learning_outcome_id).map do |_, outcome_results|
+        RollupScore.new(outcome_results)
       end
     end
 

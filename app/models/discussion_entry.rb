@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 - 2013 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,16 +16,16 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+require 'atom'
+
 class DiscussionEntry < ActiveRecord::Base
   include Workflow
-  include SendToInbox
   include SendToStream
   include TextHelper
   include HtmlTextHelper
 
-  attr_accessible :plaintext_message, :message, :discussion_topic, :user, :parent, :attachment, :parent_entry
   attr_readonly :discussion_topic_id, :user_id, :parent_id
-  has_many :discussion_subentries, :class_name => 'DiscussionEntry', :foreign_key => "parent_id", :order => :created_at
+  has_many :discussion_subentries, -> { order(:created_at) }, class_name: 'DiscussionEntry', foreign_key: "parent_id"
   has_many :unordered_discussion_subentries, :class_name => 'DiscussionEntry', :foreign_key => "parent_id"
   has_many :flattened_discussion_subentries, :class_name => 'DiscussionEntry', :foreign_key => "root_entry_id"
   has_many :discussion_entry_participants
@@ -47,6 +47,7 @@ class DiscussionEntry < ActiveRecord::Base
   validates_presence_of :discussion_topic_id
   before_validation :set_depth, :on => :create
   validate :validate_depth, on: :create
+  validate :discussion_not_deleted, on: :create
 
   sanitize_field :message, CanvasSanitize::SANITIZE
 
@@ -58,48 +59,32 @@ class DiscussionEntry < ActiveRecord::Base
     state :deleted
   end
 
-  on_create_send_to_inboxes do
-    if self.context && self.context.respond_to?(:available?) && self.context.available?
-      user_id = nil
-      if self.parent_entry
-        user_id = self.parent_entry.user_id
-      else
-        user_id = self.discussion_topic.user_id unless self.discussion_topic.assignment_id
-      end
-      if user_id && user_id != self.user_id
-        {
-          :recipients => user_id,
-          :subject => t("#subject_reply_to", "Re: %{subject}", :subject => self.discussion_topic.title),
-          :html_body => self.message,
-          :sender => self.user_id
-        }
-      end
-    end
-  end
-
   set_broadcast_policy do |p|
     p.dispatch :new_discussion_entry
     p.to { subscribers - [user] }
     p.whenever { |record|
       record.just_created && record.active?
     }
+
+    p.dispatch :announcement_reply
+    p.to { discussion_topic.user }
+    p.whenever { |record|
+      record.discussion_topic.is_announcement && record.just_created && record.active?
+    }
   end
 
   on_create_send_to_streams do
     if self.root_entry_id.nil?
-      recent_entries = DiscussionEntry.active.
-          where('discussion_topic_id=? AND created_at > ?', self.discussion_topic_id, 2.weeks.ago).
-          select(:user_id).all
-      # If the topic has been going for more than two weeks and it suddenly
-      # got "popular" again, move it back up in user streams
-      if !self.discussion_topic.for_assignment? && self.created_at && self.created_at > self.discussion_topic.created_at + 2.weeks && recent_entries.select{|e| e.created_at && e.created_at > 24.hours.ago }.length > 10
-        self.discussion_topic.active_participants
-      # If the topic has beeng going for more than two weeks, only show
+      participants = discussion_topic.active_participants_with_visibility
+
+      # If the topic has been going for more than two weeks, only show
       # people who have been participating in the topic
-      elsif self.created_at > self.discussion_topic.created_at + 2.weeks
-        recent_entries.map(&:user_id).uniq
+      if self.created_at > self.discussion_topic.created_at + 2.weeks
+        participants.map(&:id) & DiscussionEntry.active.
+          where('discussion_topic_id=? AND created_at > ?', self.discussion_topic_id, 2.weeks.ago).
+          distinct.pluck(:user_id)
       else
-        self.discussion_topic.active_participants
+        participants
       end
     else
       []
@@ -109,6 +94,11 @@ class DiscussionEntry < ActiveRecord::Base
   # The maximum discussion entry threading depth that is allowed
   def self.max_depth
     Setting.get('discussion_entry_max_depth', '50').to_i
+  end
+
+  def self.rating_sums(entry_ids)
+    sums = self.where(:id => entry_ids).where('COALESCE(rating_sum, 0) != 0')
+    Hash[sums.map{|x| [x.id, x.rating_sum]}]
   end
 
   def set_depth
@@ -121,8 +111,13 @@ class DiscussionEntry < ActiveRecord::Base
     end
   end
 
+  def discussion_not_deleted
+    errors.add(:base, "Requires non-deleted discussion topic") if self.discussion_topic.deleted?
+  end
+
   def reply_from(opts)
-    raise IncomingMail::IncomingMessageProcessor::UnknownAddressError if self.context.root_account.deleted?
+    raise IncomingMail::Errors::UnknownAddress if self.context.root_account.deleted?
+    raise IncomingMail::Errors::ReplyToDeletedDiscussion if self.discussion_topic.deleted?
     user = opts[:user]
     if opts[:html]
       message = opts[:html].strip
@@ -136,15 +131,17 @@ class DiscussionEntry < ActiveRecord::Base
     elsif !message || message.empty?
       raise "Message body cannot be blank"
     else
-      entry = DiscussionEntry.new(:message => message)
-      entry.discussion_topic_id = self.discussion_topic_id
-      entry.parent_entry = self
-      entry.user = user
-      if entry.grants_right?(user, :create)
-        entry.save!
-        entry
-      else
-        raise IncomingMail::IncomingMessageProcessor::ReplyToLockedTopicError
+      self.shard.activate do
+        entry = DiscussionEntry.new(:message => message)
+        entry.discussion_topic_id = self.discussion_topic_id
+        entry.parent_entry = self
+        entry.user = user
+        if entry.grants_right?(user, :create)
+          entry.save!
+          entry
+        else
+          raise IncomingMail::Errors::ReplyToLockedTopic
+        end
       end
     end
   end
@@ -166,14 +163,14 @@ class DiscussionEntry < ActiveRecord::Base
   end
 
   def summary(length=150)
-    strip_and_truncate(message, :max_length => length)
+    HtmlTextHelper.strip_and_truncate(message, :max_length => length)
   end
 
   def plaintext_message(length=250)
     truncate_html(self.message, :max_length => length)
   end
 
-  alias_method :destroy!, :destroy
+  alias_method :destroy_permanently!, :destroy
   def destroy
     self.workflow_state = 'deleted'
     self.deleted_at = Time.now.utc
@@ -191,7 +188,7 @@ class DiscussionEntry < ActiveRecord::Base
         dt = dt.root_topic
         break if dt.blank?
       end
-      connection.after_transaction_commit { self.discussion_topic.update_materialized_view }
+      self.class.connection.after_transaction_commit { self.discussion_topic.update_materialized_view }
     end
   end
 
@@ -235,8 +232,8 @@ class DiscussionEntry < ActiveRecord::Base
     end
   end
 
-  scope :active, where("discussion_entries.workflow_state<>'deleted'")
-  scope :deleted, where(:workflow_state => 'deleted')
+  scope :active, -> { where("discussion_entries.workflow_state<>'deleted'") }
+  scope :deleted, -> { where(:workflow_state => 'deleted') }
 
   def user_name
     self.user.name rescue t :default_user_name, "User Name"
@@ -245,7 +242,7 @@ class DiscussionEntry < ActiveRecord::Base
   def infer_root_entry_id
     # don't allow parent ids for flat discussions
     self.parent_entry = nil if self.discussion_topic.discussion_type == DiscussionTopic::DiscussionTypes::FLAT
-    
+
     # only allow non-root parents for threaded discussions
     unless self.discussion_topic.try(:threaded?)
       self.parent_entry = parent_entry.try(:root_entry) || parent_entry
@@ -256,7 +253,7 @@ class DiscussionEntry < ActiveRecord::Base
 
   def update_topic
     if self.discussion_topic
-      last_reply_at = [self.discussion_topic.last_reply_at, self.created_at].max
+      last_reply_at = [self.discussion_topic.last_reply_at, self.created_at].compact.max
       DiscussionTopic.where(:id => self.discussion_topic_id).update_all(:last_reply_at => last_reply_at, :updated_at => Time.now.utc)
     end
   end
@@ -271,43 +268,43 @@ class DiscussionEntry < ActiveRecord::Base
     given { |user| self.user && self.user == user && self.discussion_topic.available_for?(user) && context.user_can_manage_own_discussion_posts?(user) }
     can :update and can :delete
 
-    given { |user, session| self.cached_context_grants_right?(user, session, :read_forum) }
+    given { |user, session| self.discussion_topic.is_announcement && self.context.grants_right?(user, session, :read_announcements) && self.discussion_topic.visible_for?(user) }
     can :read
 
-    given { |user, session| self.cached_context_grants_right?(user, session, :post_to_forum) && self.discussion_topic.available_for?(user) }
+    given { |user, session| !self.discussion_topic.is_announcement && self.context.grants_right?(user, session, :read_forum) && self.discussion_topic.visible_for?(user) }
+    can :read
+
+    given { |user, session| self.context.grants_right?(user, session, :post_to_forum) && !self.discussion_topic.locked_for?(user) && self.discussion_topic.visible_for?(user) }
     can :reply and can :create and can :read
 
-    given { |user, session| self.cached_context_grants_right?(user, session, :post_to_forum) }
+    given { |user, session| self.context.grants_right?(user, session, :post_to_forum) && self.discussion_topic.visible_for?(user)}
     can :read
 
-    given { |user, session| context.respond_to?(:allow_student_forum_attachments) && context.allow_student_forum_attachments && cached_context_grants_right?(user, session, :post_to_forum) && discussion_topic.available_for?(user) }
+    given { |user, session| context.respond_to?(:allow_student_forum_attachments) && context.allow_student_forum_attachments && context.grants_right?(user, session, :post_to_forum) && discussion_topic.available_for?(user) }
     can :attach
 
-    given { |user, session| !self.discussion_topic.root_topic_id && self.cached_context_grants_right?(user, session, :moderate_forum) && self.discussion_topic.available_for?(user) }
+    given { |user, session| !self.discussion_topic.root_topic_id && self.context.grants_right?(user, session, :moderate_forum) && !self.discussion_topic.locked_for?(user, :check_policies => true) }
     can :update and can :delete and can :reply and can :create and can :read and can :attach
 
-    given { |user, session| !self.discussion_topic.root_topic_id && self.cached_context_grants_right?(user, session, :moderate_forum) }
+    given { |user, session| !self.discussion_topic.root_topic_id && self.context.grants_right?(user, session, :moderate_forum) }
     can :update and can :delete and can :read
 
-    given { |user, session| self.discussion_topic.root_topic && self.discussion_topic.root_topic.cached_context_grants_right?(user, session, :moderate_forum) && self.discussion_topic.available_for?(user) }
+    given { |user, session| self.discussion_topic.root_topic && self.discussion_topic.root_topic.context.grants_right?(user, session, :moderate_forum) && !self.discussion_topic.locked_for?(user, :check_policies => true) }
     can :update and can :delete and can :reply and can :create and can :read and can :attach
 
-    given { |user, session| self.discussion_topic.root_topic && self.discussion_topic.root_topic.cached_context_grants_right?(user, session, :moderate_forum) }
+    given { |user, session| self.discussion_topic.root_topic && self.discussion_topic.root_topic.context.grants_right?(user, session, :moderate_forum) }
     can :update and can :delete and can :read
 
-    given { |user, session| self.discussion_topic.context.respond_to?(:collection) && self.discussion_topic.context.collection.grants_right?(user, session, :read) }
-    can :read
-
-    given { |user, session| self.discussion_topic.context.respond_to?(:collection) && self.discussion_topic.context.collection.grants_right?(user, session, :comment) }
-    can :create
+    given { |user, session| self.discussion_topic.grants_right?(user, session, :rate) }
+    can :rate
   end
 
   scope :for_user, lambda { |user| where(:user_id => user).order("discussion_entries.created_at") }
   scope :for_users, lambda { |users| where(:user_id => users) }
   scope :after, lambda { |date| where("created_at>?", date) }
-  scope :top_level_for_topics, lambda {|topics| where(:root_entry_id => nil, :discussion_topic_id => topics) }
+  scope :top_level_for_topics, lambda { |topics| where(:root_entry_id => nil, :discussion_topic_id => topics) }
   scope :all_for_topics, lambda { |topics| where(:discussion_topic_id => topics) }
-  scope :newest_first, order("discussion_entries.created_at DESC, discussion_entries.id DESC")
+  scope :newest_first, -> { order("discussion_entries.created_at DESC, discussion_entries.id DESC") }
 
   def to_atom(opts={})
     author_name = self.user.present? ? self.user.name : t('atom_no_author', "No Author")
@@ -346,7 +343,9 @@ class DiscussionEntry < ActiveRecord::Base
   end
 
   def context_module_action_later
-    self.send_later_if_production(:context_module_action)
+    unless self.deleted?
+      self.send_later_if_production(:context_module_action)
+    end
   end
   protected :context_module_action_later
 
@@ -354,6 +353,11 @@ class DiscussionEntry < ActiveRecord::Base
     if self.discussion_topic && self.user
       self.discussion_topic.context_module_action(user, :contributed)
     end
+  end
+
+  after_commit :subscribe_author, on: :create
+  def subscribe_author
+    discussion_topic.subscribe(user) unless discussion_topic.subscription_hold(user, nil, nil)
   end
 
   def create_participants
@@ -365,15 +369,14 @@ class DiscussionEntry < ActiveRecord::Base
       if self.user
         my_entry_participant = self.discussion_entry_participants.create(:user => self.user, :workflow_state => "read")
 
-        topic_participant = self.discussion_topic.discussion_topic_participants.find_by_user_id(self.user.id)
+        topic_participant = self.discussion_topic.discussion_topic_participants.where(user_id: self.user).first
         if topic_participant.blank?
-          new_count = self.discussion_topic.unread_count(self.user) - 1
+          new_count = self.discussion_topic.default_unread_count - 1
           topic_participant = self.discussion_topic.discussion_topic_participants.create(:user => self.user,
                                                                                          :unread_entry_count => new_count,
                                                                                          :workflow_state => "unread",
                                                                                          :subscribed => self.discussion_topic.subscribed?(self.user))
         end
-        self.discussion_topic.subscribe(self.user) unless self.discussion_topic.subscription_hold(self.user, nil, nil)
       end
     end
   end
@@ -383,6 +386,12 @@ class DiscussionEntry < ActiveRecord::Base
     current_user ||= self.current_user
     return "read" unless current_user # default for logged out users
     find_existing_participant(current_user).workflow_state
+  end
+
+  def rating(current_user = nil)
+    current_user ||= self.current_user
+    return nil unless current_user # default for logged out users
+    find_existing_participant(current_user).rating
   end
 
   def read?(current_user = nil)
@@ -419,6 +428,48 @@ class DiscussionEntry < ActiveRecord::Base
     end
   end
 
+  # Public: Change the rating of the entry for the specified user.
+  #
+  # new_rating    - The new rating.
+  # current_user - The User to to change state for. This function does nothing
+  #                if nil is passed. (default: self.current_user)
+  #
+  # Returns nil if current_user is nil, the DiscussionEntryParticipent if the
+  # rating was changed, or true if the rating was not changed. If the
+  # rating is not changed, a participant record will not be created.
+  def change_rating(new_rating, current_user = nil)
+    current_user ||= self.current_user
+    return nil unless current_user
+
+    entry_participant = nil
+    transaction do
+      lock!
+      old_rating = self.rating(current_user)
+      if new_rating == old_rating
+        return true
+      end
+
+      entry_participant = self.update_or_create_participant(current_user: current_user, rating: new_rating)
+
+      update_aggregate_rating(old_rating, new_rating)
+    end
+
+    entry_participant
+  end
+
+  def update_aggregate_rating(old_rating, new_rating)
+    count_delta = (new_rating.nil? ? 0 : 1) - (old_rating.nil? ? 0 : 1)
+    sum_delta = new_rating.to_i - old_rating.to_i
+
+    DiscussionEntry.where(id: id). update_all([
+      'rating_count = COALESCE(rating_count, 0) + ?,
+        rating_sum = COALESCE(rating_sum, 0) + ?',
+      count_delta,
+      sum_delta
+    ])
+    self.discussion_topic.update_materialized_view
+  end
+
   # Public: Update and save the DiscussionEntryParticipant for a specified user,
   # creating it if necessary. This function properly handles race conditions of
   # calling this function simultaneously in two separate processes.
@@ -441,7 +492,8 @@ class DiscussionEntry < ActiveRecord::Base
         entry_participant = self.discussion_entry_participants.where(:user_id => current_user).first
         entry_participant ||= self.discussion_entry_participants.build(:user => current_user, :workflow_state => "unread")
         entry_participant.workflow_state = opts[:new_state] if opts[:new_state]
-        entry_participant.forced_read_state = opts[:forced] if opts.has_key?(:forced)
+        entry_participant.forced_read_state = opts[:forced] if opts.key?(:forced)
+        entry_participant.rating = opts[:rating] if opts.key?(:rating)
         entry_participant.save
       end
     end
@@ -450,9 +502,9 @@ class DiscussionEntry < ActiveRecord::Base
 
   # Public: Find the existing DiscussionEntryParticipant, or create a default
   # participant, for the specified user.
-  # 
+  #
   # user - The User to lookup the participant for.
-  # 
+  #
   # Returns the DiscussionEntryParticipant for the user, or a participant with
   # default values set. The returned record is marked as readonly! If you need
   # to update a participant, use the #update_or_create_participant method

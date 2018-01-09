@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -23,9 +23,9 @@ describe "/eportfolios/index" do
   it "should render" do
     eportfolio_with_user
     view_portfolio
-    assigns[:portfolios] = [@portfolio]
+    assign(:portfolios, [@portfolio])
     render "eportfolios/user_index"
-    response.should_not be_nil
+    expect(response).not_to be_nil
   end
 end
 

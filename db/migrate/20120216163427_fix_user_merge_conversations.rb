@@ -1,4 +1,21 @@
-class FixUserMergeConversations < ActiveRecord::Migration
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+class FixUserMergeConversations < ActiveRecord::Migration[4.2]
   tag :postdeploy
 
   def self.up
@@ -8,9 +25,9 @@ class FixUserMergeConversations < ActiveRecord::Migration
     # (which may merge it with another conversation)
     ConversationParticipant.find_by_sql(<<-SQL).
       SELECT conversation_participants.*
-      FROM conversation_participants, (
+      FROM #{ConversationParticipant.quoted_table_name}, (
         SELECT MIN(id) AS id, user_id, conversation_id
-        FROM conversation_participants
+        FROM #{ConversationParticipant.quoted_table_name}
         GROUP BY user_id, conversation_id
         HAVING COUNT(*) > 1
         ORDER BY conversation_id
@@ -26,11 +43,10 @@ class FixUserMergeConversations < ActiveRecord::Migration
 
     # there may be a bunch more private conversations with the wrong private
     # hash, and there's not a reliable way to figure out which ones those are
-    # in sql alone (unless you have a sha1 method for postgres and sqlite), so
+    # in sql alone (unless you have a sha1 method for postgres), so
     # we just walk them all out of band and make sure they're right (this may
     # also merge some private conversations in the process)
-    Conversation.connection.select_all("SELECT id FROM conversations WHERE private_hash IS NOT NULL").
-    map{ |r| r["id"] }.each_slice(1000) do |ids|
+    Conversation.where("private_hash IS NOT NULL").pluck(:id).each_slice(1000) do |ids|
       Conversation.send_later_if_production_enqueue_args(:batch_regenerate_private_hashes!, {
         :priority => Delayed::LOWER_PRIORITY,
         :max_attempts => 1,

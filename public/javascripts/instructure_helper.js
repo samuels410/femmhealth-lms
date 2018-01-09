@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,25 +12,23 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
 //create a global object "INST" that we will have be Instructure's namespace.
-define([
-  'INST' /* INST */,
-  'i18n!instructure',
-  'jquery' /* $ */,
-  'jqueryui/dialog'
-], function(INST, I18n, $) {
+import INST from './INST'
+import I18n from 'i18n!instructure'
+import $ from 'jquery'
+import 'jqueryui/dialog'
 
   function getTld(hostname){
     hostname = (hostname || "").split(":")[0];
     var parts = hostname.split("."),
         length = parts.length;
-    return ( length > 1  ? 
-      [ parts[length - 2] , parts[length - 1] ] : 
-      parts 
+    return ( length > 1  ?
+      [ parts[length - 2] , parts[length - 1] ] :
+      parts
     ).join("");
   }
   var locationTld = getTld(window.location.hostname);
@@ -39,7 +37,7 @@ define([
     //if a browser doesnt support <a>.hostname then just dont mark anything as external, better to not get false positives.
     return !!(href && href.length && !href.match(/^(mailto\:|javascript\:)/) && element.hostname && getTld(element.hostname) != locationTld);
   };
-    
+
   window.equella = {
     ready: function(data) {
       $(document).triggerHandler('equella_ready', data);
@@ -53,23 +51,21 @@ define([
   }).bind('equella_cancel', function() {
     $("#equella_dialog").dialog('close');
   });
-  
-  window.external_tool = {
+
+  window.external_tool_dialog = {
     ready: function(data) {
-      $("#external_tool_button_dialog:visible").triggerHandler('selection', data);
-      $("#resource_selection_dialog:visible").triggerHandler('selection', data);
-      $("#homework_selection_dialog:visible").triggerHandler('selection', data);
+      var e = jQuery.Event( 'selection' )
+      e.contentItems = data
+      $("#resource_selection_dialog:visible").triggerHandler(e);
+      $("#homework_selection_dialog:visible").triggerHandler(e);
     },
     cancel: function() {
       $("#external_tool_button_dialog").dialog('close');
       $("#resource_selection_dialog").dialog('close');
       $("#homework_selection_dialog:visible").dialog('close');
     }
-  }
-  
+  };
+
   window.jsonFlickrApi = function(data) {
     $("#instructure_image_search").triggerHandler('search_results', data);
   };
-
-});
-

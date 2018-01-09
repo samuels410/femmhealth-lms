@@ -1,4 +1,21 @@
-class DelayedJobsUseAdvisoryLocks < ActiveRecord::Migration
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+class DelayedJobsUseAdvisoryLocks < ActiveRecord::Migration[4.2]
   tag :predeploy
 
   def self.connection
@@ -12,7 +29,7 @@ class DelayedJobsUseAdvisoryLocks < ActiveRecord::Migration
     # be much smaller
     if connection.adapter_name == 'PostgreSQL'
       execute(<<-CODE)
-      CREATE FUNCTION half_md5_as_bigint(strand varchar) RETURNS bigint AS $$
+      CREATE FUNCTION #{connection.quote_table_name('half_md5_as_bigint')}(strand varchar) RETURNS bigint AS $$
       DECLARE
         strand_md5 bytea;
       BEGIN
@@ -30,7 +47,7 @@ class DelayedJobsUseAdvisoryLocks < ActiveRecord::Migration
       CODE
 
       execute(<<-CODE)
-      CREATE OR REPLACE FUNCTION delayed_jobs_before_insert_row_tr_fn () RETURNS trigger AS $$
+      CREATE OR REPLACE FUNCTION #{connection.quote_table_name('delayed_jobs_before_insert_row_tr_fn')} () RETURNS trigger AS $$
       BEGIN
         PERFORM pg_advisory_xact_lock(half_md5_as_bigint(NEW.strand));
         IF (SELECT 1 FROM delayed_jobs WHERE strand = NEW.strand LIMIT 1) = 1 THEN
@@ -42,7 +59,7 @@ class DelayedJobsUseAdvisoryLocks < ActiveRecord::Migration
       CODE
 
       execute(<<-CODE)
-      CREATE OR REPLACE FUNCTION delayed_jobs_after_delete_row_tr_fn () RETURNS trigger AS $$
+      CREATE OR REPLACE FUNCTION #{connection.quote_table_name('delayed_jobs_after_delete_row_tr_fn')} () RETURNS trigger AS $$
       BEGIN
         PERFORM pg_advisory_xact_lock(half_md5_as_bigint(OLD.strand));
         UPDATE delayed_jobs SET next_in_strand = 't' WHERE id = (SELECT id FROM delayed_jobs j2 WHERE j2.strand = OLD.strand ORDER BY j2.strand, j2.id ASC LIMIT 1 FOR UPDATE);
@@ -56,7 +73,7 @@ class DelayedJobsUseAdvisoryLocks < ActiveRecord::Migration
   def self.down
     if connection.adapter_name == 'PostgreSQL'
       execute(<<-CODE)
-      CREATE OR REPLACE FUNCTION delayed_jobs_before_insert_row_tr_fn () RETURNS trigger AS $$
+      CREATE OR REPLACE FUNCTION #{connection.quote_table_name('delayed_jobs_before_insert_row_tr_fn')} () RETURNS trigger AS $$
       BEGIN
         LOCK delayed_jobs IN SHARE ROW EXCLUSIVE MODE;
         IF (SELECT 1 FROM delayed_jobs WHERE strand = NEW.strand LIMIT 1) = 1 THEN
@@ -68,7 +85,7 @@ class DelayedJobsUseAdvisoryLocks < ActiveRecord::Migration
       CODE
 
       execute(<<-CODE)
-      CREATE OR REPLACE FUNCTION delayed_jobs_after_delete_row_tr_fn () RETURNS trigger AS $$
+      CREATE OR REPLACE FUNCTION #{connection.quote_table_name('delayed_jobs_after_delete_row_tr_fn')} () RETURNS trigger AS $$
       BEGIN
         UPDATE delayed_jobs SET next_in_strand = 't' WHERE id = (SELECT id FROM delayed_jobs j2 WHERE j2.strand = OLD.strand ORDER BY j2.strand, j2.id ASC LIMIT 1 FOR UPDATE);
         RETURN OLD;
@@ -76,7 +93,7 @@ class DelayedJobsUseAdvisoryLocks < ActiveRecord::Migration
       $$ LANGUAGE plpgsql;
       CODE
 
-      execute('DROP FUNCTION half_md5_as_bigint(varchar)')
+      execute("DROP FUNCTION #{connection.quote_table_name('half_md5_as_bigint')}(varchar)")
     end
   end
 end

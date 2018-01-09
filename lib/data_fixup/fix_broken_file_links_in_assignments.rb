@@ -1,3 +1,22 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+require 'nokogiri'
+
 module DataFixup::FixBrokenFileLinksInAssignments
 
   def self.broken_assignment_scope
@@ -39,14 +58,14 @@ module DataFixup::FixBrokenFileLinksInAssignments
           end
 
           if file_id
-            if att = Attachment.find_by_id(file_id)
+            if att = Attachment.where(id: file_id).first
               # this find returns the passed in att if nothing found in the context
               # and sometimes URI.unescape errors so ignore that
               att = att.context.attachments.find(att.id) rescue att
               if att.context_type == "Course" && att.context_id == assignment.context_id
                 course_id = assignment.context_id
                 file_id = att.id
-              elsif att.cloned_item_id && cloned_att = assignment.context.attachments.find_by_cloned_item_id(att.cloned_item_id)
+              elsif att.cloned_item_id && cloned_att = assignment.context.attachments.where(cloned_item_id: att.cloned_item_id).first
                 course_id = assignment.context_id
                 file_id = assignment.context.attachments.find(cloned_att.id).id rescue cloned_att.id
               elsif att.context_type == "Course"

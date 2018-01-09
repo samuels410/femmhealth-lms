@@ -1,61 +1,98 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'INST'
   'i18n!assignment'
   'compiled/views/ValidatedFormView'
   'underscore'
   'jquery'
-  'wikiSidebar'
+  'jsx/shared/helpers/numberHelper'
+  'compiled/util/round'
+  'jsx/shared/rce/RichContentEditor'
   'jst/assignments/EditView'
+  'compiled/userSettings'
   'compiled/models/TurnitinSettings'
+  'compiled/models/VeriCiteSettings'
   'compiled/views/assignments/TurnitinSettingsDialog'
   'compiled/fn/preventDefault'
   'compiled/views/calendar/MissingDateDialogView'
   'compiled/views/assignments/AssignmentGroupSelector'
   'compiled/views/assignments/GroupCategorySelector'
   'compiled/jquery/toggleAccessibly'
-  'compiled/tinymce'
-  'tinymce.editor_box'
+  'compiled/views/editor/KeyboardShortcuts'
+  'jsx/shared/conditional_release/ConditionalRelease'
+  'compiled/util/deparam'
+  'compiled/util/SisValidationHelper'
+  'jsx/assignments/AssignmentConfigurationTools'
   'jqueryui/dialog'
   'jquery.toJSON'
   'compiled/jquery.rails_flash_notifications'
-], (INST, I18n, ValidatedFormView, _, $, wikiSidebar, template,
-TurnitinSettings, TurnitinSettingsDialog, preventDefault, MissingDateDialog,
-AssignmentGroupSelector, GroupCategorySelector, toggleAccessibly) ->
+  'compiled/behaviors/tooltip'
+], (INST, I18n, ValidatedFormView, _, $, numberHelper, round, RichContentEditor, EditViewTemplate,
+  userSettings, TurnitinSettings, VeriCiteSettings, TurnitinSettingsDialog,
+  preventDefault, MissingDateDialog, AssignmentGroupSelector,
+  GroupCategorySelector, toggleAccessibly, RCEKeyboardShortcuts,
+  ConditionalRelease, deparam, SisValidationHelper, SimilarityDetectionTools) ->
+
+  RichContentEditor.preloadRemoteModule()
 
   class EditView extends ValidatedFormView
 
-    template: template
+    template: EditViewTemplate
 
     dontRenableAfterSaveSuccess: true
 
     ASSIGNMENT_GROUP_SELECTOR = '#assignment_group_selector'
-    DUE_DATE_AREA = '#assignment_due_date_controls'
-    DUE_AT = '[name="due_at"]'
     DESCRIPTION = '[name="description"]'
     SUBMISSION_TYPE = '[name="submission_type"]'
     ONLINE_SUBMISSION_TYPES = '#assignment_online_submission_types'
     NAME = '[name="name"]'
     ALLOW_FILE_UPLOADS = '#assignment_online_upload'
+    ALLOW_TEXT_ENTRY = '#assignment_text_entry'
     RESTRICT_FILE_UPLOADS = '#assignment_restrict_file_extensions'
     RESTRICT_FILE_UPLOADS_OPTIONS = '#restrict_file_extensions_container'
     ALLOWED_EXTENSIONS = '#allowed_extensions_container'
-    ADVANCED_ASSIGNMENT_OPTIONS = '#advanced_assignment_options'
     TURNITIN_ENABLED = '#assignment_turnitin_enabled'
+    VERICITE_ENABLED = '#assignment_vericite_enabled'
     ADVANCED_TURNITIN_SETTINGS = '#advanced_turnitin_settings_link'
-    ASSIGNMENT_TOGGLE_ADVANCED_OPTIONS = '#assignment_toggle_advanced_options'
     GRADING_TYPE_SELECTOR = '#grading_type_selector'
     GRADED_ASSIGNMENT_FIELDS = '#graded_assignment_fields'
     EXTERNAL_TOOL_SETTINGS = '#assignment_external_tool_settings'
     GROUP_CATEGORY_SELECTOR = '#group_category_selector'
     PEER_REVIEWS_FIELDS = '#assignment_peer_reviews_fields'
     EXTERNAL_TOOLS_URL = '#assignment_external_tool_tag_attributes_url'
+    EXTERNAL_TOOLS_CONTENT_TYPE = '#assignment_external_tool_tag_attributes_content_type'
+    EXTERNAL_TOOLS_CONTENT_ID = '#assignment_external_tool_tag_attributes_content_id'
     EXTERNAL_TOOLS_NEW_TAB = '#assignment_external_tool_tag_attributes_new_tab'
+    ASSIGNMENT_POINTS_POSSIBLE = '#assignment_points_possible'
+    ASSIGNMENT_POINTS_CHANGE_WARN = '#point_change_warning'
+    SECURE_PARAMS = '#secure_params'
+
+    PEER_REVIEWS_BOX = '#assignment_peer_reviews'
+    INTRA_GROUP_PEER_REVIEWS = '#intra_group_peer_reviews_toggle'
+    GROUP_CATEGORY_BOX = '#has_group_category'
+    MODERATED_GRADING_BOX = '#assignment_moderated_grading'
+    CONDITIONAL_RELEASE_TARGET = '#conditional_release_target'
+    SIMILARITY_DETECTION_TOOLS = '#similarity_detection_tools'
 
     els: _.extend({}, @::els, do ->
       els = {}
       els["#{ASSIGNMENT_GROUP_SELECTOR}"] = '$assignmentGroupSelector'
-      els["#{DUE_DATE_AREA}"] = '$dueDateArea'
-      els["#{DUE_AT}"] = '$dueAt'
       els["#{DESCRIPTION}"] = '$description'
       els["#{SUBMISSION_TYPE}"] = '$submissionType'
       els["#{ONLINE_SUBMISSION_TYPES}"] = '$onlineSubmissionTypes'
@@ -64,10 +101,9 @@ AssignmentGroupSelector, GroupCategorySelector, toggleAccessibly) ->
       els["#{RESTRICT_FILE_UPLOADS}"] = '$restrictFileUploads'
       els["#{RESTRICT_FILE_UPLOADS_OPTIONS}"] = '$restrictFileUploadsOptions'
       els["#{ALLOWED_EXTENSIONS}"] = '$allowedExtensions'
-      els["#{ADVANCED_ASSIGNMENT_OPTIONS}"] = '$advancedAssignmentOptions'
       els["#{TURNITIN_ENABLED}"] = '$turnitinEnabled'
+      els["#{VERICITE_ENABLED}"] = '$vericiteEnabled'
       els["#{ADVANCED_TURNITIN_SETTINGS}"] = '$advancedTurnitinSettings'
-      els["#{ASSIGNMENT_TOGGLE_ADVANCED_OPTIONS}"] = '$assignmentToggleAdvancedOptions'
       els["#{GRADING_TYPE_SELECTOR}"] = '$gradingTypeSelector'
       els["#{GRADED_ASSIGNMENT_FIELDS}"] = '$gradedAssignmentFields'
       els["#{EXTERNAL_TOOL_SETTINGS}"] = '$externalToolSettings'
@@ -75,19 +111,35 @@ AssignmentGroupSelector, GroupCategorySelector, toggleAccessibly) ->
       els["#{PEER_REVIEWS_FIELDS}"] = '$peerReviewsFields'
       els["#{EXTERNAL_TOOLS_URL}"] = '$externalToolsUrl'
       els["#{EXTERNAL_TOOLS_NEW_TAB}"] = '$externalToolsNewTab'
+      els["#{EXTERNAL_TOOLS_CONTENT_TYPE}"] = '$externalToolsContentType'
+      els["#{EXTERNAL_TOOLS_CONTENT_ID}"] = '$externalToolsContentId'
+      els["#{ASSIGNMENT_POINTS_POSSIBLE}"] = '$assignmentPointsPossible'
+      els["#{ASSIGNMENT_POINTS_CHANGE_WARN}"] = '$pointsChangeWarning'
+      els["#{MODERATED_GRADING_BOX}"] = '$moderatedGradingBox'
+      els["#{CONDITIONAL_RELEASE_TARGET}"] = '$conditionalReleaseTarget'
+      els["#{SIMILARITY_DETECTION_TOOLS}"] = '$similarityDetectionTools'
+      els["#{SECURE_PARAMS}"] = '$secureParams'
       els
     )
 
     events: _.extend({}, @::events, do ->
       events = {}
       events["click .cancel_button"] = 'handleCancel'
-      events["click #{ASSIGNMENT_TOGGLE_ADVANCED_OPTIONS}"] = 'toggleAdvancedOptions'
+      events["click .save_and_publish"] = 'saveAndPublish'
       events["change #{SUBMISSION_TYPE}"] = 'handleSubmissionTypeChange'
+      events["change #{ONLINE_SUBMISSION_TYPES}"] = 'handleOnlineSubmissionTypeChange'
       events["change #{RESTRICT_FILE_UPLOADS}"] = 'handleRestrictFileUploadsChange'
       events["click #{ADVANCED_TURNITIN_SETTINGS}"] = 'showTurnitinDialog'
       events["change #{TURNITIN_ENABLED}"] = 'toggleAdvancedTurnitinSettings'
+      events["change #{VERICITE_ENABLED}"] = 'toggleAdvancedTurnitinSettings'
       events["change #{ALLOW_FILE_UPLOADS}"] = 'toggleRestrictFileUploads'
-      events["click #{EXTERNAL_TOOLS_URL}"] = 'showExternalToolsDialog'
+      events["click #{EXTERNAL_TOOLS_URL}_find"] = 'showExternalToolsDialog'
+      events["change #assignment_points_possible"] = 'handlePointsChange'
+      events["change #{PEER_REVIEWS_BOX}"] = 'handleModeratedGradingChange'
+      events["change #{MODERATED_GRADING_BOX}"] = 'handleModeratedGradingChange'
+      events["change #{GROUP_CATEGORY_BOX}"] = 'handleGroupCategoryChange'
+      if ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED
+        events["change"] = 'onChange'
       events
     )
 
@@ -99,37 +151,108 @@ AssignmentGroupSelector, GroupCategorySelector, toggleAccessibly) ->
     initialize: (options) ->
       super
       @assignment = @model
+      @setDefaultsIfNew()
       @dueDateOverrideView = options.views['js-assignment-overrides']
-      @model.on 'sync', -> window.location = @get 'html_url'
+      @on 'success', @redirectAfterSave
       @gradingTypeSelector.on 'change:gradingType', @handleGradingTypeChange
+      if ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED
+        @gradingTypeSelector.on 'change:gradingType', @onChange
+
+      @lockedItems = options.lockedItems || {};
 
     handleCancel: (ev) =>
       ev.preventDefault()
-      window.location = ENV.CANCEL_TO if ENV.CANCEL_TO?
+      @redirectAfterCancel()
 
-    showingAdvancedOptions: =>
-      ariaExpanded = @$advancedAssignmentOptions.attr('aria-expanded')
-      ariaExpanded == 'true' or ariaExpanded == true
+    settingsToCache:() =>
+      ["assignment_group_id","grading_type","submission_type","submission_types",
+       "points_possible","allowed_extensions","peer_reviews","peer_review_count",
+       "automatic_peer_reviews","group_category_id","grade_group_students_individually",
+       "turnitin_enabled", "vericite_enabled"]
 
-    toggleAdvancedOptions: (ev) =>
+    handlePointsChange:(ev) =>
       ev.preventDefault()
-      $(ev.currentTarget).focus() # to ensure its errorBox gets cleaned up (if it has one)
-      expanded = @showingAdvancedOptions()
-      @$advancedAssignmentOptions.attr('aria-expanded', !expanded)
-      @$advancedAssignmentOptions.toggle(!expanded)
-      if expanded
-        @$dueDateArea.show()
-        text = I18n.t('show_advanced_options', 'Show Advanced Options') + ' ▼'
-      else
-        @$dueDateArea.hide()
-        text = I18n.t('hide_advanced_options', 'Hide Advanced Options') + ' ▲'
-      @$assignmentToggleAdvancedOptions.text text
+      if (numberHelper.validate(@$assignmentPointsPossible.val()))
+        newPoints = round(numberHelper.parse(@$assignmentPointsPossible.val()), 2)
+        @$assignmentPointsPossible.val(I18n.n(newPoints))
+
+      if @assignment.hasSubmittedSubmissions()
+        @$pointsChangeWarning.toggleAccessibly(@$assignmentPointsPossible.val() != "#{@assignment.pointsPossible()}")
+
+    checkboxAccessibleAdvisory: (box) ->
+      label = box.parent()
+      advisory = label.find('span.screenreader-only.accessible_label')
+      advisory = $('<span class="screenreader-only accessible_label"></span>').appendTo(label) unless advisory.length
+      advisory
+
+    setImplicitCheckboxValue: (box, value) ->
+      $("input[type='hidden'][name='#{box.attr('name')}']", box.parent()).attr('value', value)
+
+    disableCheckbox: (box, message) ->
+      box.prop("disabled", true).parent().attr('data-tooltip', 'top').data('tooltip', {disabled: false}).attr('title', message)
+      @setImplicitCheckboxValue(box, if box.prop('checked') then '1' else '0')
+      @checkboxAccessibleAdvisory(box).text(message)
+
+    enableCheckbox: (box) ->
+      if box.prop('disabled')
+        return if @assignment.inClosedGradingPeriod()
+
+        box.prop('disabled', false).parent().timeoutTooltip().timeoutTooltip('disable').removeAttr('data-tooltip').removeAttr('title')
+        @setImplicitCheckboxValue(box, '0')
+        @checkboxAccessibleAdvisory(box).text('')
+
+    handleGroupCategoryChange: ->
+      isGrouped = @$groupCategoryBox.prop('checked')
+      @$intraGroupPeerReviews.toggleAccessibly(isGrouped)
+      @handleModeratedGradingChange()
+
+    handleModeratedGradingChange: =>
+      if !ENV?.HAS_GRADED_SUBMISSIONS
+        if @$moderatedGradingBox.prop('checked')
+          @disableCheckbox(@$peerReviewsBox, I18n.t("Peer reviews cannot be enabled for moderated assignments"))
+          @disableCheckbox(@$groupCategoryBox, I18n.t("Group assignments cannot be enabled for moderated assignments"))
+          @enableCheckbox(@$moderatedGradingBox)
+        else
+          if @$groupCategoryBox.prop('checked')
+            @disableCheckbox(@$moderatedGradingBox,  I18n.t("Moderated grading cannot be enabled for group assignments"))
+          else if @$peerReviewsBox.prop('checked')
+            @disableCheckbox(@$moderatedGradingBox, I18n.t("Moderated grading cannot be enabled for peer reviewed assignments"))
+          else
+            @enableCheckbox(@$moderatedGradingBox)
+
+          @enableCheckbox(@$peerReviewsBox)
+          @enableCheckbox(@$groupCategoryBox)
+
+    setDefaultsIfNew: =>
+      if @assignment.isNew()
+        if userSettings.contextGet('new_assignment_settings')
+          _.each(@settingsToCache(), (setting) =>
+            setting_from_cache = userSettings.contextGet('new_assignment_settings')[setting]
+            if setting_from_cache == "1" || setting_from_cache == "0"
+              setting_from_cache = parseInt setting_from_cache
+            if setting_from_cache && (!@assignment.get(setting)? || @assignment.get(setting)?.length == 0)
+              @assignment.set(setting, setting_from_cache)
+          )
+        if @assignment.submissionTypes().length == 0
+          @assignment.submissionTypes(['online'])
+
+    cacheAssignmentSettings: =>
+      new_assignment_settings = _.pick(@getFormData(), @settingsToCache()...)
+      userSettings.contextSet('new_assignment_settings', new_assignment_settings)
 
     showTurnitinDialog: (ev) =>
       ev.preventDefault()
-      turnitinDialog = new TurnitinSettingsDialog(model: @assignment.get('turnitin_settings'))
+      type = "turnitin"
+      model = @assignment.get('turnitin_settings')
+      if @$vericiteEnabled.prop('checked')
+        type = "vericite"
+        model = @assignment.get('vericite_settings')
+      turnitinDialog = new TurnitinSettingsDialog(model, type)
       turnitinDialog.render().on 'settings:change', (settings) =>
-        @assignment.set 'turnitin_settings', new TurnitinSettings(settings)
+        if @$vericiteEnabled.prop('checked')
+          @assignment.set 'vericite_settings', new VeriCiteSettings(settings)
+        else
+          @assignment.set 'turnitin_settings', new TurnitinSettings(settings)
         turnitinDialog.off()
         turnitinDialog.remove()
 
@@ -140,6 +263,8 @@ AssignmentGroupSelector, GroupCategorySelector, toggleAccessibly) ->
         select_button_text: I18n.t('buttons.select_url', 'Select'),
         no_name_input: true,
         submit: (data) =>
+          @$externalToolsContentType.val(data['item[type]'])
+          @$externalToolsContentId.val(data['item[id]'])
           @$externalToolsUrl.val(data['item[url]'])
           @$externalToolsNewTab.prop('checked', data['item[new_tab]'] == '1')
 
@@ -148,7 +273,7 @@ AssignmentGroupSelector, GroupCategorySelector, toggleAccessibly) ->
 
     toggleAdvancedTurnitinSettings: (ev) =>
       ev.preventDefault()
-      @$advancedTurnitinSettings.toggleAccessibly @$turnitinEnabled.prop('checked')
+      @$advancedTurnitinSettings.toggleAccessibly (@$turnitinEnabled.prop('checked') || @$vericiteEnabled.prop('checked'))
 
     handleRestrictFileUploadsChange: =>
       @$allowedExtensions.toggleAccessibly @$restrictFileUploads.prop('checked')
@@ -163,70 +288,122 @@ AssignmentGroupSelector, GroupCategorySelector, toggleAccessibly) ->
       @$externalToolSettings.toggleAccessibly subVal == 'external_tool'
       @$groupCategorySelector.toggleAccessibly subVal != 'external_tool'
       @$peerReviewsFields.toggleAccessibly subVal != 'external_tool'
+      @$similarityDetectionTools.toggleAccessibly subVal == 'online' && ENV.PLAGIARISM_DETECTION_PLATFORM
+      if subVal == 'online'
+        @handleOnlineSubmissionTypeChange()
+
+    handleOnlineSubmissionTypeChange: (env) =>
+      showConfigTools = @$onlineSubmissionTypes.find(ALLOW_FILE_UPLOADS).attr('checked') ||
+        @$onlineSubmissionTypes.find(ALLOW_TEXT_ENTRY).attr('checked')
+      @$similarityDetectionTools.toggleAccessibly showConfigTools && ENV.PLAGIARISM_DETECTION_PLATFORM
 
     afterRender: =>
-      @_attachDatepickerToDateFields()
+      # have to do these here because they're rendered by other things
+      @$peerReviewsBox = $("#{PEER_REVIEWS_BOX}")
+      @$intraGroupPeerReviews = $("#{INTRA_GROUP_PEER_REVIEWS}")
+      @$groupCategoryBox = $("#{GROUP_CATEGORY_BOX}")
+
+      @similarityDetectionTools = SimilarityDetectionTools.attach(
+            @$similarityDetectionTools.get(0),
+            parseInt(ENV.COURSE_ID),
+            @$secureParams.val(),
+            parseInt(ENV.SELECTED_CONFIG_TOOL_ID),
+            ENV.SELECTED_CONFIG_TOOL_TYPE,
+            ENV.REPORT_VISIBILITY_SETTING)
+
       @_attachEditorToDescription()
-      $ @_initializeWikiSidebar
+      @addTinyMCEKeyboardShortcuts()
+      @handleModeratedGradingChange()
+      @handleOnlineSubmissionTypeChange()
+      @handleSubmissionTypeChange()
+
+      if ENV?.HAS_GRADED_SUBMISSIONS
+        @disableCheckbox(@$moderatedGradingBox, I18n.t("Moderated grading setting cannot be changed if graded submissions exist"))
+      if ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED
+        @conditionalReleaseEditor = ConditionalRelease.attach(
+          @$conditionalReleaseTarget.get(0),
+          I18n.t('assignment'),
+          ENV.CONDITIONAL_RELEASE_ENV)
+
+      @disableFields() if @assignment.inClosedGradingPeriod()
+
       this
 
     toJSON: =>
       data = @assignment.toView()
+
       _.extend data,
         kalturaEnabled: ENV?.KALTURA_ENABLED or false
+        postToSISEnabled: ENV?.POST_TO_SIS or false
+        postToSISName: ENV.SIS_NAME
         isLargeRoster: ENV?.IS_LARGE_ROSTER or false
-        submissionTypesFrozen: _.include(data.frozenAttributes, 'submission_types')
+        conditionalReleaseServiceEnabled: ENV?.CONDITIONAL_RELEASE_SERVICE_ENABLED or false
+        lockedItems: @lockedItems
+        anonymousInstructorAnnotationsEnabled: ENV?.ANONYMOUS_INSTRUCTOR_ANNOTATIONS_ENABLED or false
+
 
     _attachEditorToDescription: =>
-      @$description.editorBox()
+      return if @lockedItems.content
+
+      RichContentEditor.initSidebar()
+      RichContentEditor.loadNewEditor(@$description, { focus: true, manageParent: true })
+
       $('.rte_switch_views_link').click (e) =>
         e.preventDefault()
-        @$description.editorBox 'toggle'
+        RichContentEditor.callOnRCE(@$description, 'toggle')
         # hide the clicked link, and show the other toggle link.
         $(e.currentTarget).siblings('.rte_switch_views_link').andSelf().toggle()
 
-    _attachDatepickerToDateFields: =>
-      if @assignment.isSimple()
-        @$dueAt.datetime_field()
-
-    _initializeWikiSidebar: =>
-      # $("#sidebar_content").hide()
-      unless wikiSidebar.inited
-        wikiSidebar.init()
-        $.scrollSidebar()
-      wikiSidebar.attachToEditor(@$description).show()
+    addTinyMCEKeyboardShortcuts: =>
+      keyboardShortcutsView = new RCEKeyboardShortcuts()
+      keyboardShortcutsView.render().$el.insertBefore($(".rte_switch_views_link:first"))
 
     # -- Data for Submitting --
     getFormData: =>
       data = super
       data = @_inferSubmissionTypes data
       data = @_filterAllowedExtensions data
+      data = @_unsetGroupsIfExternalTool data
       unless ENV?.IS_LARGE_ROSTER
         data = @groupCategorySelector.filterFormData data
       # should update the date fields.. pretty hacky.
-      if @showingAdvancedOptions()
-        @dueDateOverrideView.updateOverrides()
-        defaultDates = @dueDateOverrideView.getDefaultDueDate()
-        data.lock_at = defaultDates?.get('lock_at') or null
-        data.unlock_at = defaultDates?.get('unlock_at') or null
-        data.due_at = defaultDates?.get('due_at') or null
-        data.assignment_overrides = @dueDateOverrideView.getOverrides()
-      else
-        unfudged = $.unfudgeDateForProfileTimezone(data.due_at)
-        data.due_at = $.dateToISO8601UTC(unfudged) if unfudged?
+      unless data.post_to_sis
+        data.post_to_sis = false
+      defaultDates = @dueDateOverrideView.getDefaultDueDate()
+      data.lock_at = defaultDates?.get('lock_at') or null
+      data.unlock_at = defaultDates?.get('unlock_at') or null
+      data.due_at = defaultDates?.get('due_at') or null
+      data.only_visible_to_overrides = !@dueDateOverrideView.overridesContainDefault()
+      data.assignment_overrides = @dueDateOverrideView.getOverrides()
+      data.published = true if @shouldPublish
+      data.points_possible = round(numberHelper.parse(data.points_possible), 2)
+      data.peer_review_count = numberHelper.parse(data.peer_review_count) if data.peer_review_count
       return data
+
+    saveFormData: =>
+      if ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED
+        super.pipe (data, status, xhr) =>
+          @conditionalReleaseEditor.updateAssignment(data)
+          # Restore expected promise values
+          @conditionalReleaseEditor.save().pipe(
+            => new $.Deferred().resolve(data, status, xhr).promise()
+            (err) => new $.Deferred().reject(xhr, err).promise())
+      else
+        super
 
     submit: (event) =>
       event.preventDefault()
       event.stopPropagation()
-      @dueDateOverrideView.updateOverrides()
+
+      @cacheAssignmentSettings()
+
       if @dueDateOverrideView.containsSectionsWithoutOverrides()
         sections = @dueDateOverrideView.sectionsWithoutOverrides()
         missingDateDialog = new MissingDateDialog
           validationFn: -> sections
           labelFn: (section) -> section.get 'name'
-          success: =>
-            @model.setNullDates()
+          success: (dateDialog) =>
+            dateDialog.dialog('close').remove()
             ValidatedFormView::submit.call(this)
         missingDateDialog.cancel = (e) ->
           missingDateDialog.$dialog.dialog('close').remove()
@@ -234,6 +411,22 @@ AssignmentGroupSelector, GroupCategorySelector, toggleAccessibly) ->
         missingDateDialog.render()
       else
         super
+
+    saveAndPublish: (event) ->
+      @shouldPublish = true
+      @disableWhileLoadingOpts = {buttons: ['.save_and_publish']}
+      @submit(event)
+
+    onSaveFail: (xhr) =>
+      response_text = JSON.parse(xhr.responseText)
+      if response_text.errors
+        subscription_errors = response_text.errors.plagiarism_tool_subscription
+        if subscription_errors && subscription_errors.length > 0
+          $.flashError(subscription_errors[0].message)
+
+      @shouldPublish = false
+      @disableWhileLoadingOpts = {}
+      super(xhr)
 
     _inferSubmissionTypes: (assignmentData) =>
       if assignmentData.grading_type == 'not_graded'
@@ -258,10 +451,14 @@ AssignmentGroupSelector, GroupCategorySelector, toggleAccessibly) ->
         data.allowed_extensions = null
       data
 
+    _unsetGroupsIfExternalTool: (data) =>
+      if data.submission_type == 'external_tool'
+        data.group_category_id = null
+      data
+
     # -- Pre-Save Validations --
 
     fieldSelectors: _.extend(
-      { assignmentToggleAdvancedOptions: '#assignment_toggle_advanced_options'},
       AssignmentGroupSelector::fieldSelectors,
       GroupCategorySelector::fieldSelectors
     )
@@ -269,9 +466,12 @@ AssignmentGroupSelector, GroupCategorySelector, toggleAccessibly) ->
     showErrors: (errors) ->
       # override view handles displaying override errors, remove them
       # before calling super
-      # see getFormValues in DueDateView.coffee
       delete errors.assignmentOverrides
       super(errors)
+      @trigger 'show-errors', errors
+      if ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED
+        if errors['conditional_release']
+          @conditionalReleaseEditor.focusOnError()
 
     validateBeforeSave: (data, errors) =>
       errors = @_validateTitle data, errors
@@ -281,62 +481,142 @@ AssignmentGroupSelector, GroupCategorySelector, toggleAccessibly) ->
       unless ENV?.IS_LARGE_ROSTER
         errors = @groupCategorySelector.validateBeforeSave(data, errors)
       errors = @_validatePointsPossible(data, errors)
-      errors = @_validatePercentagePoints(data, errors)
-      errors = @_validateAdvancedOptions(data, errors)
+      errors = @_validatePointsRequired(data, errors)
+      errors = @_validateExternalTool(data, errors)
       data2 =
-        assignment_overrides: @dueDateOverrideView.getAllDates(data)
+        assignment_overrides: @dueDateOverrideView.getAllDates(),
+        postToSIS: data.post_to_sis == '1'
       errors = @dueDateOverrideView.validateBeforeSave(data2,errors)
+      if ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED
+        crErrors = @conditionalReleaseEditor.validateBeforeSave()
+        errors['conditional_release'] = crErrors if crErrors
       errors
 
     _validateTitle: (data, errors) =>
-      frozenTitle = _.contains(@model.frozenAttributes(), "title")
+      return errors if _.contains(@model.frozenAttributes(), "title")
 
-      if !frozenTitle and (!data.name or $.trim(data.name.toString()).length == 0)
+      post_to_sis = data.post_to_sis == '1'
+      max_name_length = 256
+      if post_to_sis && ENV.MAX_NAME_LENGTH_REQUIRED_FOR_ACCOUNT && data.grading_type != 'not_graded'
+        max_name_length = ENV.MAX_NAME_LENGTH
+
+      validationHelper = new SisValidationHelper({
+        postToSIS: post_to_sis
+        maxNameLength: max_name_length
+        name: data.name
+        maxNameLengthRequired: ENV.MAX_NAME_LENGTH_REQUIRED_FOR_ACCOUNT
+      })
+
+      if !data.name or $.trim(data.name.toString()).length == 0
         errors["name"] = [
           message: I18n.t 'name_is_required', 'Name is required!'
         ]
+      else if validationHelper.nameTooLong()
+        errors["name"] = [
+          message: I18n.t("Name is too long, must be under %{length} characters", length: max_name_length + 1)
+        ]
       errors
-
 
     _validateSubmissionTypes: (data, errors) =>
       if data.submission_type == 'online' and data.submission_types.length == 0
         errors["online_submission_types[online_text_entry]"] = [
           message: I18n.t 'at_least_one_submission_type', 'Please choose at least one submission type'
         ]
+      else if data.submission_type == 'online' and data.vericite_enabled == "1"
+        allow_vericite = true
+        _.select _.keys(data.submission_types), (k) ->
+          allow_vericite = allow_vericite && (data.submission_types[k] == "online_upload" || data.submission_types[k] == "online_text_entry")
+        if !allow_vericite
+          errors["online_submission_types[online_text_entry]"] = [
+            message: I18n.t 'vericite_submission_types_validation', 'VeriCite only supports file submissions and text entry'
+          ]
+
       errors
 
     _validateAllowedExtensions: (data, errors) =>
-      if data.allowed_extensions and data.allowed_extensions.length == 0
+      if (data.allowed_extensions and _.contains(data.submission_types, "online_upload")) and data.allowed_extensions.length == 0
         errors["allowed_extensions"] = [
           message: I18n.t 'at_least_one_file_type', 'Please specify at least one allowed file type'
         ]
       errors
 
     _validatePointsPossible: (data, errors) =>
-      frozenPoints = _.contains(@model.frozenAttributes(), "points_possible")
+      return errors if _.contains(@model.frozenAttributes(), "points_possible")
+      return errors if this.lockedItems.points
 
-      if !frozenPoints and data.points_possible and isNaN(parseFloat(data.points_possible))
+      if typeof data.points_possible != 'number' or isNaN(data.points_possible)
         errors["points_possible"] = [
           message: I18n.t 'points_possible_number', 'Points possible must be a number'
         ]
       errors
 
     # Require points possible > 0
-    # if grading type === percent
-    _validatePercentagePoints: (data, errors) =>
-      if data.grading_type == 'percent' and (data.points_possible == "0" or isNaN(parseFloat(data.points_possible)))
+    # if grading type === percent || letter_grade || gpa_scale
+    _validatePointsRequired: (data, errors) =>
+      return errors unless _.include ['percent','letter_grade','gpa_scale'], data.grading_type
+
+      if typeof data.points_possible != 'number' or data.points_possible < 0 or isNaN(data.points_possible)
         errors["points_possible"] = [
-          message: I18n.t 'percentage_points_possible', 'Points possible must be more than 0 for percentage grading'
+          message: I18n.t("Points possible must be 0 or more for selected grading type")
         ]
       errors
 
-    # add an extra error box if errors are hidden
-    _validateAdvancedOptions: (data, errors) =>
-      ariaExpanded = @$advancedAssignmentOptions.attr('aria-expanded')
-      expanded = ariaExpanded == 'true' or ariaExpanded == true
-      error_keys = _.without(_.keys(errors), "name", "points_possible")
-      if error_keys.length > 0 and !expanded
-        errors["assignmentToggleAdvancedOptions"] = [
-          message: I18n.t 'advanced_options_errors', 'There were errors on one or more advanced options'
+    _validateExternalTool: (data, errors) =>
+      if data.submission_type == 'external_tool' && data.grading_type != 'not_graded' && $.trim(data.external_tool_tag_attributes?.url?.toString()).length == 0
+        errors["external_tool_tag_attributes[url]"] = [
+          message: I18n.t 'External Tool URL cannot be left blank'
         ]
       errors
+
+    redirectAfterSave: ->
+      window.location = @locationAfterSave(deparam())
+
+    locationAfterSave: (params) ->
+      return params['return_to'] if params['return_to']?
+      @model.get 'html_url'
+
+    redirectAfterCancel: ->
+      location = @locationAfterCancel(deparam())
+      window.location = location if location
+
+    locationAfterCancel: (params) ->
+      return params['return_to'] if params['return_to']?
+      return ENV.CANCEL_TO if ENV.CANCEL_TO?
+      null
+
+    onChange: ->
+      if ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED && @assignmentUpToDate
+        @assignmentUpToDate = false
+
+    updateConditionalRelease: ->
+      if ENV.CONDITIONAL_RELEASE_SERVICE_ENABLED && !@assignmentUpToDate
+        assignmentData = @getFormData()
+        @conditionalReleaseEditor.updateAssignment(assignmentData)
+        @assignmentUpToDate = true
+
+    disableFields: ->
+      ignoreFields = [
+        "#overrides-wrapper *"
+        "#submission_type_fields *"
+        "#assignment_peer_reviews_fields *"
+        "#assignment_description"
+        "#assignment_notify_of_update"
+        "#assignment_post_to_sis"
+      ]
+      ignoreFilter = ignoreFields.map((field) -> "not(#{field})").join(":")
+
+      self = this
+      @$el.find(":checkbox:#{ignoreFilter}").each ->
+        self.disableCheckbox($(this), I18n.t("Cannot be edited for assignments in closed grading periods"))
+      @$el.find(":radio:#{ignoreFilter}").click(@ignoreClickHandler)
+      @$el.find("select:#{ignoreFilter}").each(@lockSelectValueHandler)
+
+    ignoreClickHandler: (event) ->
+      event.preventDefault()
+      event.stopPropagation()
+
+    lockSelectValueHandler: ->
+      lockedValue = this.value
+      $(this).change (event) ->
+        this.value = lockedValue
+        event.stopPropagation()

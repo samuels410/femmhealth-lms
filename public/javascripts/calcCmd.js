@@ -1,7 +1,24 @@
-define([
-  'i18n!calculator.command',
-  'jquery' /* $ */
-], function(I18n, $) {
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
+ *
+ * This file is part of Canvas.
+ *
+ * Canvas is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License.
+ *
+ * Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+ * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+import I18n from 'i18n!calculator.command'
+
+
 
   var calcCmd = {};
 
@@ -60,7 +77,7 @@ define([
         result = syntax[syntaxIndex];
         break;
       case 'subtract':
-        if(syntax[syntaxIndex + 1] && syntax[syntaxIndex + 1].token == 'number') {
+        if(syntax[syntaxIndex + 1] && (syntax[syntaxIndex + 1].token == 'number' || syntax[syntaxIndex + 1].token == 'variable')) {
           syntax[syntaxIndex + 1].value = "-" + syntax[syntaxIndex + 1].value;
           syntaxIndex++;
           result = syntax[syntaxIndex];
@@ -75,8 +92,8 @@ define([
           result.arguments = []
           var ender = 'comma';
           syntaxIndex = syntaxIndex + 2;
-          if(syntax[syntaxIndex].token == 'close_paren') { 
-            ender = 'close_paren'; 
+          if(syntax[syntaxIndex].token == 'close_paren') {
+            ender = 'close_paren';
             syntaxIndex++;
           }
           while(ender == 'comma') {
@@ -109,7 +126,7 @@ define([
     };
     var parseModifier = function(syntax) {
       switch(syntax[syntaxIndex].token) {
-      case 'add':      
+      case 'add':
         return syntax[syntaxIndex++];
         break;
       case 'subtract':
@@ -129,7 +146,7 @@ define([
       var index = (syntax && syntax[syntaxIndex] && syntax[syntaxIndex].newIndex) || 0;
       throw("unexpected " + value + " at " + index);
     };
-    
+
     var parseExpression = function(syntax, enders) {
       var result = {
         token: 'expression',
@@ -205,7 +222,7 @@ define([
         } else if(item.token == 'divide') {
           var left = round2.pop();
           var right = round1[idx + 1];
-          round2.push(numberItem(compute(left) / compute(right)));
+            round2.push(numberItem(compute(left) / compute(right)));
         } else {
           round2.push(round1[idx]);
           round2.push(round1[idx + 1]);
@@ -264,8 +281,15 @@ define([
         if(tree.value == '_') {
           return lastComputedResult || 0;
         }
-        var value = predefinedVariables && predefinedVariables[tree.value];
-        value = value || (variables && variables[tree.value]);
+        if(tree.value.indexOf("-") == 0) { // the variable is negative, e.g. '-x'
+          var absolute = tree.value.replace(/^\-/, "")
+          var value = predefinedVariables && predefinedVariables[absolute];
+          value = value || (variables && variables[absolute]);
+          value = -value;
+        } else {
+          var value = predefinedVariables && predefinedVariables[tree.value];
+          value = value || (variables && variables[tree.value]);
+        }
         if (value == undefined) {
           throw("undefined variable " + tree.value);
         }
@@ -296,7 +320,7 @@ define([
       var result = {};
       command = command.toString();
       result.command = command;
-      tree = cached_trees[command];
+      var tree = cached_trees[command];
       if(tree) {
         result.syntax = tree.syntax;
         result.tree = tree.tree;
@@ -369,10 +393,10 @@ define([
   (function() {
     var p = function(name, value, description) { calcCmd.addPredefinedVariable(name, value, description); }
     var f = function(name, func, description, example) { calcCmd.addFunction(name, func, description, example); }
-    
+
     p('pi', Math.PI );
     p('e', Math.exp(1));
-    
+
     f('abs', function(val) { return Math.abs(val) }, I18n.t('abs.description', "Returns the absolute value of the given value"), "abs(x)");
     f('asin', function(x) { return Math.asin(x); }, I18n.t('asin.description', "Returns the arcsin of the given value"), "asin(x)");
     f('acos', function(x) { return Math.acos(x); }, I18n.t('acos.description', "Returns the arccos of the given value"), "acos(x)");
@@ -384,6 +408,11 @@ define([
     f('sin', function(x) { return Math.sin(x); }, I18n.t('sin.description', "Returns the sine of the given value"), "sin(radians)");
     f('cos', function(x) { return Math.cos(x); }, I18n.t('cos.description', "Returns the cosine of the given value"), "cos(radians)" );
     f('tan', function(x) { return Math.tan(x); }, I18n.t('tan.description', "Returns the tangent of the given value"), "tan(radians)");
+
+    f('sec', function(x) { return 1 / Math.cos(x); }, I18n.t('sec.description', "Returns the secant of the given value"), "sec(radians)");
+    f('cosec', function(x) { return 1 / Math.sin(x); }, I18n.t('cosec.description', "Returns the cosecant of the given value"), "cosec(radians)" );
+    f('cotan', function(x) { return 1 / Math.tan(x); }, I18n.t('cotan.description', "Returns the cotangent of the given value"), "cotan(radians)");
+
     f('pi', function(x) { return Math.PI; }, I18n.t('pi.description', "Returns the computed value of pi"), "pi()");
     f('if', function(bool, pass, fail) { return bool ? pass : fail; }, I18n.t('if.description', "Evaluates the first argument, returns the second argument if it evaluates to a non-zero value, otherwise returns the third value"), "if(bool,success,fail)");
     var make_list = function(args) {
@@ -393,7 +422,7 @@ define([
         return args;
       }
     }
-    f('max', function() { 
+    f('max', function() {
       var args = make_list(arguments)
       var max = args[0];
       for(var idx = 0; idx < args.length; idx++) { //in arguments) {
@@ -410,15 +439,15 @@ define([
       return min;
     }, I18n.t('min.description', "Returns the lowest value in the list"), ["min(a,b,c...)", "min(list)"]);
     f('sqrt', function(x) { return Math.sqrt(x); }, I18n.t('sqrt.description', "Returns the square root of the given value"), "sqrt(x)");
-    f('sort', function(x) { 
+    f('sort', function(x) {
       var args = make_list(arguments);
       var list = [];
       for(var idx = 0; idx < args.length; idx++) {
         list.push(args[idx]);
       }
-      return list.sort();
+      return list.sort(function(a, b) {return a - b;});
     }, I18n.t('sort.description', "Returns the list of values, sorted from lowest to highest"), ["sort(a,b,c...)", "sort(list)"]);
-    f('reverse', function(x) { 
+    f('reverse', function(x) {
       var args = make_list(arguments);
       var list = [];
       for(var idx = 0; idx < args.length; idx++) {
@@ -427,9 +456,9 @@ define([
       return list;
     }, I18n.t('reverse.description', "Reverses the order of the list of values"), ["reverse(a,b,c...)", "reverse(list)"]);
     f('first', function() { return make_list(arguments)[0]; }, I18n.t('first.description', "Returns the first value in the list"), ["first(a,b,c...)", "first(list)"]);
-    f('last', function() { 
+    f('last', function() {
       var args = make_list(arguments);
-      return args[args.length - 1]; 
+      return args[args.length - 1];
     }, I18n.t('last.description', "Returns the last value in the list"), ["last(a,b,c...)", "last(list)"]);
     f('at', function(list, x) { return list[x]; }, I18n.t('at.description', "Returns the indexed value in the given list"), "at(list,index)" );
     f('rand', function(x) { return (Math.random() * (x || 1)); }, I18n.t('rand.description', "Returns a random number between zero and the range specified, or one if no number is given"), "rand(x)");
@@ -443,7 +472,7 @@ define([
       }
       return total;
     }
-    f('mean', function() { 
+    f('mean', function() {
       var args = make_list(arguments);
       return sum(args) / args.length;
     }, I18n.t('mean.description', "Returns the average mean of the values in the list"), ["mean(a,b,c...)", "mean(list)"]);
@@ -453,14 +482,16 @@ define([
       for(var idx = 0; idx < args.length; idx++) {
         list.push(args[idx]);
       }
-      var list = list.sort();
+      var list = list.sort(function(a, b) {
+        return parseFloat(a) - parseFloat(b);
+      });
       if(list.length % 2 == 1) {
         return list[Math.floor(list.length / 2)];
       } else {
         return ((list[Math.round(list.length / 2)] + list[Math.round(list.length / 2) - 1]) / 2);
       }
     }, I18n.t('median.description', "Returns the median for the list of values"), ["median(a,b,c...)", "median(list)"]);
-    f('range', function() { 
+    f('range', function() {
       var args = make_list(arguments);
       var list = [];
       for(var idx = 0; idx < args.length; idx++) {
@@ -493,5 +524,4 @@ define([
     f('e', function(x) { return Math.exp(x || 1); }, I18n.t('e.description', "Returns the value for e"), "e()");
   })();
 
-  return calcCmd;
-});
+export default calcCmd;

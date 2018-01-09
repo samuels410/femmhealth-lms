@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -23,12 +23,26 @@ describe "/groups/index" do
   it "should render" do
     course_with_student
     view_context
-    assigns[:categories] = []
-    assigns[:students] = [@user]
-    assigns[:memberships] = []
-    assigns[:groups] = []
+    assign(:categories, [])
+    assign(:students, [@user])
+    assign(:memberships, [])
+    assign(:current_groups, [])
+    assign(:previous_groups, [])
     render "groups/index"
-    response.should_not be_nil
+    expect(response).not_to be_nil
+  end
+
+  it "should show context name under group name" do
+    course_with_student
+    group_with_user(:user => @user, :group_context => @course)
+    view_context
+    assign(:categories, [])
+    assign(:students, [@user])
+    assign(:memberships, [])
+    assign(:current_groups, [@group])
+    assign(:previous_groups, [])
+    render "groups/index"
+    doc = Nokogiri::HTML.parse(response.body)
+    expect(doc.at_css('#my_groups_table td:nth-child(2) span.group-course-name').text).to eq @course.name
   end
 end
-

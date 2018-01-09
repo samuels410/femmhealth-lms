@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,9 +18,7 @@
 
 class AppointmentGroupSubContext < ActiveRecord::Base
   belongs_to :appointment_group
-  belongs_to :sub_context, :polymorphic => true
-
-  attr_accessible :appointment_group, :sub_context, :sub_context_code
+  belongs_to :sub_context, polymorphic: [:group_category, :course_section]
 
   validates_each :sub_context do |record, attr, value|
     if record.participant_type == 'User'

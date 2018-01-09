@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,19 +12,18 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-  'i18n!alerts',
-  'jquery', // $
-  'jquery.ajaxJSON', // ajaxJSON
-  'jquery.instructure_forms', // validateForm, formErrors, errorBox
-  'jquery.instructure_misc_helpers', // replaceTags
-  'vendor/jquery.ba-tinypubsub', // /\.publish/
-  'jqueryui/button' // /\.button/
-], function(I18n, $) {
+import I18n from 'i18n!alerts'
+import $ from 'jquery'
+import htmlEscape from './str/htmlEscape'
+import './jquery.ajaxJSON'
+import './jquery.instructure_forms' // validateForm, formErrors, errorBox
+import './jquery.instructure_misc_helpers' // replaceTags
+import 'vendor/jquery.ba-tinypubsub' // /\.publish/
+import 'jqueryui/button'
 
   $(function () {
     var $list = $('.alerts_list');
@@ -57,9 +56,13 @@ define([
     }
 
     var createElement = function(key, element, value, lookup) {
+      // xsslint safeString.identifier element
       var $element = $("<" + element + " />");
       $element.data('value', key);
-      $element.html(lookup[key][value]);
+      var contentHtml = htmlEscape(lookup[key][value]).toString();
+      // see placeholder in _alerts.html.erb
+      contentHtml = contentHtml.replace("%{count}", "<span class='displaying' /><input type='text' name='alert[criteria][][threshold]' class='editing' size='2' />");
+      $element.html(contentHtml);
       if(element == 'li') {
         $element.append(' ');
         $element.append($list.find('>.delete_item_link').clone().toggle());
@@ -69,8 +72,9 @@ define([
       return $element;
     }
 
+    // xsslint jqueryObject.function createRecipient createCriterion
     var createRecipient = function(recipient, element) {
-      $element = createElement(recipient, element, 'label', ENV.ALERTS.POSSIBLE_RECIPIENTS);
+      var $element = createElement(recipient, element, 'label', ENV.ALERTS.POSSIBLE_RECIPIENTS);
       if(element == 'li') {
         $element.prepend($("<input type='hidden' name='alert[recipients][]' />").attr('value', recipient));
       }
@@ -84,7 +88,7 @@ define([
         threshold = criterion.threshold;
         id = criterion.id;
       }
-      $element = createElement(criterion_type, element, element == 'li' ? 'label' : 'option', ENV.ALERTS.POSSIBLE_CRITERIA)
+      var $element = createElement(criterion_type, element, element == 'li' ? 'label' : 'option', ENV.ALERTS.POSSIBLE_CRITERIA)
       if (element == 'li') {
         if (!threshold) {
           threshold = ENV.ALERTS.POSSIBLE_CRITERIA[criterion_type].default_threshold;
@@ -108,7 +112,9 @@ define([
       var $recipients = $alert.find('.recipients');
       $recipients.empty();
       for(var idx in data.recipients) {
-        $recipients.append(createRecipient(data.recipients[idx], 'li'));
+        if (ENV.ALERTS.POSSIBLE_RECIPIENTS[data.recipients[idx]]) {
+          $recipients.append(createRecipient(data.recipients[idx], 'li'));
+        }
       }
       if(data.repetition) {
         $alert.find('input[name="repetition"][value="value"]').attr('checked', true);
@@ -345,7 +351,8 @@ define([
           $error_box.remove();
         });
       }
+    }).delegate('label.repetition', 'click', function(event){
+      event.preventDefault();
+      $(this).parents('.alert').find('input[name="repetition"]').prop('checked', true);
     });
   });
-});
-

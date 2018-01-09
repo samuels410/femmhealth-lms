@@ -1,13 +1,42 @@
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
 <% root_account = @context.root_account %>
 <% account = @context.respond_to?(:account) ? @context.account : @context %>
+<% css_bundle("user_list_boxes") %>
 <div id="user_list_boxes">
   <a id="user_lists_path" style="display:none;" href="<%= polymorphic_path([@context, :user_lists], :format => :json) %>"></a>
   <div id="user_list_textarea_container" style="z-index: 2;">
     <input type="hidden" name="enrollment_type" value="StudentEnrollment" />
     <label for="user_list">
-    <%= root_account.login_handle_name_is_customized? ? t(:copy_and_paste_notice_with_login_handle, "Copy and paste a list of users. You can use their email address or %{login_handle_name}.", :login_handle_name => root_account.login_handle_name) : t(:copy_and_paste_notice_just_email, "Copy and paste a list of email addresses to add users.") %>
+      <% if root_account.login_handle_name_is_customized? %>
+        <%= t(:copy_and_paste_notice_with_login_handle,
+              "Copy and paste a list of users. "\
+              "You can use their email address or %{login_handle_name}.",
+              login_handle_name: root_account.login_handle_name_with_inference) %>
+      <% else %>
+        <%= t(:copy_and_paste_notice_just_email,
+              "Copy and paste a list of email addresses to add users.") %>
+      <% end %>
       <textarea name="user_list" class="user_list" id="user_list"></textarea>
-      <%= t :user_list_explanation, 'Sample format: "Example Student" <student@example.com>, "Lastname, Firstname" <firstlast@example.com>, justAnEmailAddress@example.com' %>
+      <%= t :user_list_explanation,
+            'Sample format: "Example Student" <student@example.com>, '\
+            '"Lastname, Firstname" <firstlast@example.com>, justAnEmailAddress@example.com' %>
     </label>
   </div>
   <div id="user_list_parsed" style="z-index: 1; display:none;">
@@ -44,4 +73,3 @@
     </div>
   </div>
 </div>
-

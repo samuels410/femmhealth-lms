@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,20 +20,21 @@ class AssignmentOverride < ActiveRecord::Base
   include Workflow
   include TextHelper
 
+  NOOP_MASTERY_PATHS = 1
+
+  SET_TYPE_NOOP = 'Noop'.freeze
+
   simply_versioned :keep => 10
 
-  attr_accessible
-
-  attr_accessor :dont_touch_assignment
+  attr_accessor :dont_touch_assignment, :preloaded_student_ids, :changed_student_ids
 
   belongs_to :assignment
   belongs_to :quiz, class_name: 'Quizzes::Quiz'
-  belongs_to :set, :polymorphic => true
-  has_many :assignment_override_students, :dependent => :destroy
-
+  belongs_to :set, polymorphic: [:group, :course_section], exhaustive: false
+  has_many :assignment_override_students, :dependent => :destroy, :validate => false
   validates_presence_of :assignment_version, :if => :assignment
   validates_presence_of :title, :workflow_state
-  validates_inclusion_of :set_type, :in => %w(CourseSection Group ADHOC)
+  validates :set_type, inclusion: ['CourseSection', 'Group', 'ADHOC', SET_TYPE_NOOP]
   validates_length_of :title, :maximum => maximum_string_length, :allow_nil => true
 
   concrete_set = lambda{ |override| ['CourseSection', 'Group'].include?(override.set_type) }
@@ -43,13 +44,15 @@ class AssignmentOverride < ActiveRecord::Base
     :if => lambda{ |override| override.assignment? && override.active? && concrete_set.call(override) }
   validates_uniqueness_of :set_id, :scope => [:quiz_id, :set_type, :workflow_state],
     :if => lambda{ |override| override.quiz? && override.active? && concrete_set.call(override) }
+
   validate :if => concrete_set do |record|
     if record.set && record.assignment && record.active?
       case record.set
       when CourseSection
         record.errors.add :set, "not from assignment's course" unless record.set.course_id == record.assignment.context_id
       when Group
-        record.errors.add :set, "not from assignment's group category" unless record.set.group_category_id == record.assignment.group_category_id
+        valid_group_category_id = record.assignment.group_category_id || record.assignment.discussion_topic.try(:group_category_id)
+        record.errors.add :set, "not from assignment's group category" unless record.set.group_category_id == valid_group_category_id
       end
     end
   end
@@ -66,16 +69,76 @@ class AssignmentOverride < ActiveRecord::Base
     end
   end
 
-  after_save :update_cached_due_dates
+  validate do |record|
+    record.assignment_override_students.each do |s|
+      next if s.valid?
+      s.errors.each do |_, error|
+        record.errors.add(:assignment_override_students, error.type,
+          message: error.message)
+      end
+    end
+  end
+
   after_save :touch_assignment, :if => :assignment
+  after_save :update_grading_period_grades
+  after_commit :update_cached_due_dates
+
+  def set_not_empty?
+    overridable = assignment? ? assignment : quiz
+    ['CourseSection', 'Group', SET_TYPE_NOOP].include?(self.set_type) ||
+    (set.any? && overridable.context.current_enrollments.where(user_id: set).exists?)
+  end
+
+  def update_grading_period_grades
+    return true unless due_at_overridden && due_at_changed? && !id_changed?
+
+    course = assignment&.context || quiz&.context || quiz&.assignment&.context
+    return true unless course&.grading_periods?
+
+    grading_period_was = GradingPeriod.for_date_in_course(date: due_at_was, course: course)
+    grading_period = GradingPeriod.for_date_in_course(date: due_at, course: course)
+    return true if grading_period_was&.id == grading_period&.id
+
+    students = applies_to_students.map(&:id)
+    return true if students.blank?
+
+    if grading_period_was
+      # recalculate just the old grading period's score
+      course.recompute_student_scores(students, grading_period_id: grading_period_was.id, update_course_score: false)
+    end
+    # recalculate the new grading period's score. If the grading period group is
+    # weighted, then we need to recalculate the overall course score too. (If
+    # grading period is nil, make sure we pass true for `update_course_score`
+    # so we can use a singleton job.)
+    course.recompute_student_scores(
+      students,
+      grading_period_id: grading_period&.id,
+      update_course_score: grading_period.blank? || grading_period.grading_period_group&.weighted?
+    )
+    true
+  end
+  private :update_grading_period_grades
+
+  # This method is meant to be used in an after_commit setting
+  def update_cached_due_dates?
+    return false if assignment.blank?
+
+    set_id_changed = previous_changes.key?(:set_id)
+    set_type_changed_to_non_adhoc = previous_changes.key?(:set_type) && set_type != 'ADHOC'
+    due_at_overridden_changed = previous_changes.key?(:due_at_overridden)
+    due_at_changed = previous_changes.key?(:due_at) && due_at_overridden?
+    workflow_state_changed = previous_changes.key?(:workflow_state)
+
+    due_at_overridden_changed ||
+      set_id_changed ||
+      set_type_changed_to_non_adhoc ||
+      due_at_changed ||
+      workflow_state_changed
+  end
+  private :update_cached_due_dates?
 
   def update_cached_due_dates
-    return unless assignment?
-    if due_at_overridden_changed? ||
-      (due_at_overridden && due_at_changed?) ||
-      (due_at_overridden && workflow_state_changed?)
-      DueDateCacher.recompute(assignment)
-    end
+    DueDateCacher.recompute(assignment) if update_cached_due_dates?
   end
 
   def touch_assignment
@@ -85,6 +148,7 @@ class AssignmentOverride < ActiveRecord::Base
   private :touch_assignment
 
   def assignment?; !!assignment_id; end
+
   def quiz?; !!quiz_id; end
 
   workflow do
@@ -92,16 +156,35 @@ class AssignmentOverride < ActiveRecord::Base
     state :deleted
   end
 
-  alias_method :destroy!, :destroy
+  alias_method :destroy_permanently!, :destroy
   def destroy
     transaction do
-      self.assignment_override_students.destroy_all
+      self.assignment_override_students.reload.destroy_all
       self.workflow_state = 'deleted'
-      self.save!
+      self.default_values
+      self.save!(validate: false)
     end
   end
 
-  scope :active, where(:workflow_state => 'active')
+  scope :active, -> { where(:workflow_state => 'active') }
+
+  scope :visible_students_only, -> (visible_ids) do
+    scope = select("assignment_overrides.*").
+      joins(:assignment_override_students).
+      distinct
+
+    if ActiveRecord::Relation === visible_ids
+      column = visible_ids.klass == User ? :id : visible_ids.select_values.first
+      scope = scope.primary_shard.activate {
+        scope.joins("INNER JOIN #{visible_ids.klass.quoted_table_name} ON assignment_override_students.user_id=#{visible_ids.klass.table_name}.#{column}")
+      }
+      next scope.merge(visible_ids.except(:select))
+    end
+
+    scope.where(
+      assignment_override_students: { user_id: visible_ids },
+    )
+  end
 
   before_validation :default_values
   def default_values
@@ -116,9 +199,13 @@ class AssignmentOverride < ActiveRecord::Base
       self.assignment_version = assignment.version_number if assignment
     end
 
-    self.title = set.name if set_type != 'ADHOC' && set
+    set_title_if_needed
   end
   protected :default_values
+
+  def mastery_paths?
+    set_type == SET_TYPE_NOOP && set_id == NOOP_MASTERY_PATHS
+  end
 
   # override set read accessor and set_id read/write accessors so that reading
   # set/set_id or setting set_id while set_type=ADHOC doesn't try and find the
@@ -127,17 +214,18 @@ class AssignmentOverride < ActiveRecord::Base
     read_attribute(:set_id)
   end
 
-  def set_with_adhoc
+  def set
     if self.set_type == 'ADHOC'
-      assignment_override_students.includes(:user).map(&:user)
+      assignment_override_students.preload(:user).map(&:user)
+    elsif self.set_type == SET_TYPE_NOOP
+      nil
     else
-      set_without_adhoc
+      super
     end
   end
-  alias_method_chain :set, :adhoc
 
   def set_id=(id)
-    if self.set_type == 'ADHOC'
+    if ['ADHOC', SET_TYPE_NOOP].include? self.set_type
       write_attribute(:set_id, id)
     else
       super
@@ -163,12 +251,27 @@ class AssignmentOverride < ActiveRecord::Base
       true
     end
 
-    scope "overriding_#{field}", where("#{field}_overridden" => true)
+    scope "overriding_#{field}", -> { where("#{field}_overridden" => true) }
   end
 
-  override :due_at
-  override :unlock_at
-  override :lock_at
+  def visible_student_overrides(visible_student_ids)
+    assignment_override_students.where(user_id: visible_student_ids).exists?
+  end
+
+  def self.visible_enrollments_for(overrides, user=nil)
+    return Enrollment.none if overrides.empty? || user.nil?
+    override = overrides.first
+    (override.assignment || override.quiz).context.enrollments_visible_to(user)
+  end
+
+  OVERRIDDEN_DATES = %i(due_at unlock_at lock_at).freeze
+  OVERRIDDEN_DATES.each do |field|
+    override field
+  end
+
+  def self.overridden_dates
+    OVERRIDDEN_DATES
+  end
 
   def due_at=(new_due_at)
     new_due_at = CanvasTime.fancy_midnight(new_due_at)
@@ -187,9 +290,16 @@ class AssignmentOverride < ActiveRecord::Base
     write_attribute(:lock_at, CanvasTime.fancy_midnight(new_lock_at))
   end
 
+  def availability_expired?
+    lock_at_overridden &&
+      lock_at.present? &&
+      lock_at <= Time.zone.now
+  end
+
   def as_hash
     { :title => title,
       :due_at => due_at,
+      :id => id,
       :all_day => all_day,
       :set_type => set_type,
       :set_id => set_id,
@@ -209,6 +319,8 @@ class AssignmentOverride < ActiveRecord::Base
       set.participating_students
     when 'Group'
       set.participants
+    else
+      []
     end
   end
 
@@ -226,10 +338,34 @@ class AssignmentOverride < ActiveRecord::Base
     self.assignment.context.available? &&
     self.assignment.published? &&
     self.assignment.created_at < 3.hours.ago &&
-    (!self.prior_version ||
-      self.workflow_state != self.prior_version.workflow_state ||
-      self.due_at_overridden != self.prior_version.due_at_overridden ||
-      self.due_at_overridden && !Assignment.due_dates_equal?(self.due_at, self.prior_version.due_at))
+    (workflow_state_changed? ||
+      due_at_overridden_changed? ||
+      due_at_overridden && !Assignment.due_dates_equal?(due_at, due_at_was))
+  end
+
+  def set_title_if_needed
+    if set_type != 'ADHOC' && set
+      self.title = set.name
+    elsif set_type == 'ADHOC' && set.any?
+      self.title ||= title_from_students(set)
+    else
+      self.title ||= "No Title"
+    end
+  end
+
+  def title_from_students(students)
+    return t("No Students") if students.blank?
+    self.class.title_from_student_count(students.count)
+  end
+
+  def self.title_from_student_count(student_count)
+    t(:student_count, { one: '%{count} student', other: '%{count} students' }, count: student_count)
+  end
+
+  def destroy_if_empty_set
+    return unless set_type == 'ADHOC'
+    self.assignment_override_students.reload if self.id_was.nil? # fixes a problem with rails 4.2 caching an empty association scope
+    self.destroy if set.empty?
   end
 
   has_a_broadcast_policy
@@ -246,34 +382,4 @@ class AssignmentOverride < ActiveRecord::Base
     p.to { applies_to_admins }
     p.whenever { |record| record.notify_change? }
   end
-
-  scope :visible_to, lambda { |admin, course|
-    scopes = []
-
-    # adhoc overrides for visible students
-    scopes << course.enrollments_visible_to(admin).
-        select("assignment_override_students.assignment_override_id AS id").
-        joins("INNER JOIN assignment_override_students ON assignment_override_students.user_id=enrollments.user_id").
-        uniq
-
-    # group overrides for visible groups
-    scopes << course.groups_visible_to(admin).
-        select("assignment_overrides.id").
-        joins("INNER JOIN assignment_overrides ON assignment_overrides.set_type='Group' AND groups.id=assignment_overrides.set_id")
-
-    # section overrides for visible sections
-    scopes << course.sections_visible_to(admin).
-        select("assignment_overrides.id").
-        joins("INNER JOIN assignment_overrides ON assignment_overrides.set_type='CourseSection' AND course_sections.id=assignment_overrides.set_id")
-
-    # section overrides for visible students
-    scopes << course.enrollments_visible_to(admin).
-        select("assignment_overrides.id").
-        joins("INNER JOIN assignment_overrides ON assignment_overrides.set_type='CourseSection' AND enrollments.course_section_id=assignment_overrides.set_id")
-
-    # union the visible override subselects and join against them
-    subselect = scopes.map{ |scope| scope.to_sql }.join(' UNION ')
-    join_clause = "INNER JOIN (#{subselect}) AS visible_overrides ON visible_overrides.id=assignment_overrides.id"
-    joins(join_clause).readonly(false)
-  }
 end

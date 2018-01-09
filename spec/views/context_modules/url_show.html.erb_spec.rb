@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,36 +21,17 @@ require File.expand_path(File.dirname(__FILE__) + '/../views_helper')
 
 describe "/context_modules/url_show" do
   it "should render" do
-    course
+    course_factory
     view_context(@course, @user)
     @module = @course.context_modules.create!(:name => 'teh module')
     @tag = @module.add_item(:type => 'external_url',
                             :url => 'http://example.com/lolcats',
                             :title => 'pls view')
-    assigns[:module] = @module
-    assigns[:tag] = @tag
+    assign(:module, @module)
+    assign(:tag, @tag)
     render 'context_modules/url_show'
     doc = Nokogiri::HTML.parse(response.body)
-    doc.at_css('iframe')['src'].should == 'http://example.com/lolcats'
-    doc.css('a').collect{ |a| [a['href'], a.inner_text] }.should be_include ['http://example.com/lolcats', 'pls view']
-  end
-
-  it "should check whether the content is locked" do
-    course
-    view_context(@course, @user)
-    @module = @course.context_modules.create!(:name => 'locked module',
-                                              :unlock_at => 1.week.from_now)
-    @tag = @module.add_item(:type => 'external_url',
-                            :url => 'http://example.com/lolcats',
-                            :title => 'pls view')
-    assigns[:module] = @module
-    assigns[:tag] = @tag
-    render 'context_modules/url_show'
-    doc = Nokogiri::HTML.parse(response.body)
-    doc.at_css('h2').inner_text.should == 'pls view'
-    doc.at_css('b').inner_text.should == 'locked module'
-    doc.at_css('#module_prerequisites_lookup_link')['href'].should ==
-        "/courses/#{@course.id}/modules/#{@module.id}/prerequisites/content_tag_#{@tag.id}"
-    doc.css('iframe').should be_empty
+    expect(doc.at_css('iframe')['src']).to eq 'http://example.com/lolcats'
+    expect(doc.css('a').collect{ |a| [a['href'], a.inner_text] }).to be_include ['http://example.com/lolcats', 'pls view']
   end
 end

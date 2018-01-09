@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -26,9 +26,26 @@ module Api::V1::AccountAuthorizationConfig
   end
 
   def aac_json(aac)
-    AccountAuthorizationConfig.recognized_params(aac.auth_type).inject(api_json(aac, nil, nil, :only => [:id, :position])) do |h, key|
-      h[key] = aac.send(key) unless key == :auth_password
-      h
+    result = api_json(aac, nil, nil, :only => [:auth_type, :id, :position])
+    allowed_params = aac.class.recognized_params
+    sensitive_params = aac.class.const_get(:SENSITIVE_PARAMS)
+    (allowed_params - sensitive_params).each do |param|
+      result[param] = aac.public_send(param)
     end
+
+    if aac.class.recognized_federated_attributes != []
+      result['federated_attributes'] = aac.federated_attributes_for_api
+    end
+
+    # These settings were moved to the account settings level,
+    # but we can't just change the API with no warning, so this keeps
+    # them coming through in the JSON until we get appropriate notifications
+    # sent and have given reasonable time to update any integrations.
+    #  --2015-05-08
+    aac.class.deprecated_params.each do |setting|
+      result[setting] = aac.account.public_send(setting)
+    end
+
+    result
   end
 end

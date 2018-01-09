@@ -1,28 +1,41 @@
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
 <%= fields_for :settings, OpenObject.new(settings) do |f| %>
   <table style="width: 500px;" class="formtable">
     <tr>
-      <td colspan="2"><%= mt(:description, <<-TEXT, :linkedin_url => 'https://www.linkedin.com/secure/developer', :oauth_url => raw('<span class="nobr">https://&lt; ' + t(:domain_name, 'domain') + ' &gt;/oauth_success?service=linked_in</span>'))
-You will need to register a [new app on LinkedIn](%{linkedin_url}).
-Set the following configuration options to ensure your LinkedIn integration
-works correctly:
-
-* **Application Type:** set to "Web Application"
-* **Live Status:** set to "Live"
-* **OAuth Redirect URL:** set to %{oauth_url}
-* After you save your app, make a note of the API Key and Secret Key
+      <td colspan="2"><%= mt(<<-TEXT, :linkedin_url => 'https://www.linkedin.com/secure/developer', :callback_url => raw('<span class="nobr">https://&lt; ' + t(:domain_name, 'domain') + ' &gt;/oauth_success?service=linked_in</span>'))
+You will need to [register an application on LinkedIn](%{linkedin_url}).
+You should add %{callback_url} as an OAuth 2.0 authorized redirect URL, and set the Application Status to Live
+After you create your application, make a note of the Client ID and Client Secret, and enter them here.
 TEXT
       %></td>
     </tr>
     <tr>
-      <td><%= f.blabel :api_key, :en => "API Key" %></td>
+      <td><%= f.blabel :client_id, :en => "Client ID" %></td>
       <td>
-        <%= f.text_field :api_key %>
+        <%= f.text_field :client_id %>
       </td>
     </tr>
     <tr>
-      <td><%= f.blabel :secret_key, :en => "Secret Key" %></td>
+      <td><%= f.blabel :client_secret, :en => "Client Secret" %></td>
       <td>
-        <%= f.text_field :secret_key %>
+        <%= f.password_field :client_secret %>
       </td>
     </tr>
   </table>

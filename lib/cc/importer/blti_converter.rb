@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -15,11 +15,14 @@
 # You should have received a copy of the GNU Affero General Public License along
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
+
+require 'nokogiri'
+
 module CC::Importer
   class BLTIConverter
     class CCImportError < Exception; end
     include CC::Importer
-    
+
     def get_blti_resources(manifest)
       blti_resources = []
 
@@ -42,30 +45,32 @@ module CC::Importer
       tools = []
 
       blti_resources.each do |res|
-        path = res[:href] || res[:files].first[:href]
+        path = res[:href] || (res[:files] && res[:files].first && res[:files].first[:href])
         path = converter.get_full_path(path)
 
-        if File.exists?(path)
+        if File.exist?(path)
           doc = open_file_xml(path)
           tool = convert_blti_link(doc)
           tool[:migration_id] = res[:migration_id]
           res[:url] = tool[:url] # for the organization item to reference
-          
+
           tools << tool
         end
       end
 
       tools
     end
-    
+
     def convert_blti_link(doc)
       blti = get_blti_namespace(doc)
+      blti = nil unless doc.namespaces["xmlns:#{blti}"]
       link_css_path = "cartridge_basiclti_link"
       tool = {}
       tool[:description] = get_node_val(doc, "#{link_css_path} > #{blti}|description")
       tool[:title] = get_node_val(doc, "#{link_css_path} > #{blti}|title")
       tool[:url] = get_node_val(doc, "#{link_css_path} > #{blti}|secure_launch_url")
       tool[:url] ||= get_node_val(doc, "#{link_css_path} > #{blti}|launch_url")
+      tool[:url] &&= tool[:url].strip
       if custom_node = doc.css("#{link_css_path} > #{blti}|custom").first
         tool[:custom_fields] = get_custom_properties(custom_node)
       end
@@ -76,9 +81,10 @@ module CC::Importer
         ext = {}
         ext[:platform] = extension['platform']
         ext[:custom_fields] = get_custom_properties(extension)
-        
+
         if ext[:platform] == CANVAS_PLATFORM
           tool[:privacy_level] = ext[:custom_fields].delete 'privacy_level'
+          tool[:not_selectable] = ext[:custom_fields].delete 'not_selectable'
           tool[:domain] = ext[:custom_fields].delete 'domain'
           tool[:consumer_key] = ext[:custom_fields].delete 'consumer_key'
           tool[:shared_secret] = ext[:custom_fields].delete 'shared_secret'
@@ -97,9 +103,12 @@ module CC::Importer
       end
       tool
     end
-    
+
     def convert_blti_xml(xml)
-      doc = Nokogiri::XML(xml)
+      doc = create_xml_doc(xml)
+      if !doc.namespaces.to_s.downcase.include? 'imsglobal'
+        raise CCImportError.new(I18n.t("Invalid XML Configuration"))
+      end
       begin
         tool = convert_blti_link(doc)
         check_for_unescaped_url_properties(tool) if tool
@@ -122,34 +131,46 @@ module CC::Importer
     end
 
     def check_for_unescaped_url(url)
-      if (url =~ /(.*[^\=]*\?*\=)[^\&]*\=/)
+      if (url =~ /(.*[^\=]*\?*\=)[^\&;]*\=/)
         raise CCImportError.new(I18n.t(:invalid_url_in_xml, "Invalid url in xml. Ampersands must be escaped."))
+      end
+    end
+
+    def fetch(url, limit = 10)
+      # You should choose better exception.
+      raise ArgumentError, 'HTTP redirect too deep' if limit == 0
+
+      uri = URI.parse(url)
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = uri.scheme == 'https'
+      http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+
+      request = Net::HTTP::Get.new(uri.request_uri)
+      response = http.request(request)
+
+      case response
+        when Net::HTTPRedirection then fetch(response['location'], limit - 1)
+        else
+          response
       end
     end
 
     def retrieve_and_convert_blti_url(url)
       begin
-        uri = URI.parse(url)
-        http = Net::HTTP.new(uri.host, uri.port)
-        http.use_ssl = uri.scheme == 'https'
-        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
-        
-        request = Net::HTTP::Get.new(uri.request_uri)
-        response = http.request(request)
+        response = fetch(url)
         config_xml = response.body
-
         convert_blti_xml(config_xml)
       rescue Timeout::Error
         raise CCImportError.new(I18n.t(:retrieve_timeout, "could not retrieve configuration, the server response timed out"))
       end
     end
-    
+
     def get_custom_properties(node)
       props = {}
       node.children.each do |property|
         next if property.name == 'text'
         if property.name == 'property'
-          props[property['name']] = property.text
+          props[property['name']] = property.text.strip
         elsif property.name == 'options'
           props[property['name']] = get_custom_properties(property)
         elsif property.name == 'custom'
@@ -158,7 +179,7 @@ module CC::Importer
       end
       props
     end
-    
+
     def get_blti_namespace(doc)
       doc.namespaces.each_pair do |key, val|
         if val == BLTI_NAMESPACE

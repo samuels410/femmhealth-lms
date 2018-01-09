@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,12 +12,21 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-define([
-  'jquery' /* $ */
-], function($) {
+
+import $ from 'jquery'
+
+  /**
+   * TL;DR: Remove this file when possible.
+   *
+   * Please note that this file is considered very legacy.  All instances of it
+   * should be evaluated and replaced with the newer and far better looking
+   * KyleMenu.  The only other place that I've seen it in used is the file
+   * attendance.js which is on the chopping block at some point in the future.
+   * Once that file has been axed, then this file should be able to be removed.
+   */
 
   // Simple dropdown list.  Takes the list of attributes specified in "options" and displays them
   // in a menu anchored to the selected element.
@@ -88,15 +97,14 @@ define([
         $div.find(".list").css('maxHeight', options.height); 
       }
       $list.empty();
-      $.each(options.options, function(optionName, callback){
+      $.each(options.options, function(optionHtml, callback){
         var $option = $("<div class='option minimal' style='cursor: pointer; padding: 2px 5px; overflow: hidden; white-space: nowrap;'>" +
-                        "  <span tabindex='-1'>" + optionName + "</span>" +
+                        "  <span tabindex='-1'>" + optionHtml + "</span>" +
                         "</div>").appendTo($list);
-
+        function unhoverOtherOptions () {
+          $option.parent().find("div.option").removeClass('ui-state-hover ui-state-active').addClass('minimal');
+        }
         if($.isFunction(callback)) {
-          function unhoverOtherOptions(){
-            $option.parent().find("div.option").removeClass('ui-state-hover ui-state-active').addClass('minimal');
-          }
           $option.addClass('ui-state-default').bind({
             mouseenter: function() {
               unhoverOtherOptions();
@@ -140,4 +148,3 @@ define([
   };
   $.fn.dropdownList.defaults = {height: 250, width: "auto"};
   
-});

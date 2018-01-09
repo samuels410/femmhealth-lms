@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -44,8 +44,8 @@ module Api::V1::ContentMigration
     json[:migration_issues_count] = migration.migration_issues.count
     if attachment_preflight
       json[:pre_attachment] = attachment_preflight
-    elsif migration.attachment && !migration.for_course_copy?
-      json[:attachment] = attachment_json(migration.attachment, current_user, {}, {:can_manage_files => true})
+    elsif migration.attachment && !migration.expired? && !migration.for_course_copy?
+      json[:attachment] = attachment_json(migration.attachment, current_user, {}, {:can_view_hidden_files => true})
     end
 
     if migration.for_course_copy?
@@ -67,6 +67,23 @@ module Api::V1::ContentMigration
         json['migration_type_title'] = plugin.meta[:name].call
       end
     end
+
+    # For easier auditing for support requests
+    if Account.site_admin.grants_right?(current_user, :read)
+      json[:audit_info] = migration.respond_to?(:slice) &&
+                          migration.slice(:id,
+                                          :user_id,
+                                          :migration_settings,
+                                          :started_at,
+                                          :finished_at,
+                                          :created_at,
+                                          :updated_at,
+                                          :progress,
+                                          :context_type,
+                                          :source_course_id,
+                                          :migration_type)
+    end
+
     json
   end
 

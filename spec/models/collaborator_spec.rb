@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,23 +19,26 @@
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 
 describe Collaborator do
-  before do
+  before :once do
+    course_with_teacher(:active_all => true)
     @notification       = Notification.create!(:name => 'Collaboration Invitation')
-    @author             = user_with_pseudonym(:active_all => true)
+    @author             = @teacher
     @collaboration      = Collaboration.new(:title => 'Test collaboration')
+    @collaboration.context = @course
     @collaboration.type = 'EtherpadCollaboration'
     @collaboration.user = @author
   end
 
   context 'broadcast policy' do
-    it 'should notify collaborating users' do
+    it 'should notify collaborating users', priority: "1", test_id: 193152 do
       user = user_with_pseudonym(:active_all => true)
+      @course.enroll_student(user)
       NotificationPolicy.create(:notification => @notification,
                                 :communication_channel => user.communication_channel,
                                 :frequency => 'immediately')
       @collaboration.update_members([user])
-      @collaboration.collaborators.detect { |c| c.user_id == user.id }.
-        messages_sent.keys.should == ['Collaboration Invitation']
+      expect(@collaboration.collaborators.detect { |c| c.user_id == user.id }.
+        messages_sent.keys).to eq ['Collaboration Invitation']
     end
 
     it 'should not notify the author' do
@@ -43,18 +46,18 @@ describe Collaborator do
                                 :communication_channel => @author.communication_channel,
                                 :frequency => 'immediately')
       @collaboration.update_members([@author])
-      @collaboration.reload.collaborators.detect { |c| c.user_id == @author.id }.
-        messages_sent.keys.should be_empty
+      expect(@collaboration.reload.collaborators.detect { |c| c.user_id == @author.id }.
+        messages_sent.keys).to be_empty
 
     end
 
     it 'should notify all members of a group' do
-      group = group_model(:name => 'Test group')
+      group = group_model(:name => 'Test group', :context => @course)
       users = (1..2).map { user_with_pseudonym(:active_all => true) }
       users.each { |u| group.add_user(u, 'active') }
       @collaboration.update_members([], [group.id])
-      @collaboration.collaborators.detect { |c| c.group_id.present? }.
-        messages_sent.keys.should include 'Collaboration Invitation'
+      expect(@collaboration.collaborators.detect { |c| c.group_id.present? }.
+        messages_sent.keys).to include 'Collaboration Invitation'
     end
   end
 end

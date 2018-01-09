@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,14 +16,15 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-def scribd_mime_type_model(opts={})
-  ScribdAPI.stubs(:enabled?).returns(true)
-  @scribd_mime_type = ScribdMimeType.create!(valid_scribd_mime_type_attributes.merge(opts))
-end
+module Factories
+  def scribd_mime_type_model(opts={})
+    @scribd_mime_type = ScribdMimeType.create!(valid_scribd_mime_type_attributes.merge(opts))
+  end
 
-def valid_scribd_mime_type_attributes
-  {
-    :extension => "pdf",
-    :name => "application/pdf"
-  }
+  def valid_scribd_mime_type_attributes
+    {
+      :extension => "pdf",
+      :name => "application/pdf"
+    }
+  end
 end

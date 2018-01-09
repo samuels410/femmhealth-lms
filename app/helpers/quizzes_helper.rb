@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,17 +16,15 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-module QuizzesHelper
-  def needs_unpublished_warning?(quiz=@quiz, user=@current_user)
-    if quiz.feature_enabled?(:draft_state)
-      return false unless can_publish(quiz)
-      show_unpublished_changes = true
-    else
-      return false unless can_read(quiz)
-      show_unpublished_changes = can_publish(quiz)
-    end
+require 'nokogiri'
 
-    !quiz.available? || (show_unpublished_changes && quiz.unpublished_changes?)
+module QuizzesHelper
+  RE_EXTRACT_BLANK_ID = /['"]question_\w+_(.*?)['"]/
+
+  def needs_unpublished_warning?(quiz=@quiz, user=@current_user)
+    return false unless can_publish(quiz)
+
+    !quiz.available? || quiz.unpublished_changes?
   end
 
   def can_read(quiz, user=@current_user)
@@ -38,77 +36,96 @@ module QuizzesHelper
   end
 
   def unpublished_quiz_warning
-    I18n.t("#quizzes.warnings.unpublished_quiz",
+    I18n.t(
       '*This quiz is unpublished* Only teachers can see the quiz until ' +
       'it is published.',
       :wrapper => '<strong class=unpublished_quiz_warning>\1</strong>')
   end
 
-  def unpublished_changes_warning
-    I18n.t("#quizzes.warnings.unpublished_changes",
-      '*You have made unpublished changes to this quiz.* '+
-      'These changes will not appear for students until you publish or ' +
-      'republish the quiz.',
-      :wrapper => '<strong class=unpublished_quiz_warning>\1</strong>')
+  def unsaved_changes_warning
+    I18n.t(
+      '*You have made changes to the questions in this quiz.* '+
+      'These changes will not appear for students until you ' +
+      'save the quiz.',
+      :wrapper => '<strong class=unsaved_quiz_warning>\1</strong>')
+  end
+
+  def quiz_published_state_warning(quiz=@quiz)
+    if !quiz.available?
+      unpublished_quiz_warning
+    else
+      unsaved_changes_warning
+    end
+  end
+
+  def display_save_button?(quiz=@quiz)
+    quiz.available? && can_publish(quiz)
   end
 
   def render_score(score, precision=2)
     if score.nil?
       '_'
     else
-      score.to_f.round(precision).to_s
+      I18n.n(round_if_whole(score.to_f.round(precision)))
     end
   end
 
   def render_quiz_type(quiz_type)
     case quiz_type
     when "practice_quiz"
-      I18n.t('#quizzes.practice_quiz', "Practice Quiz")
+      I18n.t("Practice Quiz")
     when "assignment"
-      I18n.t('#quizzes.graded_quiz', "Graded Quiz")
+      I18n.t("Graded Quiz")
     when "graded_survey"
-      I18n.t('#quizzes.graded_survey', "Graded Survey")
+      I18n.t("Graded Survey")
     when "survey"
-      I18n.t('#quizzes.ungraded_survey', "Ungraded Survey")
+      I18n.t("Ungraded Survey")
     end
   end
 
   def render_score_to_keep(quiz_scoring_policy)
     case quiz_scoring_policy
     when "keep_highest"
-      I18n.t('#quizzes.keep_highest', 'Highest')
+      I18n.t('Highest')
     when "keep_latest"
-      I18n.t('#quizzes.keep_latest', 'Latest')
+      I18n.t('Latest')
+    when "keep_average"
+      I18n.t('Average')
     end
   end
 
   def render_show_correct_answers(quiz)
     if !quiz.show_correct_answers
-      return I18n.t('#options.no', 'No')
+      return I18n.t('No')
     end
 
     show_at = quiz.show_correct_answers_at
     hide_at = quiz.hide_correct_answers_at
 
     if show_at && hide_at
-      I18n.t('#quizzes.show_and_hide_correct_answers', 'From %{from} to %{to}', {
+      I18n.t('From %{from} to %{to}', {
         from: datetime_string(quiz.show_correct_answers_at),
         to: datetime_string(quiz.hide_correct_answers_at)
       })
     elsif show_at
-      I18n.t('#quizzes.show_correct_answers_after', 'After %{date}', {
+      I18n.t('After %{date}', {
         date: datetime_string(quiz.show_correct_answers_at)
       })
     elsif hide_at
-      I18n.t('#quizzes.show_correct_answers_until', 'Until %{date}', {
+      I18n.t('Until %{date}', {
         date: datetime_string(quiz.hide_correct_answers_at)
       })
+    elsif quiz.show_correct_answers_last_attempt
+      I18n.t('After Last Attempt')
     else
-      I18n.t('#quizzes.show_correct_answers_immediately', 'Immediately')
+      I18n.t('Immediately')
     end
   end
 
-  def render_correct_answer_protection(quiz)
+  def render_correct_answer_protection(quiz, submission)
+    if quiz.show_correct_answers_last_attempt && !submission.last_attempt_completed?
+      return I18n.t('Answers will be shown after your last attempt')
+    end
     show_at = quiz.show_correct_answers_at
     hide_at = quiz.hide_correct_answers_at
     now = Time.now
@@ -116,32 +133,30 @@ module QuizzesHelper
     # Some labels will be used in more than one case, so we'll pre-define them.
     labels = {}
     if hide_at
-      labels[:available_until] = I18n.t('#quizzes.correct_answers_shown_until',
+      labels[:available_until] = I18n.t(
         'Correct answers are available until %{date}.', {
         date: datetime_string(quiz.hide_correct_answers_at)
       })
     end
 
     if !quiz.show_correct_answers
-      I18n.t('#quizzes.correct_answers_protected',
-        'Correct answers are hidden.')
+      I18n.t('Correct answers are hidden.')
     elsif hide_at.present? && hide_at < now
-      I18n.t('#quizzes.correct_answers_no_longer_available',
-        'Correct answers are no longer available.')
+      I18n.t('Correct answers are no longer available.')
     elsif show_at.present? && hide_at.present?
       # If the answers are currently visible, there's no need to show the range
       # of availability.
       if now > show_at
         labels[:available_until]
       else
-        I18n.t('#quizzes.correct_answers_shown_between',
+        I18n.t(
           'Correct answers will be available %{from} - %{to}.', {
             from: datetime_string(show_at),
             to: datetime_string(hide_at)
           })
       end
     elsif show_at.present?
-      I18n.t('#quizzes.correct_answers_shown_after',
+      I18n.t(
         'Correct answers will be available on %{date}.', {
           date: datetime_string(show_at)
         })
@@ -154,11 +169,11 @@ module QuizzesHelper
     # "Let Students See Their Quiz Responses?"
     case quiz_hide_results
     when "always"
-      I18n.t('#options.no', "No")
+      I18n.t("No")
     when "until_after_last_attempt"
-      I18n.t('#quizzes.after_last_attempt', "After Last Attempt")
+      I18n.t("After Last Attempt")
     when nil
-      I18n.t('#quizzes.always', "Always")
+      I18n.t("Always")
     end
   end
 
@@ -172,7 +187,7 @@ module QuizzesHelper
   end
 
   def submitted_students_quiz_title(student_count)
-    I18n.t('#quizzes.headers.submitted_students_quiz_title',
+    I18n.t(
       { :zero => "Students who have taken the quiz",
         :one => "Students who have taken the quiz (%{count})",
         :other => "Students who have taken the quiz (%{count})" },
@@ -180,7 +195,7 @@ module QuizzesHelper
   end
 
   def submitted_students_survey_title(student_count)
-    I18n.t('#quizzes.headers.submitted_students_survey_title',
+    I18n.t(
       { :zero => "Students who have taken the survey",
         :one => "Students who have taken the survey (%{count})",
         :other => "Students who have taken the survey (%{count})" },
@@ -189,9 +204,9 @@ module QuizzesHelper
 
   def no_submitted_students_msg(quiz)
     if quiz.survey?
-      t('#quizzes.messages.no_submitted_students_survey', "No Students have taken the survey yet")
+      I18n.t("No Students have taken the survey yet")
     else
-      t('#quizzes.messages.no_submitted_students_quiz', "No Students have taken the quiz yet")
+      I18n.t("No Students have taken the quiz yet")
     end
   end
 
@@ -204,7 +219,7 @@ module QuizzesHelper
   end
 
   def unsubmitted_students_quiz_title(student_count)
-    I18n.t('#quizzes.headers.unsubmitted_students_quiz_title',
+    I18n.t(
       { :zero => "Student who haven't taken the quiz",
         :one => "Students who haven't taken the quiz (%{count})",
         :other => "Students who haven't taken the quiz (%{count})" },
@@ -212,7 +227,7 @@ module QuizzesHelper
   end
 
   def unsubmitted_students_survey_title(student_count)
-    I18n.t('#quizzes.headers.unsubmitted_students_survey_title',
+    I18n.t(
       { :zero => "Student who haven't taken the survey",
         :one => "Students who haven't taken the survey (%{count})",
         :other => "Students who haven't taken the survey (%{count})" },
@@ -221,9 +236,19 @@ module QuizzesHelper
 
   def no_unsubmitted_students_msg(quiz)
     if quiz.survey?
-      t('#quizzes.messages.no_unsubmitted_students_survey', "All Students have taken the survey")
+      I18n.t("All Students have taken the survey")
     else
-      t('#quizzes.messages.no_unsubmitted_students_quiz', "All Students have taken the quiz")
+      I18n.t("All Students have taken the quiz")
+    end
+  end
+
+  def render_result_protection(quiz, submission)
+    if quiz.one_time_results && submission.has_seen_results?
+      I18n.t("Quiz results are protected for this quiz and can be viewed a single time immediately after submission.")
+    elsif quiz.hide_results == 'until_after_last_attempt'
+      I18n.t("Quiz results are protected for this quiz and are not visible to students until they have submitted their last attempt.")
+    else
+      I18n.t("Quiz results are protected for this quiz and are not visible to students.")
     end
   end
 
@@ -356,8 +381,9 @@ module QuizzesHelper
   def question_comment(user_answer, question)
     correct_text   = (hash_get(user_answer, :correct) == true) ? comment_get(question, :correct_comments) : nil
     incorrect_text = (hash_get(user_answer, :correct) == false) ? comment_get(question, :incorrect_comments) : nil
-    neutral_text   = (hash_get(question, :neutral_comments).present?) ? comment_get(question, :neutral_comments) : nil
-
+    neutral_text   = if hash_get(question, :neutral_comments).present? || hash_get(question, :neutral_comments_html).present?
+      comment_get(question, :neutral_comments)
+    end
     text = []
     text << content_tag(:p, correct_text, {:class => 'correct_comments'}) if correct_text.present?
     text << content_tag(:p, incorrect_text, {:class => 'incorrect_comments'}) if incorrect_text.present?
@@ -370,62 +396,90 @@ module QuizzesHelper
   end
 
   def comment_get(hash, field)
-    if html = hash_get(hash, "#{field}_html".to_sym)
-      raw(html)
+    html = hash_get(hash, "#{field}_html".to_sym)
+
+    if html
+      sanitize(html)
     else
       hash_get(hash, field)
     end
   end
 
+  # @param [Array<Hash>] options.answer_list
+  #   A set of question blanks and the student response for each. Example:
+  #   [{ blank_id: "color", "answer": "red" }]
   def fill_in_multiple_blanks_question(options)
     question = hash_get(options, :question)
     answers  = hash_get(options, :answers).dup
-    answer_list = hash_get(options, :answer_list)
+    answer_list = hash_get(options, :answer_list, [])
     res      = user_content hash_get(question, :question_text)
     readonly_markup = hash_get(options, :editable) ? " />" : 'readonly="readonly" />'
-    label_attr = "aria-label='#{I18n.t('#quizzes.labels.multiple_blanks_question', "Fill in the blank, read surrounding text")}'"
-    index  = 0
+    label_attr = "aria-label='#{I18n.t("Fill in the blank, read surrounding text")}'"
 
-    res.gsub! %r{<input.*?name=['"](question_.*?)['"].*?/>} do |match|
-      a = h(answer_list[index])
-      index += 1
+    answer_list.each do |entry|
+      entry[:blank_id] = AssessmentQuestion.variable_id(entry[:blank_id])
+    end
+    # Requires mutliline option to be robust
+    res.gsub!(%r{<input.*?name=\\?['"](question_.*?)\\?['"].*?>}m) do |match|
+      blank = match.match(RE_EXTRACT_BLANK_ID).to_a[1]
+      blank.gsub!(/\\/,'')
+      answer = answer_list.detect { |entry| entry[:blank_id] == blank } || {}
+      answer = h(answer[:answer] || '')
+
       # If given answer list, insert the values into the text inputs for displaying user's answers.
-      if answer_list && !answer_list.empty?
-
-        #  Replace the {{question_BLAH}} template text with the user's answer text.
-        match = match.sub(/\{\{question_.*?\}\}/, a.to_s).
+      if answer_list.any?
+        #  Replace the {{question_IDNUM_VARIABLEID}} template text with the user's answer text.
+        match = match.sub(/\{\{question_.*?\}\}/, answer.to_s).
           # Match on "/>" but only when at the end of the string and insert "readonly" if set to be readonly
-          sub(/\/\>\Z/, readonly_markup)
+          sub(/\/*>\Z/, readonly_markup)
       end
-
       # add labelling to input element regardless
-      match.sub(/\/\>\Z/, "#{label_attr} />")
+      match.sub(/\/*>\Z/, "#{label_attr} />")
     end
 
-    unless answer_list && !answer_list.empty?
+    if answer_list.empty?
       answers.delete_if { |k, v| !k.match /^question_#{hash_get(question, :id)}/ }
       answers.each { |k, v| res.sub! /\{\{#{k}\}\}/, h(v) }
       res.gsub! /\{\{question_[^}]+\}\}/, ""
     end
 
-    res
+    # all of our manipulation lost this flag - reset it
+    res.html_safe
   end
 
   def multiple_dropdowns_question(options)
     question = hash_get(options, :question)
     answers  = hash_get(options, :answers)
     answer_list = hash_get(options, :answer_list)
+    editable = hash_get(options, :editable)
     res      = user_content hash_get(question, :question_text)
     index  = 0
-    res.gsub %r{<select.*?name=['"](question_.*?)['"].*?>.*?</select>} do |match|
+    doc = Nokogiri::HTML.fragment(res)
+    selects = doc.css(".question_input")
+    selects.each do |s|
       if answer_list && !answer_list.empty?
         a = answer_list[index]
         index += 1
       else
-        a = hash_get(answers, $1)
+        question_id = s["name"]
+        a = hash_get(answers, question_id)
       end
-      match.sub(%r{(<option.*?value=['"]#{ERB::Util.h(a)}['"])}, '\\1 selected')
+
+      if editable
+        # If existing answer is one of the options, select it
+        if (opt_tag = s.children.css("option[value='#{a}']").first)
+          opt_tag["selected"] = "selected"
+        end
+      else
+        # If existing answer is one of the options, replace it with a span
+        if (opt_tag = s.children.css("option[value='#{a}']").first)
+          s.replace(<<-HTML)
+            <span>#{opt_tag.content}</span>
+          HTML
+        end
+      end
     end
+    doc.to_s.html_safe
   end
 
   def duration_in_minutes(duration_seconds)
@@ -434,7 +488,7 @@ module QuizzesHelper
     else
       duration_minutes = (duration_seconds / 60).round
     end
-    I18n.t("quizzes.helpers.duration_in_minutes",
+    I18n.t(
       { :zero => "less than 1 minute",
         :one => "1 minute",
         :other => "%{count} minutes" },
@@ -446,12 +500,12 @@ module QuizzesHelper
     score_html = \
       if options[:id] or options[:class] or options[:style] then
         content_tag('span',
-          render_score(score, options[:precision]), 
+          render_score(score, options[:precision]),
           options.slice(:class, :id, :style))
       else
         render_score(score, options[:precision])
       end
-    I18n.t("quizzes.helpers.score_out_of_points_possible", "%{score} out of %{points_possible}",
+    I18n.t("%{score} out of %{points_possible}",
         :score => score_html,
         :points_possible => render_score(points_possible, options[:precision]))
   end
@@ -463,7 +517,11 @@ module QuizzesHelper
     opts['class'] = class_array.compact.join(" ")
     opts['aria-controls'] = 'js-sequential-warning-dialogue' if @quiz.cant_go_back?
     opts['data-method'] = 'post' unless @quiz.cant_go_back?
-    link_to(link_body, take_quiz_url, opts)
+    link_to(link_body, (opts["preview"] == 1)? preview_quiz_url : take_quiz_url, opts)
+  end
+
+  def preview_quiz_url
+    course_quiz_take_path(@context, @quiz, preview: 1)
   end
 
   def take_quiz_url
@@ -479,6 +537,10 @@ module QuizzesHelper
     end
   end
 
+  def link_to_preview_quiz(opts={})
+    link_to_take_quiz(preview_poll_message, opts)
+  end
+
   def link_to_take_poll(opts={})
     link_to_take_quiz(take_poll_message, opts)
   end
@@ -491,22 +553,26 @@ module QuizzesHelper
     link_to_take_quiz(resume_poll_message, opts)
   end
 
+  def preview_poll_message
+    I18n.t("Preview")
+  end
+
   def take_poll_message(quiz=@quiz)
     quiz.survey? ?
-      t('#quizzes.links.take_the_survey', 'Take the Survey') :
-      t('#quizzes.links.take_the_quiz', 'Take the Quiz')
+      I18n.t('Take the Survey') :
+      I18n.t('Take the Quiz')
   end
 
   def retake_poll_message(quiz=@quiz)
     quiz.survey? ?
-      t('#quizzes.links.take_the_survey_again', 'Take the Survey Again') :
-      t('#quizzes.links.take_the_quiz_again', 'Take the Quiz Again')
+      I18n.t('Take the Survey Again') :
+      I18n.t('Take the Quiz Again')
   end
 
   def resume_poll_message(quiz=@quiz)
     quiz.survey? ?
-      t('#quizzes.links.resume_survey', 'Resume Survey') :
-      t('#quizzes.links.resume_quiz', 'Resume Quiz')
+      I18n.t('Resume Survey') :
+      I18n.t('Resume Quiz')
   end
 
   def attachment_id_for(question)
@@ -520,24 +586,29 @@ module QuizzesHelper
   end
 
   def score_to_keep_message(quiz=@quiz)
-    quiz.scoring_policy == "keep_highest" ?
-      t('#quizzes.links.will_keep_highest_score', "Will keep the highest of all your scores") :
-      t('#quizzes.links.will_keep_latest_score', "Will keep the latest of all your scores")
+    case quiz.scoring_policy
+    when "keep_highest"
+      I18n.t("Will keep the highest of all your scores")
+    when "keep_latest"
+      I18n.t("Will keep the latest of all your scores")
+    when "keep_average"
+      I18n.t("Will keep the average of all your scores")
+    end
   end
 
   def quiz_edit_text(quiz=@quiz)
     if quiz.survey?
-      I18n.t('titles.edit_survey', 'Edit Survey')
+      I18n.t('Edit Survey')
     else
-      I18n.t('titles.edit_quiz', 'Edit Quiz')
+      I18n.t('Edit Quiz')
     end
   end
 
   def quiz_delete_text(quiz=@quiz)
     if quiz.survey?
-      I18n.t('titles.delete_survey', 'Delete Survey')
+      I18n.t('Delete Survey')
     else
-      I18n.t('titles.delete_quiz', 'Delete Quiz')
+      I18n.t('Delete Quiz')
     end
   end
 
@@ -549,8 +620,13 @@ module QuizzesHelper
     submission && submission.score_before_regrade != submission.kept_score
   end
 
-  def answer_title(selected_answer, correct_answer, show_correct_answers)
+  def answer_title(answer, selected_answer, correct_answer, show_correct_answers)
     titles = []
+
+    if selected_answer || correct_answer || show_correct_answers
+      titles << ("#{answer}.")
+    end
+
     if selected_answer
       titles << I18n.t(:selected_answer, "You selected this answer.")
     end
@@ -559,31 +635,55 @@ module QuizzesHelper
       titles << I18n.t(:correct_answer, "This was the correct answer.")
     end
 
-    title = "title=\"#{titles.join(' ')}\"" if titles.length > 0
+    titles = titles.map { |title| h(title) }
+    title = "title=\"#{titles.join(' ')}\"".html_safe if titles.length > 0
   end
 
-  def show_correct_answers?(quiz=@quiz, user=@current_user, submission=@submission)
-    @quiz && @quiz.try_rescue(:show_correct_answers?, @current_user, @submission)
-  end
+  def matching_answer_title(item_text, did_select_answer, selected_answer_text, is_correct_answer, correct_answer_text, show_correct_answers)
+    titles = []
 
-  def correct_answers_protected?(quiz=@quiz, user=@current_user, submission=@submission)
-    if !quiz
-      false
-    elsif !show_correct_answers?(quiz, user, submission)
-      true
-    elsif quiz.hide_correct_answers_at.present?
-      !quiz.grants_right?(user, nil, :grade)
+    if did_select_answer || is_correct_answer || show_correct_answers
+      titles << "#{item_text}."
     end
+
+
+    if did_select_answer
+      titles << I18n.t(:user_selected_answer, "You selected")
+    end
+
+    titles << "#{selected_answer_text}."
+
+    if is_correct_answer && show_correct_answers
+      titles << I18n.t(:correct_answer, "This was the correct answer.")
+    end
+
+    if !is_correct_answer && show_correct_answers
+      titles << I18n.t(:user_selected_wrong, "The correct answer was %{correct_answer_text}.", correct_answer_text: correct_answer_text)
+    end
+
+    titles = titles.map { |title| h(title) }
+    title = "title=\"#{titles.join(' ')}\"".html_safe if titles.length > 0
+  end
+
+  def show_correct_answers?
+    if @show_correct_answers.nil?
+      @show_correct_answers = !!(@quiz && @quiz.show_correct_answers?(@current_user, @submission))
+    end
+    @show_correct_answers
   end
 
   def point_value_for_input(user_answer, question)
     return user_answer[:points] unless user_answer[:correct] == 'undefined'
 
     if ["assignment", "practice_quiz"].include?(@quiz.quiz_type)
-      "--"
+      ""
     else
       question[:points_possible] || 0
     end
+  end
+
+  def points_possible_display
+    @quiz.quiz_type == "survey" ? "" : round_if_whole(@quiz.points_possible)
   end
 
 end

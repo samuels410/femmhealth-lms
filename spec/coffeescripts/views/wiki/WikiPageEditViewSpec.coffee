@@ -1,44 +1,192 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
+  'compiled/models/Assignment'
   'compiled/models/WikiPage'
   'compiled/views/wiki/WikiPageEditView'
-  'wikiSidebar'
-], ($, WikiPage, WikiPageEditView, wikiSidebar) ->
+  'jsx/shared/rce/RichContentEditor',
+  'helpers/fixtures'
+  'helpers/editorUtils'
+  'helpers/fakeENV'
+], ($, Assignment, WikiPage, WikiPageEditView, RichContentEditor, fixtures, editorUtils, fakeENV) ->
 
-  module 'WikiPageEditView:Init',
+
+  QUnit.module 'WikiPageEditView:Init',
     setup: ->
-      @initStub = sinon.stub(wikiSidebar, 'init')
-      @scrollSidebarStub = sinon.stub($, 'scrollSidebar')
-      @attachWikiEditorStub = sinon.stub(wikiSidebar, 'attachToEditor')
-      @attachWikiEditorStub.returns(show: sinon.stub())
+      @initSpy = sinon.spy(RichContentEditor, 'initSidebar')
+
     teardown: ->
-      @scrollSidebarStub.restore()
-      @initStub.restore()
-      @attachWikiEditorStub.restore()
+      RichContentEditor.initSidebar.restore()
+      editorUtils.resetRCE()
+      $(window).off('beforeunload')
+      $(".ui-dialog").remove()
 
   test 'init wiki sidebar during render', ->
     wikiPageEditView = new WikiPageEditView
     wikiPageEditView.render()
-    ok @initStub.calledOnce, 'Called wikiSidebar init once'
+    ok @initSpy.calledOnce, 'Called richContentEditor.initSidebar once'
 
-  test 'scroll sidebar during render', ->
-    wikiPageEditView = new WikiPageEditView
-    wikiPageEditView.render()
-    ok @scrollSidebarStub.calledOnce, 'Called scrollSidebar once'
+  test 'renders escaped angle brackets properly', ->
+    body = "<p>&lt;E&gt;</p>"
+    wikiPage = new WikiPage body: body
+    view = new WikiPageEditView model: wikiPage
+    view.render()
+    equal view.$wikiPageBody.val(), body
 
-  test 'wiki body gets attached to the wikisidebar', ->
-    wikiPageEditView = new WikiPageEditView
-    wikiPageEditView.render()
-    ok @attachWikiEditorStub.calledOnce, 'Attached wikisidebar to body'
+  test 'conditional content is hidden when disabled', ->
+    view = new WikiPageEditView
+      WIKI_RIGHTS:
+        manage: true
+    view.render()
 
+    conditionalToggle = view.$el.find('#conditional_content')
+    equal conditionalToggle.length, 0, 'Toggle is hidden'
 
-  module 'WikiPageEditView:UnsavedChanges'
+  QUnit.module 'WikiPageEditView:StudentPlanner',
+    setup: ->
+      fakeENV.setup(student_planner_enabled: true)
+
+    teardown: ->
+      fakeENV.teardown()
+      $(".ui-dialog").remove()
+
+  test 'student planner option hidden for insufficient rights', ->
+    view = new WikiPageEditView
+      WIKI_RIGHTS:
+        read: true
+      PAGE_RIGHTS:
+        read: true
+        update_content: true
+    view.render()
+
+    studentPlannerContainer = view.$el.find('#todo_date_container')
+    equal studentPlannerContainer.length, 0, 'Toggle is hidden'
+
+  test 'student planner option appears', ->
+    view = new WikiPageEditView
+      WIKI_RIGHTS:
+        manage: true
+    view.render()
+
+    studentPlannerToggle = view.$el.find('#student_planner_checkbox')
+    equal studentPlannerToggle.length, 1, 'Toggle is visible'
+    equal studentPlannerToggle.prop('checked'), false, 'Toggle is unchecked'
+
+  test 'student planner date picker appears', ->
+    wikiPage = new WikiPage
+      todo_date: "Jan 3"
+    view = new WikiPageEditView
+      model: wikiPage
+      WIKI_RIGHTS:
+        manage: true
+    view.render()
+
+    studentPlannerToggle = view.$el.find('#student_planner_checkbox')
+    studentPlannerDateInput = view.$el.find('#todo_date_container')
+    equal studentPlannerToggle.prop('checked'), true, 'Toggle is checked'
+    equal studentPlannerDateInput.length, 1, 'Date picker is visible'
+
+  test 'student planner option does stuff', ->
+    wikiPage = new WikiPage
+      todo_date: 'Jan 3'
+    view = new WikiPageEditView
+      model: wikiPage
+      WIKI_RIGHTS:
+        manage: true
+    view.render()
+
+    studentPlannerToggle = view.$el.find('#student_planner_checkbox')
+    studentPlannerDateInput = view.$el.find('#todo_date')
+    equal studentPlannerToggle.prop('checked'), true, 'Toggle is checked'
+    equal studentPlannerDateInput.val(), 'Jan 3 at 12am'
+
+  QUnit.module 'WikiPageEditView:ConditionalContent',
+    setup: ->
+      fakeENV.setup(CONDITIONAL_RELEASE_SERVICE_ENABLED: true)
+
+    teardown: ->
+      fakeENV.teardown()
+      $(".ui-dialog").remove()
+
+  test 'conditional content option hidden for insufficient rights', ->
+    view = new WikiPageEditView
+      WIKI_RIGHTS:
+        read: true
+      PAGE_RIGHTS:
+        read: true
+        update_content: true
+    view.render()
+
+    conditionalToggle = view.$el.find('#conditional_content')
+    equal conditionalToggle.length, 0, 'Toggle is hidden'
+
+  test 'conditional content option appears', ->
+    view = new WikiPageEditView
+      WIKI_RIGHTS:
+        manage: true
+    view.render()
+
+    conditionalToggle = view.$el.find('#conditional_content')
+    equal conditionalToggle.length, 1, 'Toggle is visible'
+    equal conditionalToggle.prop('checked'), false, 'Toggle is unchecked'
+
+  test 'conditional content option appears populated', ->
+    wikiPage = new WikiPage
+      set_assignment: true
+      assignment: new Assignment
+        set_assignment: true
+    view = new WikiPageEditView
+      model: wikiPage
+      WIKI_RIGHTS:
+        manage: true
+    view.render()
+
+    conditionalToggle = view.$el.find('#conditional_content')
+    equal conditionalToggle.prop('checked'), true, 'Toggle is checked'
+
+  test 'conditional content option does stuff', ->
+    wikiPage = new WikiPage
+    view = new WikiPageEditView
+      model: wikiPage
+      WIKI_RIGHTS:
+        manage: true
+    view.render()
+
+    conditionalToggle = view.$el.find('#conditional_content')
+    equal conditionalToggle.prop('checked'), false, 'Toggle is unchecked'
+    conditionalToggle.prop('checked', true)
+    assignment = view.getFormData().assignment
+    equal assignment.get('set_assignment'), '1', 'Sets assignment'
+    equal assignment.get('only_visible_to_overrides'), '1', 'Sets override visibility'
+
+  QUnit.module 'WikiPageEditView:UnsavedChanges',
+    setup: ->
+      fixtures.setup()
+
+    teardown: ->
+      fixtures.teardown()
+      editorUtils.resetRCE()
+      $(window).off('beforeunload')
+      $(".ui-dialog").remove()
+
   setupUnsavedChangesTest = (test, attributes) ->
     setup = ->
-      @stub($, 'scrollSidebar')
-      @stub(wikiSidebar, 'init')
-      @stub(wikiSidebar, 'attachToEditor').returns(show: @stub())
-
       @wikiPage = new WikiPage attributes
       @view = new WikiPageEditView model: @wikiPage
       @view.$el.appendTo('#fixtures')
@@ -47,23 +195,20 @@ define [
       @titleInput = @view.$el.find('[name=title]')
       @bodyInput = @view.$el.find('[name=body]')
 
-      # stub the 'is_dirty' command of the editorBox
+      # stub the 'is_dirty' RCE command. NOTE: this stubs only the editorBox
+      # version with the feature flag off. force these specs to start failing
+      # when run with the feature flag on, at which point this will need to be
+      # updated to stub remoteEditor instead
+      ok !@bodyInput.data('remoteEditor')
+      ok @bodyInput.data('rich_text')
       model = @wikiPage
       bodyInput = @bodyInput
       editorBox = bodyInput.editorBox
-      @stub $.fn, 'editorBox', (options) ->
+      @stub($.fn, 'editorBox').callsFake (options) ->
         if options == 'is_dirty'
           return bodyInput.val() != model.get('body')
         else
           editorBox.apply(this, arguments)
-
-      # extend the teardown function
-      teardown = @teardown
-      @teardown = ->
-        teardown.apply(this, arguments)
-
-        @view.remove()
-        $(window).off('beforeunload')
 
     setup.call(test, attributes)
 
@@ -120,7 +265,7 @@ define [
     ok @view.onUnload({}) isnt undefined, "Returns warning if changed"
 
 
-  module 'WikiPageEditView:Validate'
+  QUnit.module 'WikiPageEditView:Validate'
 
   test 'validation of the title is only performed if the title is present', ->
     view = new WikiPageEditView
@@ -135,8 +280,7 @@ define [
     ok errors['title'], 'error when title is present, but blank'
     ok errors['title'][0].message, 'error message when title is present, but blank'
 
-
-  module 'WikiPageEditView:JSON'
+  QUnit.module 'WikiPageEditView:JSON'
 
   testRights = (subject, options) ->
     test "#{subject}", ->
@@ -214,6 +358,7 @@ define [
       url: 'test'
     WIKI_RIGHTS:
       manage: true
+      publish_page: true
     PAGE_RIGHTS:
       read: true
       update: true

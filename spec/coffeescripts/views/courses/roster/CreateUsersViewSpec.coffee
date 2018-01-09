@@ -1,15 +1,33 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
   'compiled/views/courses/roster/CreateUsersView'
   'compiled/collections/RolesCollection'
   'compiled/models/Role'
   'compiled/models/CreateUserList'
   'helpers/assertions'
-], (CreateUsersView, RolesCollection, Role, CreateUserList, assert) ->
+], ($, CreateUsersView, RolesCollection, Role, CreateUserList, assert) ->
 
   view = null
   server = null
 
-  module 'CreateUsersView',
+  QUnit.module 'CreateUsersView',
     setup: ->
       server = sinon.fakeServer.create()
       server.respondWith("POST", "/read",
@@ -114,4 +132,14 @@ define [
     view.close()
     view.open()
     assertTextareaValue ''
+
+  # This test should work, it passes locally, but it doesn't work on
+  # Jenkins.  Commenting it out for now, and using Selenium for now.
+  #
+  # test 'sets focus to the Done button on step 3', ->
+  #   addUserText()
+  #   goToStep2()
+  #   goToStep3()
+  #   assertStepVisible 3
+  #   ok document.activeElement == $('button.dialog_closer')[0], 'Done button has focus'
 

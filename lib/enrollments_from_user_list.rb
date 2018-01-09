@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -22,43 +22,70 @@ class EnrollmentsFromUserList
       EnrollmentsFromUserList.new(course, opts).process(list)
     end
   end
-  
+
   attr_reader :students, :course
-  
+
   def initialize(course, opts={})
     @course = course
     @enrollment_type = opts[:enrollment_type] || 'StudentEnrollment'
-    @role_name = opts[:role_name]
+    @role = opts[:role]
     @limit = opts[:limit]
-    @section = (opts[:course_section_id].present? ? @course.course_sections.active.find_by_id(opts[:course_section_id].to_i) : nil) || @course.default_section
+    @section = (opts[:course_section_id].present? ? @course.course_sections.active.where(id: opts[:course_section_id].to_i).first : nil) || @course.default_section
     @limit_privileges_to_course_section = opts[:limit_privileges_to_course_section]
     @enrolled_users = {}
   end
-  
-  def process(list)
-    raise ArgumentError, "Must provide a UserList" unless list.is_a?(UserList)
-    @enrollments = []
 
-    list.addresses.slice!(0,@limit) if @limit
-    @course.transaction do
-      Enrollment.skip_callback(:update_cached_due_dates) do
-        list.users.each { |user| enroll_user(user) }
+  def process(list)
+    raise ArgumentError, "Must provide a UserList or Array (of user tokens)" unless list.is_a?(UserList) || list.is_a?(Array)
+    @enrollments = []
+    @user_ids_to_touch = []
+
+    users =
+      if list.is_a?(UserList)
+        list.addresses.slice!(0,@limit) if @limit
+        list.users
+      else
+        # list of user ids
+        User.from_tokens(list)
       end
-      if !@enrollments.empty?
+    users.each_slice(Setting.get('enrollments_from_user_list_batch_size', 50).to_i) do |users|
+      @course.transaction do
+        Enrollment.suspend_callbacks(:set_update_cached_due_dates) do
+          users.each { |user| enroll_user(user) }
+        end
+      end
+    end
+    if !@enrollments.empty?
+      @course.transaction do
         DueDateCacher.recompute_course(@course)
       end
     end
+    @user_ids_to_touch.uniq.each_slice(100) do |user_ids|
+      User.where(id: user_ids).touch_all
+      User.where(id: UserObserver.where(user_id: user_ids).select(:observer_id)).touch_all
+    end
+
     @enrollments
   end
-  
+
   protected
-  
+
   def enroll_user(user)
     return unless user
     return if @enrolled_users.has_key?(user.id)
     @enrolled_users[user.id] = true
-    @course.enroll_user(user, @enrollment_type, :section => @section, :limit_privileges_to_course_section => @limit_privileges_to_course_section, :role_name => @role_name).tap do |e|
-      @enrollments << e if e
+    enrollment = @course.enroll_user(user, @enrollment_type,
+                        :section => @section,
+                        :limit_privileges_to_course_section => @limit_privileges_to_course_section,
+                        :allow_multiple_enrollments => true,
+                        :role => @role,
+                        :skip_touch_user => true)
+    if enrollment
+      @enrollments << enrollment
+      if enrollment.need_touch_user
+        @user_ids_to_touch << enrollment.user_id
+        @user_ids_to_touch << enrollment.associated_user_id if enrollment.associated_user_id
+      end
     end
   end
 end

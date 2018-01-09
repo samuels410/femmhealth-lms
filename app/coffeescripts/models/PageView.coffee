@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,11 +18,12 @@
 
 define [
   'i18n!user'
+  'jquery'
   'underscore'
   'Backbone'
   'compiled/str/TextHelper'
   'jquery.instructure_misc_helpers' # $.parseUserAgentString
-], (I18n, _, Backbone, {truncateText}) ->
+], (I18n, $, _, Backbone, {truncateText}) ->
 
   class PageView extends Backbone.Model
 
@@ -34,7 +35,7 @@ define [
       method is 'get'
 
     summarizedUserAgent: ->
-      $.parseUserAgentString(@get 'user_agent')
+      @get('app_name') || $.parseUserAgentString(@get 'user_agent')
 
     readableInteractionTime: ->
       seconds = @get 'interaction_seconds'

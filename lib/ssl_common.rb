@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -52,7 +52,7 @@ class SSLCommon
     end
 
     def post_multipart_form(url, form_data, headers={}, field_priority=[])
-      payload, mp_headers = Multipart::MultipartPost.new.prepare_query(form_data, field_priority)
+      payload, mp_headers = Multipart::Post.new.prepare_query(form_data, field_priority)
       self.raw_post(url, payload, mp_headers.merge(headers))
     end
 

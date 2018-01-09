@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,61 +20,88 @@ require File.expand_path(File.dirname(__FILE__) + '/../spec_helper')
 
 describe InfoController do
 
-  describe "POST 'record_error'" do
-    it "should be successful" do
-      post 'record_error'
-      assert_recorded_error
-
-      post 'record_error', :error => {:title => 'ugly', :message => 'bacon', :fried_ham => 'stupid'}
-      assert_recorded_error
-    end
-
-    it "should not choke on non-integer ids" do
-      post 'record_error', :error => {:id => 'garbage'}
-      assert_recorded_error
-      ErrorReport.last.message.should_not == "Error Report Creation failed"
-    end
-
-    it "should not return nil.id if report creation failed" do
-      ErrorReport.expects(:find_by_id).once.raises("failed!")
-      post 'record_error', :format => 'json', :error => {:id => 1}
-      JSON.parse(response.body).should == { 'logged' => true, 'id' => nil }
-    end
-
-    it "should not record the user as nil.id if report creation failed" do
-      ErrorReport.expects(:find_by_id).once.raises("failed!")
-      post 'record_error', :error => {:id => 1}
-      ErrorReport.last.user_id.should be_nil
-    end
-
-    it "should record the user if report creation failed" do
-      user = User.create!
-      user_session(user)
-      ErrorReport.expects(:find_by_id).once.raises("failed!")
-      post 'record_error', :error => {:id => 1}
-      ErrorReport.last.user_id.should == user.id
-    end
-  end
-
-  def assert_recorded_error(msg = "Thanks for your help!  We'll get right on this")
-    flash[:notice].should eql(msg)
-    response.should be_redirect
-    response.should redirect_to(root_url)
-  end
-
   describe "GET 'health_check'" do
     it "should work" do
       get 'health_check'
-      response.should be_success
-      response.body.should == 'canvas ok'
+      expect(response).to be_success
+      expect(response.body).to eq 'canvas ok'
     end
 
     it "should respond_to json" do
       request.accept = "application/json"
-      Canvas.stubs(:revision).returns("Test Proc")
+      allow(Canvas).to receive(:revision).and_return("Test Proc")
+      allow(Canvas::Cdn::RevManifest).to receive(:gulp_manifest).and_return({test_key: "mock_revved_url"})
       get "health_check"
-      response.should be_success
-      JSON.parse(response.body).should == { "status" => "canvas ok", "revision" => "Test Proc" }
+      expect(response).to be_success
+      json = JSON.parse(response.body)
+      expect(json).to have_key('installation_uuid')
+      json.delete('installation_uuid')
+      expect(json).to eq({
+        "status" => "canvas ok",
+        "revision" => "Test Proc",
+        "asset_urls" => {
+          "common_css" => "/dist/brandable_css/new_styles_normal_contrast/bundles/common-#{BrandableCSS.cache_for('bundles/common', 'new_styles_normal_contrast')[:combinedChecksum]}.css",
+          "common_js" => ActionController::Base.helpers.javascript_url("#{ENV['USE_OPTIMIZED_JS'] == 'true' ? '/dist/webpack-production' : '/dist/webpack-dev'}/common"),
+          "revved_url" => "mock_revved_url"
+        }
+      })
+    end
+  end
+
+  describe "GET 'help_links'" do
+    it "should work" do
+      get 'help_links'
+      expect(response).to be_success
+    end
+
+    it "should set the locale for translated help link text from the current user" do
+      user = User.create!(locale: 'es')
+      user_session(user)
+      # create and save account instance so that we don't invoke I18n's
+      # localizer lambda in a request filter prior to loading necessary
+      # users, accounts, context etc.
+      Account.default
+      get 'help_links'
+      expect(I18n.locale.to_s).to eq 'es'
+    end
+
+    it "should filter the links based on the current user's role" do
+      account = Account.create!
+      allow(Account::HelpLinks).to receive(:default_links).and_return([
+        {
+          :available_to => ['student'],
+          :text => 'Ask Your Instructor a Question',
+          :subtext => 'Questions are submitted to your instructor',
+          :url => '#teacher_feedback',
+          :is_default => 'true'
+        },
+        {
+          :available_to => ['user', 'student', 'teacher', 'admin', 'observer', 'unenrolled'],
+          :text => 'Search the Canvas Guides',
+          :subtext => 'Find answers to common questions',
+          :url => 'http://community.canvaslms.com/community/answers/guides',
+          :is_default => 'true'
+        },
+        {
+          :available_to => ['user', 'student', 'teacher', 'admin', 'observer', 'unenrolled'],
+          :text => 'Report a Problem',
+          :subtext => 'If Canvas misbehaves, tell us about it',
+          :url => '#create_ticket',
+          :is_default => 'true'
+        }
+      ])
+      allow(LoadAccount).to receive(:default_domain_root_account).and_return(account)
+      admin = account_admin_user active_all: true
+      user_session(admin)
+
+      get 'help_links'
+
+      # because this is a normal application session, the response is prepended
+      # with our anti-csrf measure
+      json = response.body
+      anti_csrf = 'while(1);'
+      links = JSON.parse(json[anti_csrf.length..json.length-1])
+      expect(links.select {|link| link[:text] == 'Ask Your Instructor a Question'}.size).to eq 0
     end
   end
 end

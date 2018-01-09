@@ -1,12 +1,31 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
   'i18n!conversations'
   'underscore'
   'Backbone'
+  'spin.js'
   'compiled/views/conversations/CourseSelectionView'
   'compiled/views/conversations/SearchView'
-  'use!vendor/bootstrap/bootstrap-dropdown'
-  'use!vendor/bootstrap-select/bootstrap-select'
-], (I18n, _, {View}, CourseSelectionView, SearchView) ->
+  'vendor/bootstrap/bootstrap-dropdown'
+  'vendor/bootstrap-select/bootstrap-select'
+], ($, I18n, _, {View}, Spinner, CourseSelectionView, SearchView) ->
 
   class InboxHeaderView extends View
 
@@ -20,12 +39,16 @@ define [
       '#course-filter'   : '$courseFilter'
       '#admin-btn'       : '$adminBtn'
       '#mark-unread-btn' : '$markUnreadBtn'
+      '#mark-read-btn'   : '$markReadBtn'
       '#forward-btn'     : '$forwardBtn'
       '#star-toggle-btn' : '$starToggleBtn'
       '#admin-menu'      : '$adminMenu'
       '#sending-message' : '$sendingMessage'
       '#sending-spinner' : '$sendingSpinner'
       '[role=search]'    : '$search'
+      '#conversation-actions'       : '$conversationActions'
+      '#submission-comment-actions' : '$submissionCommentActions'
+      '#submission-reply-btn'       : '$submissionReplyBtn'
 
     events:
       'click #compose-btn':       'onCompose'
@@ -36,16 +59,18 @@ define [
       'change #type-filter':      'onFilterChange'
       'change #course-filter':    'onFilterChange'
       'click #mark-unread-btn':   'onMarkUnread'
+      'click #mark-read-btn':   'onMarkRead'
       'click #forward-btn':       'onForward'
       'click #star-toggle-btn':   'onStarToggle'
+      'click #submission-reply-btn': 'onSubmissionReply'
 
     messages:
       star: I18n.t('star', 'Star')
       unstar: I18n.t('unstar', 'Unstar')
       archive: I18n.t('archive', 'Archive')
       unarchive: I18n.t('unarchive', 'Unarchive')
-      archive_conversation: I18n.t('archive_conversation', 'Archive conversation')
-      unarchive_conversation: I18n.t('unarchive_conversation', 'Unarchive conversation')
+      archive_conversation: I18n.t('Archive Selected')
+      unarchive_conversation: I18n.t('Unarchive Selected')
 
     spinnerOptions:
       color: '#fff'
@@ -64,30 +89,38 @@ define [
       spinner = new Spinner(@spinnerOptions)
       spinner.spin(@$sendingSpinner[0])
       @toggleSending(false)
+      @updateFilterLabels()
 
     onSearch:      (tokens) => @trigger('search', tokens)
 
     onCompose:     (e) -> @trigger('compose')
 
-    onReply:       (e) -> @trigger('reply')
+    onReply:       (e) -> @trigger('reply', null, '#reply-btn')
 
-    onReplyAll:    (e) -> @trigger('reply-all')
+    onReplyAll:    (e) -> @trigger('reply-all', null, '#reply-all-btn')
 
-    onArchive:     (e) -> @trigger('archive')
+    onArchive:     (e) -> @trigger('archive', '#compose-btn', '#archive-btn')
 
-    onDelete:      (e) -> @trigger('delete')
+    onDelete:      (e) -> @trigger('delete', '#compose-btn', '#delete-btn')
 
     onMarkUnread: (e) ->
       e.preventDefault()
       @trigger('mark-unread')
 
+    onMarkRead: (e) ->
+      e.preventDefault()
+      @trigger('mark-read')
+
     onForward: (e) ->
       e.preventDefault()
-      @trigger('forward')
+      @trigger('forward', null, '#admin-btn')
 
     onStarToggle: (e) ->
       e.preventDefault()
+      @$adminBtn.focus()
       @trigger('star-toggle')
+
+    onSubmissionReply: (e) -> @trigger('submission-reply')
 
     onModelChange: (newModel, oldModel) ->
       @detachModelEvents(oldModel)
@@ -95,7 +128,7 @@ define [
       @updateUi(newModel)
 
     updateUi: (newModel) ->
-      @toggleMessageBtns(!newModel || !newModel.get('selected'))
+      @toggleMessageBtns(newModel)
       @onReadStateChange(newModel)
       @onStarStateChange(newModel)
       @onArchivedStateChange(newModel)
@@ -109,13 +142,15 @@ define [
         newModel.on('change:starred', @onStarStateChange, this)
 
     onReadStateChange: (msg) ->
-      @hideForwardBtn(!msg)
       @hideMarkUnreadBtn(!msg || msg.unread())
+      @hideMarkReadBtn(!msg || !msg.unread())
+      @refreshMenu()
 
     onStarStateChange: (msg) ->
       if msg
         key = if msg.starred() then 'unstar' else 'star'
         @$starToggleBtn.text(@messages[key])
+      @refreshMenu()
 
     onArchivedStateChange: (msg) ->
       return if !msg
@@ -124,29 +159,58 @@ define [
       @$archiveBtn.attr('title', if archived then @messages['unarchive'] else @messages['archive'])
       @$archiveBtn.find('.screenreader-only')
         .text(if archived then @messages['unarchive_conversation'] else @messages['archive_conversation'])
+      if msg.get('canArchive')
+        @$archiveBtn.removeAttr('disabled')
+      else
+        @$archiveBtn.attr('disabled', true)
+      @refreshMenu()
+
+    refreshMenu: ->
+      @$adminMenu.menu('refresh') if @$adminMenu.is('.ui-menu')
 
     filterObj: (obj) -> _.object(_.filter(_.pairs(obj), (x) -> !!x[1]))
 
     onFilterChange: (e) =>
-      @searchView?.autocompleteView.setContext(@courseView.getCurrentCourse())
+      @searchView?.autocompleteView.setContext(@courseView.getCurrentContext())
+      if @$typeFilter.val() == 'submission_comments'
+        @$search.show()
+        @$conversationActions.hide()
+        @$submissionCommentActions.show()
+      else
+        @$search.show()
+        @$conversationActions.show()
+        @$submissionCommentActions.hide()
       @trigger('filter', @filterObj({type: @$typeFilter.val(), course: @$courseFilter.val()}))
+      @updateFilterLabels()
+
+    updateFilterLabels: ->
+      @$typeFilterSelectionLabel = $("##{@$typeFilter.attr('aria-labelledby')}").find('.current-selection-label') unless @$typeFilterSelectionLabel?.length
+      @$courseFilterSelectionLabel = $("##{@$courseFilter.attr('aria-labelledby')}").find('.current-selection-label') unless @$courseFilterSelectionLabel?.length
+      @$typeFilterSelectionLabel.text(@$typeFilter.find(':selected').text())
+      @$courseFilterSelectionLabel.text(@$courseFilter.find(':selected').text())
 
     displayState: (state) ->
       @$typeFilter.selectpicker('val', state.type)
       @courseView.setValue(state.course)
-      @trigger('course', @courseView.getCurrentCourse())
+      @trigger('course', @courseView.getCurrentContext())
 
-    toggleMessageBtns: (value) ->
-      @toggleReplyBtn(value)
-      @toggleReplyAllBtn(value)
-      @toggleArchiveBtn(value)
-      @toggleDeleteBtn(value)
-      @toggleAdminBtn(value)
+    toggleMessageBtns: (newModel) ->
+      no_model = !newModel || !newModel.get('selected')
+      cannot_reply = no_model || newModel.get('cannot_reply')
 
-    toggleReplyBtn:    (value) -> @_toggleBtn(@$replyBtn, value)
+      @toggleReplyBtn(cannot_reply)
+      @toggleReplyAllBtn(cannot_reply)
+      @toggleArchiveBtn(no_model)
+      @toggleDeleteBtn(no_model)
+      @toggleAdminBtn(no_model)
+      @hideForwardBtn(no_model)
+
+    toggleReplyBtn:    (value) ->
+      @_toggleBtn(@$replyBtn, value)
+      @_toggleBtn(@$submissionReplyBtn, value)
 
     toggleReplyAllBtn: (value) -> @_toggleBtn(@$replyAllBtn, value)
-    
+
     toggleArchiveBtn:  (value) -> @_toggleBtn(@$archiveBtn, value)
 
     toggleDeleteBtn:   (value) -> @_toggleBtn(@$deleteBtn, value)
@@ -155,11 +219,9 @@ define [
 
     hideMarkUnreadBtn: (hide) -> if hide then @$markUnreadBtn.parent().detach() else @$adminMenu.prepend(@$markUnreadBtn.parent())
 
-    hideForwardBtn:    (hide) -> if hide then @$forwardBtn.parent().detach() else @$adminMenu.prepend(@$forwardBtn.parent())
+    hideMarkReadBtn: (hide) -> if hide then @$markReadBtn.parent().detach() else @$adminMenu.prepend(@$markReadBtn.parent())
 
-    updateAdminMenu: (messages) ->
-      @hideMarkUnreadBtn(!messages.length)
-      @hideForwardBtn(messages.length > 1)
+    hideForwardBtn:    (hide) -> if hide then @$forwardBtn.parent().detach() else @$adminMenu.prepend(@$forwardBtn.parent())
 
     focusCompose: ->
       @$composeBtn.focus()

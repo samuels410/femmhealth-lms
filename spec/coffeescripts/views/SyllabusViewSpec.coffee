@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,15 +19,18 @@
 define [
   'jquery'
   'underscore'
+  'timezone'
+  'timezone/America/Denver'
+  'timezone/America/New_York'
   'compiled/behaviors/SyllabusBehaviors'
   'compiled/collections/SyllabusCollection'
   'compiled/collections/SyllabusCalendarEventsCollection'
   'compiled/collections/SyllabusAppointmentGroupsCollection'
   'compiled/views/courses/SyllabusView'
-  'spec/javascripts/compiled/views/SyllabusViewPrerendered'
+  './SyllabusViewPrerendered.coffee'
   'helpers/fakeENV'
   'helpers/jquery.simulate'
-], ($, _, SyllabusBehaviors, SyllabusCollection, SyllabusCalendarEventsCollection, SyllabusAppointmentGroupsCollection, SyllabusView, SyllabusViewPrerendered, fakeENV) ->
+], ($, _, tz, denver, newYork, SyllabusBehaviors, SyllabusCollection, SyllabusCalendarEventsCollection, SyllabusAppointmentGroupsCollection, SyllabusView, SyllabusViewPrerendered, fakeENV) ->
 
   setupServerResponses = ->
     server = sinon.fakeServer.create()
@@ -72,14 +75,15 @@ define [
     server.respondWith /\/api\/v1\/appointment_groups($|\?)/, appointment_groups_endpoint
     server
 
-  module 'Syllabus',
+  QUnit.module 'Syllabus',
     setup: ->
-      fakeENV.setup()
+      fakeENV.setup(TIMEZONE: 'America/Denver', CONTEXT_TIMEZONE: 'America/New_York')
       # Setup stubs/mocks
       @server = setupServerResponses()
 
-      @getUserOffset = sinon.stub $, 'getUserOffset', ->
-        return -7 * 60
+      @tzSnapshot = tz.snapshot()
+      tz.changeZone(denver, 'America/Denver')
+      tz.preload("America/New_York", newYork)
 
       @clock = sinon.useFakeTimers(new Date(2012, 0, 23, 15, 30).getTime())
 
@@ -89,7 +93,7 @@ define [
       @jumpToToday = $(SyllabusViewPrerendered.jumpToToday)
       @jumpToToday.appendTo $fixtures
 
-      @miniMonth = $(SyllabusViewPrerendered.miniMonth)
+      @miniMonth = $(SyllabusViewPrerendered.miniMonth())
       @miniMonth.appendTo $fixtures
 
       @syllabusContainer = $(SyllabusViewPrerendered.syllabusContainer)
@@ -105,16 +109,19 @@ define [
 
       acollection = new SyllabusCollection collections
 
-      _.map collections, (collection) ->
+      _.map collections, (collection) =>
         error = ->
           ok false, 'ajax call failed'
 
-        success = ->
+        success = =>
           if collection.canFetch 'next'
             collection.fetch
               page: 'next'
               success: success
               error: error
+
+            # need to manually respond to calls made during a previous response
+            @server.respond()
 
         collection.fetch
           data:
@@ -135,8 +142,9 @@ define [
       @miniMonth.remove()
       @jumpToToday.remove()
       @clock.restore()
-      @getUserOffset.restore()
+      tz.restore(@tzSnapshot)
       @server.restore()
+      document.getElementById("fixtures").innerHTML = ""
 
     render: ->
       @view.render()
@@ -145,7 +153,7 @@ define [
       SyllabusBehaviors.bindToSyllabus()
 
     renderAssertions: ->
-      expect 15
+      expect 19
 
       # rendering
       syllabus = $('#syllabus')
@@ -191,6 +199,15 @@ define [
       equal expected.length, 2, 'passed events - passed events found'
       deepEqual actual.toArray(), expected.toArray(), 'passed events - events before today marked as passed'
 
+      # context-sensitive datetime titles
+      assignment_ts = $('.events_2012_01_01 .related-assignment_1 .dates > span:nth-child(1)')
+      equal assignment_ts.text(), "10am", "assignment - local time in table"
+      equal assignment_ts.data('html-tooltip-title'), "Local: Jan 1 at 10am<br>Course: Jan 1 at 12pm", 'assignment - correct local and course times given'
+
+      event_ts = $('.events_2012_01_01 .related-appointment_group_1 .dates > span:nth-child(1)')
+      equal event_ts.text(), " 8am", "event - local time in table"
+      equal event_ts.data('html-tooltip-title'), "Local: Jan 1 at 8am<br>Course: Jan 1 at 10am", 'event - correct local and course times given'
+
   test 'render (user public course)', ->
     @view.can_read = true # public course -- can read
     @view.is_valid_user = true # user - enrolled (can read)
@@ -201,21 +218,21 @@ define [
   test 'render (anonymous public course)', ->
     @view.can_read = true # public course -- can read
     @view.is_valid_user = false # anonymous
-    
+
     @render()
     @renderAssertions()
 
   test 'render (user public syllabus)', ->
     @view.can_read = false # public syllabus -- cannot read
     @view.is_valid_user = true # user - non-enrolled (cannot read)
-    
+
     @render()
     @renderAssertions()
 
   test 'render (anonymous public syllabus)', ->
     @view.can_read = false # public syllabus -- cannot read
     @view.is_valid_user = false # anonymous
-    
+
     @render()
     @renderAssertions()
 
@@ -352,14 +369,14 @@ define [
     nonEventMiniDay = $('#mini_day_2012_01_17')
     equal nonEventMiniDay.length, 1, 'non-event day hover - found'
 
-    nonEventMiniDay.simulate 'mouseover'
+    nonEventMiniDay.children('.day_wrapper').simulate 'mouseover'
     deepEqual $('.mini_calendar_day.related').toArray(), nonEventMiniDay.toArray(), 'non-event day hover - highlighted'
 
     # hover event date
     eventMiniDay = $('#mini_day_2012_01_30')
     equal eventMiniDay.length, 1, 'event day hover - event day found'
 
-    eventMiniDay.simulate 'mouseover'
+    eventMiniDay.children('.day_wrapper').simulate 'mouseover'
     deepEqual $('.mini_calendar_day.related').toArray(), eventMiniDay.toArray(), 'event day hover - event day highlighted'
 
     expected = $('.events_2012_01_30')
@@ -368,7 +385,7 @@ define [
     deepEqual actual.toArray(), expected.toArray(), 'event day hover - syllabus event highlighted'
 
     # unhover the event date
-    eventMiniDay.simulate 'mouseout'
+    eventMiniDay.children('.day_wrapper').simulate 'mouseout'
 
     expected = []
     actual = $('.mini_calendar_day.related')
@@ -382,7 +399,7 @@ define [
     prevMonthLink = $('.prev_month_link')
     equal prevMonthLink.length, 1, 'previous month - link found'
 
-    prevMonthLink.simulate 'mousedown'
+    prevMonthLink.simulate 'click'
 
     equal parseInt($('.month_number').text()), 12, 'previous month - month changed to December'
     equal parseInt($('.year_number').text()), 2011, 'previous month - year changed to 2011'
@@ -396,8 +413,8 @@ define [
     nextMonthLink = $('.next_month_link')
     equal nextMonthLink.length, 1, 'next month - link found'
 
-    nextMonthLink.simulate 'mousedown'
-    nextMonthLink.simulate 'mousedown'
+    nextMonthLink.simulate 'click'
+    nextMonthLink.simulate 'click'
 
     equal parseInt($('.month_number').text()), 2, 'next month - month changed to February'
     equal parseInt($('.year_number').text()), 2012, 'next month - year changed to 2012'

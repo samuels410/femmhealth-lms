@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -22,9 +22,7 @@ describe SubmissionVersion do
   def unversioned_submission
     # bypass the built-in submission versioning
     course_with_student
-    submission = @user.submissions.build(:assignment => @course.assignments.create!)
-    submission.without_versioning{ submission.save! }
-    submission
+    @user.submissions.find_by(assignment: @course.assignments.create!)
   end
 
   before do
@@ -34,30 +32,30 @@ describe SubmissionVersion do
 
   describe "index_version" do
     it "should create a new record" do
-      lambda{
+      expect{
         SubmissionVersion.index_version(@version)
-      }.should change(SubmissionVersion, :count)
+      }.to change(SubmissionVersion, :count)
     end
 
     it "should set the index record's version_id" do
       index = SubmissionVersion.index_version(@version)
-      index.version_id.should == @version.id
+      expect(index.version_id).to eq @version.id
     end
 
     it "should set the index record's context" do
       index = SubmissionVersion.index_version(@version)
-      index.context_type.should == 'Course'
-      index.context_id.should == @course.id
+      expect(index.context_type).to eq 'Course'
+      expect(index.context_id).to eq @course.id
     end
 
     it "should set the index record's user_id" do
       index = SubmissionVersion.index_version(@version)
-      index.user_id.should == @submission.user_id
+      expect(index.user_id).to eq @submission.user_id
     end
 
     it "should set the index record's assignment_id" do
       index = SubmissionVersion.index_version(@version)
-      index.assignment_id.should == @submission.assignment_id
+      expect(index.assignment_id).to eq @submission.assignment_id
     end
   end
 
@@ -69,26 +67,26 @@ describe SubmissionVersion do
       contexts = submissions.map{ |submission| submission.assignment.context }
       versions = submissions.map{ |submission| Version.create(:versionable => submission, :yaml => submission.attributes.to_yaml) }
 
-      lambda{
+      expect{
         SubmissionVersion.index_versions(versions)
-      }.should change(SubmissionVersion, :count).by(n)
+      }.to change(SubmissionVersion, :count).by(n)
     end
 
     context "invalid yaml" do
       before do
-        @version.update_attribute(:yaml, "--- \n- 1\n- 2\n-")
+        @version.update_attribute(:yaml, "--- \n- 1\n- 2\n--3")
       end
 
       it "should error on invalid yaml by default" do
-        lambda{
+        expect{
           SubmissionVersion.index_versions([@version])
-        }.should raise_error
+        }.to raise_error(Psych::SyntaxError)
       end
 
       it "should allow ignoring invalid yaml errors" do
-        lambda{
+        expect{
           SubmissionVersion.index_versions([@version], ignore_errors: true)
-        }.should_not raise_error
+        }.not_to raise_error
       end
     end
   end
@@ -97,9 +95,33 @@ describe SubmissionVersion do
     attrs = YAML.load(@version.yaml)
     attrs.delete('assignment_id')
     @version.update_attribute(:yaml, attrs.to_yaml)
-    lambda{
+    expect{
       SubmissionVersion.index_version(@version)
       SubmissionVersion.index_versions([@version])
-    }.should_not change(SubmissionVersion, :count)
+    }.not_to change(SubmissionVersion, :count)
+  end
+
+  it "should not create a SubmissionVersion when the Version doesn't save" do
+    version = @submission.versions.build(yaml: {"assignment_id" => @submission.assignment_id}.to_yaml)
+    expect(@submission.versions).to receive(:create).and_return(version)
+    expect do
+      @submission.with_versioning(explicit: true) do
+        @submission.send(:simply_versioned_create_version)
+      end
+    end.not_to change(SubmissionVersion, :count)
+  end
+
+  it "should let you preload current_version in one query" do
+    sub1 = unversioned_submission
+    3.times { Version.create(:versionable => sub1, :yaml => sub1.attributes.to_yaml) }
+    sub2 = unversioned_submission
+    2.times { Version.create(:versionable => sub2, :yaml => sub2.attributes.to_yaml) }
+
+    Version.preload_version_number([sub1, sub2])
+
+    [sub1, sub2].each{|s| expect(s).to receive(:versions).never}
+
+    expect(sub1.version_number).to eq 3
+    expect(sub2.version_number).to eq 2
   end
 end

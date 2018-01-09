@@ -1,4 +1,22 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
   'underscore'
   'i18n!registration'
   'compiled/fn/preventDefault'
@@ -6,26 +24,41 @@ define [
   'jst/registration/teacherDialog'
   'jst/registration/studentDialog'
   'jst/registration/parentDialog'
+  'jst/registration/samlDialog'
   'compiled/util/addPrivacyLinkToDialog'
+  'str/htmlEscape'
   'compiled/jquery/validate'
   'jquery.instructure_forms'
   'jquery.instructure_date_and_time'
-], (_, I18n, preventDefault, registrationErrors, teacherDialog, studentDialog, parentDialog, addPrivacyLinkToDialog) ->
+], ($, _, I18n, preventDefault, registrationErrors, teacherDialog, studentDialog, parentDialog, samlDialog, addPrivacyLinkToDialog, htmlEscape) ->
 
   $nodes = {}
-  templates = {teacherDialog, studentDialog, parentDialog}
+  templates = {teacherDialog, studentDialog, parentDialog, samlDialog}
 
-  signupDialog = (id, title) ->
+  # we do this in coffee because of this hbs 1.3 bug:
+  # https://github.com/wycats/handlebars.js/issues/748
+  # https://github.com/fivetanley/i18nliner-handlebars/commit/55be26ff
+  termsHtml = ({terms_of_use_url, privacy_policy_url}) ->
+    I18n.t(
+      "teacher_dialog.agree_to_terms_and_pp"
+      "You agree to the *terms of use* and acknowledge the **privacy policy**."
+      wrappers: [
+        "<a href=\"#{htmlEscape terms_of_use_url}\" target=\"_blank\">$1</a>"
+        "<a href=\"#{htmlEscape privacy_policy_url}\" target=\"_blank\">$1</a>"
+      ]
+    )
+
+  signupDialog = (id, title, path=null) ->
     return unless templates[id]
     $node = $nodes[id] ?= $('<div />')
-    $node.html templates[id](
+    path ||= "/users"
+    html = templates[id](
       account: ENV.ACCOUNT.registration_settings
       terms_required: ENV.ACCOUNT.terms_required
-      terms_url: ENV.ACCOUNT.terms_of_use_url
-      privacy_url: ENV.ACCOUNT.privacy_policy_url
+      terms_html: termsHtml(ENV.ACCOUNT)
+      path: path
     )
-    $node.find('.date-field').datetime_field()
-
+    $node.html html
     $node.find('.signup_link').click preventDefault ->
       $node.dialog('close')
       signupDialog($(this).data('template'), $(this).prop('title'))
@@ -37,10 +70,19 @@ define [
       errorFormatter: registrationErrors
       success: (data) =>
         # they should now be authenticated (either registered or pre_registered)
-        if data.course
+        if data.redirect
+          window.location = data.redirect
+        else if data.course
           window.location = "/courses/#{data.course.course.id}?registration_success=1"
         else
           window.location = "/?registration_success=1"
+      error: (data) =>
+        if data.error
+          error_msg = data.error.message
+          $("input[name='#{htmlEscape data.error.input_name}']").
+          next('.error_message').
+          text(htmlEscape error_msg)
+          $.screenReaderFlashMessage(error_msg)
 
     $node.dialog
       resizable: false
@@ -49,7 +91,10 @@ define [
       open: ->
         $(this).find('a').eq(0).blur()
         $(this).find(':input').eq(0).focus()
-      close: -> $('.error_box').filter(':visible').remove()
+        signupDialog.afterRender?()
+      close: ->
+        signupDialog.teardown?()
+        $('.error_box').filter(':visible').remove()
     $node.fixDialogButtons()
     unless ENV.ACCOUNT.terms_required # term verbiage has a link to PP, so this would be redundant
       addPrivacyLinkToDialog($node)

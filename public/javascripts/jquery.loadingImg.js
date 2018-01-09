@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,11 +12,11 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-define(['jquery'], function($){
+import $ from 'jquery'
 
   // Shows an ajax-loading image on the given object.
   $.fn.loadingImg = function(options) {
@@ -25,17 +25,17 @@ define(['jquery'], function($){
     }
     var $obj = this.filter(":first");
     var list;
-    if(options == "hide" || options == "remove") {
+    if(options === "hide" || options === "remove") {
       $obj.children(".loading_image").remove();
       list = $obj.data('loading_images') || [];
-      for(var idx in list) {
-        if(list[idx]) {
-          list[idx].remove();
+      list.forEach(function(item) {
+        if(item) {
+          item.remove();
         }
-      }
+      });
       $obj.data('loading_images', null);
       return this;
-    } else if(options == "remove_once") {
+    } else if(options === "remove_once") {
       $obj.children(".loading_image").remove();
       list = $obj.data('loading_images') || [];
       var img = list.pop();
@@ -123,4 +123,3 @@ define(['jquery'], function($){
   };
   $.fn.loadingImage = $.fn.loadingImg;
   
-});

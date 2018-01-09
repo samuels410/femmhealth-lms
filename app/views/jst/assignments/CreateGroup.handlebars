@@ -1,5 +1,10 @@
 <div class="form-dialog-content">
   <div class="form-horizontal">
+    {{#unless can_change_weighting}}
+    <div class="ag-settings-weights-message alert">{{#t}}Assignment group weights and drop rules can't be edited because
+      there are assignments in one of the groups whose due dates are closed.{{/t}}</div>
+    {{/unless}}
+
     <div class="control-group">
       <label class="control-label" for="ag_{{label_id}}_name">
         {{#t "group_name"}}Group Name:{{/t}}
@@ -14,6 +19,8 @@
         />
       </div>
     </div>
+
+    {{#if show_weight}}
     <div class="control-group">
       <div class="controls">
         <input
@@ -21,48 +28,53 @@
           id="ag_{{label_id}}_group_weight"
           class="span1 group_weight"
           name="group_weight"
-          value="{{group_weight}}"
-          {{#if disable_weight}}disabled{{/if}}
+          value="{{#if group_weight}}{{n group_weight}}{{/if}}"
+          {{#unless can_change_weighting}}readonly{{/unless}}
         />
         <label style="display:inline-block" for="ag_{{label_id}}_group_weight">
           {{#t "percent_of_total"}}% of total grade{{/t}}
         </label>
       </div>
     </div>
-    <hr/>
-    <fieldset>
-      <legend class="drop_rules_section">Number of scores to ignore for each student</legend>
+    {{/if}}
+    {{#if editable_drop}}
+      <hr/>
+      <fieldset>
+        <legend class="drop_rules_section">{{#t}}Number of scores to ignore for each student{{/t}}</legend>
 
-      <div class="control-group">
-        <label class="control-label" for="ag_{{label_id}}_drop_lowest">
-          {{#t "drop_lowest"}}Lowest Scores:{{/t}}
-        </label>
-        <div class="controls">
-          <input
-            type="number"
-            id="ag_{{label_id}}_drop_lowest"
-            class="span1 field"
-            name="rules[drop_lowest]"
-            value="{{drop_lowest}}"
-          />
+        <div class="control-group">
+          <label class="control-label" for="ag_{{label_id}}_drop_lowest">
+            {{#t "drop_lowest"}}Lowest Scores:{{/t}}
+          </label>
+          <div class="controls">
+            <input
+              type={{number_input}}
+              id="ag_{{label_id}}_drop_lowest"
+              class="span1 field"
+              name="rules[drop_lowest]"
+              value="{{n drop_lowest}}"
+              min="0"
+              {{#unless can_change_weighting}}readonly{{/unless}}
+            />
+          </div>
         </div>
-      </div>
-      <div class="control-group">
-        <label class="control-label" for="ag_{{label_id}}_drop_highest">
-          {{#t "drop_highest"}}Highest Scores:{{/t}}
-        </label>
-        <div class="controls">
-          <input
-            type="number"
-            id="ag_{{label_id}}_drop_highest"
-            class="span1 field"
-            name="rules[drop_highest]"
-            value="{{drop_highest}}"
-          />
+        <div class="control-group">
+          <label class="control-label" for="ag_{{label_id}}_drop_highest">
+            {{#t "drop_highest"}}Highest Scores:{{/t}}
+          </label>
+          <div class="controls">
+            <input
+              type={{number_input}}
+              id="ag_{{label_id}}_drop_highest"
+              class="span1 field"
+              name="rules[drop_highest]"
+              value="{{n drop_highest}}"
+              min="0"
+              {{#unless can_change_weighting}}readonly{{/unless}}
+            />
+          </div>
         </div>
-      </div>
 
-      {{#if editable_never_drop}}
         <hr/>
         <div class="control-group">
           <label class="control-label" id="ag_{{label_id}}_never_drop">
@@ -71,9 +83,8 @@
           <div class="controls never_drop_rules_group">
           </div>
         </div>
-      {{/if}}
-    </fieldset>
-
+      </fieldset>
+    {{/if}}
   </div>
 </div>
 <div class="form-controls">

@@ -1,7 +1,25 @@
-require [
+#
+# Copyright (C) 2014 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+define [
   "jquery",
   "i18n!courses.show",
   "str/htmlEscape",
+  "jsx/courses/show",
   "jquery.ajaxJSON",
   "jqueryui/dialog",
   "compiled/jquery/fixDialogButtons",
@@ -39,9 +57,9 @@ require [
       $link.hide()
       $.ajaxJSON $(this).attr("href"), "GET", {}, (data) ->
         $("#home_page").loadingImage "remove"
-        body = htmlEscape($.trim(data.wiki_page.body))
-        body = htmlEscape(I18n.t("empty_body", "No Content")) if body.length is 0
-        $("#home_page_content").html body
+        bodyHtml = htmlEscape($.trim(data.wiki_page.body))
+        bodyHtml = htmlEscape(I18n.t("empty_body", "No Content")) if bodyHtml.length is 0
+        $("#home_page_content").html bodyHtml
         $("html,body").scrollTo $("#home_page")
 
     $(".dashboard_view_link").click (event) ->
@@ -60,24 +78,3 @@ require [
       else
         $("#wizard_box").slideDown "slow", ->
           $(this).find(".option.publish_step").click()
-
-    unless ENV.DRAFT_STATE
-      $("#edit_course_home_content_select").change(->
-        $(this).parents("form").find(".options_details").hide().end().find("." + $(this).val() + "_details").show().end().find(".select_details").show()
-      ).triggerHandler "change"
-      
-    $(".edit_course_home_content_link").click (event) ->
-      event.preventDefault()
-      $("#edit_course_home_content").show()
-      $("#course_home_content").hide()
-
-    $("#edit_course_home_content .cancel_button").click ->
-      $("#edit_course_home_content").hide()
-      $("#course_home_content").show()
-
-    $("[aria-controls=edit_course_home_content_form]").click ->
-      setTimeout (->
-        $("#edit_course_home_content_select").focus()
-      ), 0
-
-

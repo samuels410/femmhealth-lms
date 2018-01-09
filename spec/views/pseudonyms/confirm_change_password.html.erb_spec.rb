@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,14 +21,14 @@ require File.expand_path(File.dirname(__FILE__) + '/../views_helper')
 
 describe "/pseudonyms/confirm_change_password" do
   it "should render" do
-    user
-    assigns[:user] = @user
-    assigns[:current_user] = @user
-    assigns[:pseudonym] = @user.pseudonyms.create!(:unique_id => "unique@example.com", :password => "asdfaa", :password_confirmation => "asdfaa")
-    assigns[:password_pseudonyms] = @user.pseudonyms
-    assigns[:cc] = @user.communication_channels.create!(:path => 'unique@example.com')
+    user_factory
+    assign(:user, @user)
+    assign(:current_user, @user)
+    assign(:pseudonym, @user.pseudonyms.create!(:unique_id => "unique@example.com", :password => "asdfaabb", :password_confirmation => "asdfaabb"))
+    assign(:password_pseudonyms, @user.pseudonyms)
+    assign(:cc, @user.communication_channels.create!(:path => 'unique@example.com'))
     render "pseudonyms/confirm_change_password"
-    response.should_not be_nil
+    expect(response).not_to be_nil
   end
 end
 

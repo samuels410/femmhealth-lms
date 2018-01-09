@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,46 +17,9 @@
 #
 
 class RubricAssessmentsController < ApplicationController
-  before_filter :require_context
-  
-  def index
-    @association = @context.rubric_associations.find(params[:rubric_association_id]) #Rubric.find(params[:rubric_id])
-    @assessments = @association.rubric_assessments
-    if authorized_action(@context, @current_user, :read)
-      @headers = false
-      render :action => "index"
-    end
-  end
-  
-  def show
-    @association = @context.rubric_associations.find(params[:rubric_association_id]) #Rubric.find(params[:rubric_id])
-    @assessment = @association.rubric_assessments.find(params[:id]) rescue nil
-    @assessment_request = @association.assessment_requests.find_by_uuid(params[:id])
-    if @assessment_request && @association.purpose == "grading" && @association.association_type == 'Assignment'
-      redirect_to named_context_url(@context, :context_assignment_submission_url, @association.association_id, @assessment_request.user_id)
-      return
-    end
-    if @assessment_request || authorized_action(@context, @current_user, :read)    
-      unless @assessment
-        raise "Assessment Request required" unless @assessment_request
-        @assessment = @assessment_request.rubric_assessment
-        @user = @assessment_request.asset.user rescue nil
-        @assessment ||= @association.assess(:assessor => (@current_user || @assessment_request.user), :user => @user, :artifact => @assessment_request.asset, :assessment => {:assessment_type => 'invited_assessment'})
-        session[:rubric_assessment_ids] = ((session[:rubric_assessment_ids] || []) + [@assessment.id]).uniq
-        @assessment_request.attributes = {:rubric_assessment => @assessment, :user => @assessment.assessor}
-        @assessment_request.complete
-        @assessing = true
-      end
-      @assessments = [@assessment]
-      if @assessment.artifact && @assessment.artifact.is_a?(Submission)
-        redirect_to named_context_url(@assessment.artifact.context, :context_assignment_submission_url, @assessment.artifact.assignment_id, @assessment.artifact.user_id)
-      else
-        @headers = false
-        render :action => "index"
-      end
-    end
-  end
-  
+  before_action :require_context
+  before_action :require_user
+
   def create
     update
   end
@@ -70,35 +33,57 @@ class RubricAssessmentsController < ApplicationController
       render :json => @request
     end
   end
-  
+
   def update
     @association = @context.rubric_associations.find(params[:rubric_association_id])
-    @assessment = @association.rubric_assessments.find_by_id(params[:id])
+    @assessment = @association.rubric_assessments.where(id: params[:id]).first
     @association_object = @association.association_object
 
     # only check if there's no @assessment object, since that's the only time
-    # this param matters (assessing_user_id and arg find_asset_for_assessment)
+    # this param matters (find_asset_for_assessment)
     user_id = params[:rubric_assessment][:user_id]
     if !@assessment && user_id !~ Api::ID_REGEX
       raise ActiveRecord::RecordNotFound
     end
 
     # Funky flow to avoid a double-render, re-work it if you like
-    @association.assessing_user_id = user_id
     if @assessment && !authorized_action(@assessment, @current_user, :update)
       return
-    elsif @assessment || authorized_action(@association, @current_user, :assess)
-      @asset, @user = @association_object.find_asset_for_assessment(@association, @assessment ? @assessment.user_id : user_id)
-      @assessment = @association.assess(:assessor => @current_user, :user => @user, :artifact => @asset, :assessment => params[:rubric_assessment])
+    else
+      opts = {}
+      if value_to_boolean(params[:provisional])
+        opts[:provisional_grader] = @current_user
+        opts[:final] = true if value_to_boolean(params[:final]) && @context.grants_right?(@current_user, :moderate_grades)
+      end
+
+      @asset, @user = @association_object.find_asset_for_assessment(@association, @assessment ? @assessment.user_id : user_id, opts)
+      return render_unauthorized_action unless @association.user_can_assess_for?(assessor: @current_user, assessee: @user)
+
+      @assessment = @association.assess(:assessor => @current_user, :user => @user, :artifact => @asset, :assessment => params[:rubric_assessment],
+        :graded_anonymously => value_to_boolean(params[:graded_anonymously]))
       @asset.reload
-      artifact_includes = @asset.is_a?(Submission) ? {
-        :artifact => Submission.json_serialization_full_parameters,
-        :rubric_association => {}
-      } : [:artifact, :rubric_association]
-      render :json => @assessment.as_json(:methods => [:ratings, :assessor_name, :related_group_submissions_and_assessments], :include => artifact_includes, :include_root => false)
+      artifact_includes =
+        case @asset
+        when Submission
+          { :artifact => Submission.json_serialization_full_parameters, :rubric_association => {} }
+        when ModeratedGrading::ProvisionalGrade
+          { :rubric_association => {} }
+        else
+          [:artifact, :rubric_association]
+        end
+      json = @assessment.as_json(:methods => [:ratings, :assessor_name, :related_group_submissions_and_assessments],
+        :include => artifact_includes, :include_root => false)
+
+      if @asset.is_a?(ModeratedGrading::ProvisionalGrade)
+        json[:artifact] = @asset.submission.
+          as_json(Submission.json_serialization_full_parameters(:include_root => false)).
+          merge(@asset.grade_attributes)
+      end
+
+      render :json => json
     end
   end
-  
+
   def destroy
     @association = @context.rubric_associations.find(params[:rubric_association_id])
     @rubric = @association.rubric

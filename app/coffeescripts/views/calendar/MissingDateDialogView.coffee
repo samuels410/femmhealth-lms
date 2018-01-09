@@ -1,18 +1,36 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'underscore'
   'Backbone'
   'i18n!calendar.edit'
   'jst/calendar/missingDueDateDialog'
+  'str/htmlEscape'
   'jqueryui/dialog'
   'compiled/jquery/fixDialogButtons'
-], ($, _, {View}, I18n, template) ->
+], ($, _, {View}, I18n, template, htmlEscape) ->
 
   class MissingDateDialogView extends View
     dialogTitle: """
       <span>
         <i class="icon-warning"></i>
-        #{I18n.t('titles.warning', 'Warning')}
+        #{htmlEscape I18n.t('titles.warning', 'Warning')}
       </span>
     """
 
@@ -65,10 +83,12 @@ define [
 
     onAction: (e) =>
       if $(e.currentTarget).hasClass('btn-primary')
-        @cancel(@invalidFields, @sectionNames)
-      else
         @success(@$dialog)
+      else
+        @cancel(@invalidFields, @sectionNames)
 
     cancel: (e) =>
-      @$dialog.dialog('close').remove()
-      @invalidFields[0].focus()
+      if @$dialog? && @$dialog.data("dialog")
+        @$dialog.dialog('close').remove()
+      if @invalidFields[0]?
+        @invalidFields[0].focus()

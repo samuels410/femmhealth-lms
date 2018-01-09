@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -25,11 +25,11 @@ module MigratorHelper
   ERROR_FILENAME = "errors.json"
   OVERVIEW_JSON = "overview.json"
   ALL_FILES_ZIP = "all_files.zip"
-  
+
   COURSE_NO_COPY_ATTS = [:name, :course_code, :start_at, :conclude_at, :grading_standard_id, :tab_configuration, :syllabus_body, :storage_quota]
-  
+
   QUIZ_FILE_DIRECTORY = "Quiz Files"
-  
+
   attr_reader :overview
 
   def self.get_utc_time_from_timestamp(timestamp)
@@ -50,10 +50,6 @@ module MigratorHelper
     end
   end
 
-  def self.unzip_command(zip_file, dest_dir)
-    "unzip -qo #{Shellwords.escape(zip_file)} -d #{Shellwords.escape(dest_dir)} 2>&1"
-  end
-
   def add_error(type, message, object=nil, e=nil)
     logger.error message
     @error_count += 1
@@ -70,7 +66,7 @@ module MigratorHelper
 
     error
   end
-  
+
   def unique_quiz_dir
     if content_migration
       if a = content_migration.attachment
@@ -83,11 +79,11 @@ module MigratorHelper
     end
     "#{QUIZ_FILE_DIRECTORY}/#{key}"
   end
-  
+
   def content_migration
     @settings[:content_migration]
   end
-  
+
   def add_warning(user_message, exception_or_info='')
     if content_migration.respond_to?(:add_warning)
       content_migration.add_warning(user_message, exception_or_info)
@@ -99,11 +95,11 @@ module MigratorHelper
       content_migration.update_conversion_progress(progress)
     end
   end
-  
+
   def logger
     Rails.logger
   end
-  
+
   def find_export_dir
     if @settings[:content_migration_id] && @settings[:user_id]
       slug = "cm_#{@settings[:content_migration_id]}_user_id_#{@settings[:user_id]}_#{@settings[:migration_type]}"
@@ -113,7 +109,7 @@ module MigratorHelper
 
     path = create_export_dir(slug)
     i = 1
-    while File.exists?(path) && File.directory?(path)
+    while File.exist?(path) && File.directory?(path)
       i += 1
       path = create_export_dir("#{slug}_attempt_#{i}")
     end
@@ -122,7 +118,7 @@ module MigratorHelper
   end
 
   def create_export_dir(slug)
-    config = Setting.from_config('external_migration')
+    config = ConfigFile.load('external_migration')
     if config && config[:data_folder]
       folder = config[:data_folder]
     else
@@ -138,7 +134,10 @@ module MigratorHelper
   # Does a JSON export of the courses
   def save_to_file(file_name = nil)
     make_export_dir
-    add_assessment_id_prepend
+
+    @course = @course.with_indifferent_access
+    Importers::AssessmentQuestionImporter.preprocess_migration_data(@course)
+
     file_name ||= File.join(@base_export_dir, FULL_COURSE_JSON_FILENAME)
     file_name = File.expand_path(file_name)
     @course[:full_export_file_path] = file_name
@@ -148,79 +147,76 @@ module MigratorHelper
     File.open(file_name, 'w') { |file| file << @course.to_json}
     file_name
   end
-  
-  def self.download_archive(settings)
-    config = Setting.from_config('external_migration') || {}
-    if settings[:export_archive_path]
-      settings[:archive_file] = File.open(settings[:export_archive_path], 'rb')
-    elsif settings[:course_archive_download_url].present?
-      # open-uri downloads the http response to a tempfile
-      settings[:archive_file] = open(settings[:course_archive_download_url])
-    elsif settings[:attachment_id]
-      att = Attachment.find(settings[:attachment_id])
-      settings[:archive_file] = att.open(:temp_folder => config[:data_folder], :need_local_file => true)
-    else
-      raise "No migration file found"
-    end
 
-    settings[:archive_file]
-  end
-  
   def id_prepender
     @settings[:id_prepender]
   end
-  
-  def prepend_id(id, prepend_value=nil)
-    prepend_value ||= id_prepender
+
+  def self.prepend_id(id, prepend_value)
     prepend_value ? "#{prepend_value}_#{id}" : id
   end
-  
-  def add_assessment_id_prepend
-    if id_prepender && !@settings[:overwrite_quizzes]
-      if @course[:assessment_questions] && @course[:assessment_questions][:assessment_questions]
-        prepend_id_to_questions(@course[:assessment_questions][:assessment_questions])
-      end
-      if @course[:assessments] && @course[:assessments][:assessments]
-        prepend_id_to_assessments(@course[:assessments][:assessments])
-        prepend_id_to_linked_assessment_module_items(@course[:modules]) if @course[:modules]
+
+  def self.should_prepend?(type, id, existing_ids)
+    existing_ids.nil? || existing_ids[type].to_a.include?(id)
+  end
+
+  def self.prepend_id_to_assessment_question_banks(banks, prepend_value, existing_ids=nil)
+    banks.each do |b|
+      if should_prepend?(:assessment_question_banks, b[:migration_id], existing_ids)
+        b[:migration_id] = prepend_id(b[:migration_id], prepend_value)
       end
     end
   end
-  
-  def prepend_id_to_questions(questions, prepend_value=nil)
+
+  # still used by standard/quiz_converter
+  def self.prepend_id_to_questions(questions, prepend_value, existing_ids=nil)
+    key_types = {:migration_id => :assessment_questions, :question_bank_id => :assessment_question_banks,
+     :question_bank_migration_id => :assessment_question_banks, :assessment_question_migration_id => :assessment_questions}
+
     questions.each do |q|
-      q[:migration_id] = prepend_id(q[:migration_id], prepend_value)
-      q[:question_bank_id] = prepend_id(q[:question_bank_id], prepend_value) if q[:question_bank_id].present?
+      key_types.each do |key, type|
+        q[key] = prepend_id(q[key], prepend_value) if q[key].present? && should_prepend?(type, q[key], existing_ids)
+      end
     end
   end
-  
-  def prepend_id_to_assessments(assessments, prepend_value=nil)
+
+  def self.prepend_id_to_assessments(assessments, prepend_value, existing_ids=nil)
     assessments.each do |a|
-      a[:migration_id] = prepend_id(a[:migration_id], prepend_value)
-      if h = a[:assignment]
-        h[:migration_id] = prepend_id(h[:migration_id], prepend_value)
+      if a[:migration_id].present? && should_prepend?(:assessments, a[:migration_id], existing_ids)
+        a[:migration_id] = prepend_id(a[:migration_id], prepend_value)
+        if h = a[:assignment]
+          h[:migration_id] = prepend_id(h[:migration_id], prepend_value)
+        end
       end
 
       a[:questions].each do |q|
         if q[:question_type] == "question_reference"
-          q[:migration_id] = prepend_id(q[:migration_id], prepend_value)
+          if should_prepend?(:assessment_questions, q[:migration_id], existing_ids)
+            q[:migration_id] = prepend_id(q[:migration_id], prepend_value)
+          end
         elsif q[:question_type] == "question_group"
-          q[:question_bank_migration_id] = prepend_id(q[:question_bank_migration_id], prepend_value) if q[:question_bank_migration_id].present?
+          if q[:question_bank_migration_id].present? && should_prepend?(:assessment_question_banks, q[:question_bank_migration_id], existing_ids)
+            q[:question_bank_migration_id] = prepend_id(q[:question_bank_migration_id], prepend_value)
+          end
           q[:questions].each do |gq|
-            gq[:migration_id] = prepend_id(gq[:migration_id], prepend_value)
+            if should_prepend?(:assessment_questions, gq[:migration_id], existing_ids)
+              gq[:migration_id] = prepend_id(gq[:migration_id], prepend_value)
+            end
           end
         end
       end
     end
   end
 
-  def prepend_id_to_linked_assessment_module_items(modules, prepend_value=nil)
+  def self.prepend_id_to_linked_assessment_module_items(modules, prepend_value, existing_ids=nil)
     modules.each do |m|
       next unless m[:items]
       m[:items].each do |i|
         if i[:linked_resource_type] =~ /assessment|quiz/i
-          i[:item_migration_id] = prepend_id(i[:item_migration_id], prepend_value)
-          i[:linked_resource_id] = prepend_id(i[:linked_resource_id], prepend_value)
+          if should_prepend?(:assessments, i[:linked_resource_id], existing_ids)
+            i[:item_migration_id] = prepend_id(i[:item_migration_id], prepend_value)
+            i[:linked_resource_id] = prepend_id(i[:linked_resource_id], prepend_value)
+          end
         end
       end
     end
@@ -245,6 +241,18 @@ module MigratorHelper
       File.open(file_name, 'w') { |file| file << @errors.to_json}
       file_name
     end
+  end
+
+  def add_learning_outcome_to_overview(overview, outcome)
+    unless outcome[:type] == "learning_outcome_group"
+      overview[:learning_outcomes] << {:migration_id => outcome[:migration_id], :title => outcome[:title]}
+    end
+    if outcome[:outcomes]
+      outcome[:outcomes].each do |sub_outcome|
+        overview = add_learning_outcome_to_overview(overview, sub_outcome)
+      end
+    end
+    overview
   end
 
   def overview
@@ -272,6 +280,7 @@ module MigratorHelper
     @overview[:all_questions_qti_export] = @course[:all_questions_qti_export] if @course[:all_questions_qti_export]
     @overview[:course_outline] = @course[:course_outline] if @course[:course_outline]
     @overview[:error_count] = @error_count
+
     if @course[:assessments]
       @overview[:assessments] = []
       if @course[:assessments][:assessments]
@@ -290,10 +299,19 @@ module MigratorHelper
           assmnt[:error_message] = a[:error_message] if a[:error_message]
           if a[:assignment] && a[:assignment][:migration_id]
             assmnt[:assignment_migration_id] = a[:assignment][:migration_id]
+            ensure_linked_assignment(a[:assignment], quiz_migration_id: a[:migration_id])
           end
         end
       end
     end
+
+    if @course[:assessment_question_banks]
+      @overview[:assessment_question_banks] ||= []
+      @course[:assessment_question_banks].each do |aqb|
+        @overview[:assessment_question_banks] << aqb.dup
+      end
+    end
+
     if @course[:calendar_events]
       @overview[:calendar_events] = []
       @course[:calendar_events].each do |e|
@@ -333,17 +351,11 @@ module MigratorHelper
     if @course[:modules]
       @overview[:modules] = []
       @course[:modules].each do |m|
-        mod = {}
-        @overview[:modules] << mod
-        mod[:title] = m[:title]
-        mod[:order] = m[:order]
-        mod[:migration_id] = m[:migration_id]
-        mod[:description] = m[:description]
-        mod[:error_message] = m[:error_message] if m[:error_message]
+        @overview[:modules] << module_overview_hash(m)
       end
     end
     if @course[:assignments]
-      @overview[:assignments] = []
+      @overview[:assignments] ||= []
       @course[:assignments].each do |a|
         assign = {}
         dates << a[:due_date] if a[:due_date]
@@ -356,25 +368,27 @@ module MigratorHelper
         assign[:error_message] = a[:error_message] if a[:error_message]
       end
     end
+    if @course[:announcements]
+      @overview[:announcements] = []
+      @course[:announcements].each do |t|
+        ann = {}
+        @overview[:announcements] << ann
+        ann[:title] = t[:title]
+        ann[:migration_id] = t[:migration_id]
+        ann[:error_message] = t[:error_message] if t[:error_message]
+      end
+    end
     if @course[:discussion_topics]
       @overview[:discussion_topics] = []
-      @overview[:announcements] = []
       @course[:discussion_topics].each do |t|
         topic = {}
-        if t[:type] == 'announcement'
-          @overview[:announcements] << topic
-        else
-          @overview[:discussion_topics] << topic
-        end
+        @overview[:discussion_topics] << topic
         topic[:title] = t[:title]
-        topic[:topic_type] = t[:type]
         topic[:migration_id] = t[:migration_id]
         topic[:error_message] = t[:error_message] if t[:error_message]
         if t[:assignment] && a_mig_id = t[:assignment][:migration_id]
-          if assign = @overview[:assignments].find{|a| a[:migration_id] == a_mig_id}
-            assign[:topic_migration_id] = t[:migration_id]
-            topic[:assignment_migration_id] = a_mig_id
-          end
+          topic[:assignment_migration_id] = a_mig_id
+          ensure_linked_assignment(t[:assignment], topic_migration_id: t[:migration_id])
         end
       end
     end
@@ -404,6 +418,10 @@ module MigratorHelper
         @overview[:wikis] << wiki
         wiki[:migration_id] = w[:migration_id]
         wiki[:title] = w[:title]
+        if w[:assignment] && a_mig_id = w[:assignment][:migration_id]
+          wiki[:assignment_migration_id] = a_mig_id
+          ensure_linked_assignment(w[:assignment], page_migration_id: w[:migration_id])
+        end
       end
     end
     if @course[:external_tools]
@@ -416,7 +434,28 @@ module MigratorHelper
         tool[:title] = ct[:title]
       end
     end
-    
+
+    if @course[:tool_profiles]
+      @overview[:tool_profiles] = []
+      @course[:tool_profiles].each do |tool_profile|
+        title = tool_profile.dig('tool_profile', 'product_instance', 'product_info', 'product_name', 'default_value')
+        next unless title
+        profile = {
+          migration_id: tool_profile['migration_id'],
+          title: title
+        }
+        @overview[:tool_profiles] << profile
+      end
+    end
+
+    if @course[:learning_outcomes]
+      @overview[:learning_outcomes] = []
+      @course[:learning_outcomes].each do |outcome|
+        next unless outcome
+        add_learning_outcome_to_overview(@overview, outcome)
+      end
+    end
+
     if dates.length > 0
       @overview[:start_timestamp] ||= dates.min
       @overview[:end_timestamp] ||= dates.max
@@ -427,6 +466,36 @@ module MigratorHelper
 #      @overview[:scrape_errors] << {:error_message=>e[:error_message], :object_type=>e[:object_type]}
 #    end
     @overview
+  end
+
+  private
+
+  def module_overview_hash(m)
+    mod = {}
+    mod[:title] = m[:title]
+    mod[:order] = m[:order]
+    mod[:migration_id] = m[:migration_id]
+    mod[:description] = m[:description]
+    mod[:error_message] = m[:error_message] if m[:error_message]
+
+    sub_mods, items = m[:items].partition{|mi| mi[:type] == "submodule"}
+    mod[:item_count] = items.count
+    if sub_mods.any?
+      mod[:submodules] = sub_mods.map{|sub| module_overview_hash(sub)}
+      mod[:item_count] += mod[:submodules].sum{|sub| sub[:item_count]}
+    end
+    mod
+  end
+
+  def ensure_linked_assignment(topic_or_quiz_assignment_hash, related_object_link)
+    @overview[:assignments] ||= []
+    ah = @overview[:assignments].detect { |a| a[:migration_id] == topic_or_quiz_assignment_hash[:migration_id] }
+    unless ah
+      ah = topic_or_quiz_assignment_hash.slice(:title, :migration_id, :assignment_group_migration_id)
+      @overview[:assignments] << ah
+    end
+    ah.merge!(related_object_link)
+    ah
   end
 end
 end

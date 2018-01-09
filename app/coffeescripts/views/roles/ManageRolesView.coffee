@@ -1,14 +1,35 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'i18n!roles'
   'jquery'
   'underscore'
   'Backbone'
   'jst/roles/manageRoles'
   'compiled/views/roles/PermissionButtonView'
   'compiled/views/roles/RoleHeaderView'
-], ($, _, Backbone, template, PermissionButtonView, RoleHeaderView) -> 
+  'str/htmlEscape'
+], (I18n, $, _, Backbone, template, PermissionButtonView, RoleHeaderView, htmlEscape) ->
   class ManageRolesView extends Backbone.View
     template: template
     className: 'manage-roles-table'
+
+    @optionProperty 'base_role_types'
 
     # Method Summary
     #   When a new Role is added/removed from the collection, re-draw the table.
@@ -37,11 +58,12 @@ define [
     #   called, which should get called when role is added or removed.
     # @api private
     renderHeader: -> 
-      @$el.find('thead tr').html "<th>Permissions</th>"
+      @$el.find('thead tr').html "<th>#{htmlEscape(I18n.t('permissions', 'Permissions'))}</th>"
 
-      @collection.each (role) => 
+      @collection.each (role) =>
         roleHeaderView = new RoleHeaderView
           model: role
+          base_role_types: @base_role_types
 
         @$el.find('thead tr').append roleHeaderView.render().el
 
@@ -90,20 +112,20 @@ define [
 
       _.each @permission_groups, (permission_group) => 
         # Add the headers to the group
-        permission_group_header = """
+        permission_group_header_html = """
                                     <tr class="toolbar">
-                                      <th colspan="#{@collection.length + 1}">#{permission_group.group_name.toUpperCase()}</th>
+                                      <th colspan="#{htmlEscape(@collection.length + 1)}">#{htmlEscape(permission_group.group_name.toUpperCase())}</th>
                                     </tr>
                                   """
 
-        @$el.find('tbody').append permission_group_header
+        @$el.find('tbody').append permission_group_header_html
 
         # Add each permission item.
         _.each permission_group.group_permissions, (permission_row) => 
 
           permission_row_html = """
                             <tr>
-                              <th role="rowheader">#{permission_row.label}</th>
+                              <th role="rowheader">#{htmlEscape(permission_row.label)}</th>
                             </tr>
                            """
 

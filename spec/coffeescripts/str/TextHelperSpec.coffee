@@ -1,5 +1,22 @@
-define [ 'compiled/str/TextHelper' ], ({delimit, truncateText}) ->
-  module 'TextHelper'
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+define [ 'compiled/str/TextHelper' ], ({delimit, truncateText, formatMessage}) ->
+  QUnit.module 'TextHelper'
 
   test 'delimit: comma-delimits long numbers', ->
     equal delimit(123456), '123,456'
@@ -15,6 +32,10 @@ define [ 'compiled/str/TextHelper' ], ({delimit, truncateText}) ->
     equal delimit(123), '123'
     equal delimit(0), '0'
     equal delimit(null), '0'
+
+  test 'no double encoding of url', ->
+    equal formatMessage("https://blah.blee.com/Steven%20Test/thing%20that%20cool…anvas_non_Demonstration_-_Flash_%28joel%29_-_123456_03.41.18PM.html "),
+     "<a href='https:&#x2F;&#x2F;blah.blee.com&#x2F;Steven%20Test&#x2F;thing%20that%20cool…anvas_non_Demonstration_-_Flash_%28joel%29_-_123456_03.41.18PM.html'>https:&#x2F;&#x2F;blah.blee.com&#x2F;Steven%20Test&#x2F;thing%20that%20cool…anvas_non_Demonstration_-_Flash_%28joel%29_-_123456_03.41.18PM.html</a> "
 
   test 'delimit: should not error on NaN', ->
     equal delimit(0/0), 'NaN'
@@ -34,3 +55,6 @@ define [ 'compiled/str/TextHelper' ], ({delimit, truncateText}) ->
   test 'truncateText: should break up the first word if it exceeds max', ->
     equal truncateText("zomgzomg", max: 6), "zom..."
     equal truncateText("zomgzomg", max: 7), "zomg..."
+
+  test 'formatMessage: prepends http:// to a link to example.com/things', ->
+    equal formatMessage('example.com/things'), "<a href='http:&#x2F;&#x2F;example.com&#x2F;things'>example.com&#x2F;things</a>"

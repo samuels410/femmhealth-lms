@@ -1,128 +1,119 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require File.expand_path('../spec_helper', File.dirname(__FILE__))
 
 
 describe AuthenticationMethods do
-
-  describe '#initiate_delegated_login' do;
-    let(:request) { stub(:host_with_port => '', :host => '' ) }
-    let(:controller) { Spec::MockController.new(domain_root_account, request) }
-
-    describe 'when auth is not delegated' do
-      let(:domain_root_account) { stub(:delegated_authentication? => false) }
-
-      it 'returns false' do
-        controller.initiate_delegated_login.should be_false
-      end
-
-      it 'does not redirect anywhere' do
-        controller.initiate_delegated_login
-        controller.redirects.should == []
-      end
-    end
-
-    describe 'when auth is CAS' do
-      let(:domain_root_account) do
-        stub(
-          :delegated_authentication? => true,
-          :cas_authentication? => true,
-          :saml_authentication? => false,
-          :account_authorization_config => stub(:auth_base => 'base_url')
-        )
-      end
-
-      it 'returns true' do
-        controller.initiate_delegated_login.should be_true
-      end
-
-      it 'redirects to CAS client url' do
-        client = stub(:add_service_to_login_url => 'cas_login_url')
-        CASClient::Client.stubs(:new => client)
-        controller.initiate_delegated_login
-        controller.redirects.should == ['cas_login_url']
-      end
-
-      it 'can be overriden by passing the canvas_login parameter' do
-        controller = Spec::MockController.new(domain_root_account, request, :canvas_login => true)
-        controller.initiate_delegated_login.should be_false
-        controller.redirects.should == []
-      end
-    end
-
-    describe 'when auth is SAML' do
-      let(:domain_root_account) do
-        stub(
-          :delegated_authentication? => true,
-          :cas_authentication? => false,
-          :saml_authentication? => true,
-          :account_authorization_config => stub(:saml_settings => {}, :debugging? => false),
-          :auth_discovery_url => nil
-        )
-      end
-
-      let(:saml_request) { stub(:generate_request => 'saml_login_url') }
-
-      before do
-        pending('requires SAML extension') unless AccountAuthorizationConfig.saml_enabled
-        Onelogin::Saml::AuthRequest.stubs(:new => saml_request)
-      end
-
-      it 'returns true' do
-        controller.initiate_delegated_login.should be_true
-      end
-
-      it 'redirects to SAML auth request url' do
-        controller.initiate_delegated_login
-        controller.redirects.should == ['saml_login_url']
-      end
-
-      it 'redirects to the discovery url if there is one' do
-        domain_root_account.stubs(:auth_discovery_url => 'discovery_url')
-        controller.initiate_delegated_login
-        controller.redirects.should == ['discovery_url']
-      end
-
-      it 'can be overriden by passing the canvas_login parameter' do
-        controller = Spec::MockController.new(domain_root_account, request, :canvas_login => true)
-        controller.initiate_delegated_login.should be_false
-        controller.redirects.should == []
-      end
-    end
-  end
-
   describe "#load_user" do
     before do
-      @request = stub(:env => {'encrypted_cookie_store.session_refreshed_at' => 5.minutes.ago})
-      @controller = Spec::MockController.new(nil, @request)
-      @controller.stubs(:load_pseudonym_from_access_token)
-      @controller.stubs(:api_request?).returns(false)
+      @request = double(:env => {'encrypted_cookie_store.session_refreshed_at' => 5.minutes.ago},
+                      :format =>double(:json? => false),
+                      :host_with_port => "")
+      @controller = RSpec::MockController.new(nil, @request)
+      allow(@controller).to receive(:load_pseudonym_from_access_token)
+      allow(@controller).to receive(:api_request?).and_return(false)
+      allow(@controller).to receive(:logger).and_return(double(info: nil))
     end
 
     context "with active session" do
       before do
         user_with_pseudonym
-        @pseudonym_session = stub(:record => @pseudonym)
-        PseudonymSession.stubs(:find).returns(@pseudonym_session)
+        @pseudonym_session = double(:record => @pseudonym)
+        allow(PseudonymSession).to receive(:find).and_return(@pseudonym_session)
       end
 
       it "should set the user and pseudonym" do
-        @controller.send(:load_user).should == @user
-        @controller.instance_variable_get(:@current_user).should == @user
-        @controller.instance_variable_get(:@current_pseudonym).should == @pseudonym
+        expect(@controller.send(:load_user)).to eq @user
+        expect(@controller.instance_variable_get(:@current_user)).to eq @user
+        expect(@controller.instance_variable_get(:@current_pseudonym)).to eq @pseudonym
       end
 
       it "should destroy session if user was explicitly logged out" do
         @user.stamp_logout_time!
         @pseudonym.reload
-        @controller.expects(:destroy_session).once
-        @controller.send(:load_user).should be_nil
-        @controller.instance_variable_get(:@current_user).should be_nil
-        @controller.instance_variable_get(:@current_pseudonym).should be_nil
+        expect(@controller).to receive(:destroy_session).once
+        expect(@controller.send(:load_user)).to be_nil
+        expect(@controller.instance_variable_get(:@current_user)).to be_nil
+        expect(@controller.instance_variable_get(:@current_pseudonym)).to be_nil
       end
+
+      it "should not destroy session if user was logged out in the future" do
+        Timecop.freeze(5.minutes.from_now) do
+          @user.stamp_logout_time!
+        end
+        @pseudonym.reload
+        expect(@controller.send(:load_user)).to eq @user
+        expect(@controller.instance_variable_get(:@current_user)).to eq @user
+        expect(@controller.instance_variable_get(:@current_pseudonym)).to eq @pseudonym
+      end
+
+      it "should set the CSRF cookie" do
+        @controller.send(:load_user)
+        expect(@controller.cookies['_csrf_token']).not_to be nil
+      end
+    end
+  end
+
+  describe "#masked_authenticity_token" do
+    before do
+      @request = double(host_with_port: "")
+      @controller = RSpec::MockController.new(nil, @request)
+      @session_options = {}
+      expect(CanvasRails::Application.config).to receive(:session_options).at_least(:once).and_return(@session_options)
+    end
+
+    it "should not set SSL-only explicitly if session_options doesn't specify" do
+      @controller.send(:masked_authenticity_token)
+      expect(@controller.cookies['_csrf_token']).not_to be_has_key(:secure)
+    end
+
+    it "should set SSL-only if session_options specifies" do
+      @session_options[:secure] = true
+      @controller.send(:masked_authenticity_token)
+      expect(@controller.cookies['_csrf_token'][:secure]).to be true
+    end
+
+    it "should set httponly explicitly false on a non-files host" do
+      @controller.send(:masked_authenticity_token)
+      expect(@controller.cookies['_csrf_token'][:httponly]).to be false
+    end
+
+    it "should set httponly explicitly true on a files host" do
+      expect(HostUrl).to receive(:is_file_host?).once.with(@request.host_with_port).and_return(true)
+      @controller.send(:masked_authenticity_token)
+      expect(@controller.cookies['_csrf_token'][:httponly]).to be true
+    end
+
+    it "should not set a cookie domain explicitly if session_options doesn't specify" do
+      @controller.send(:masked_authenticity_token)
+      expect(@controller.cookies['_csrf_token']).not_to be_has_key(:domain)
+    end
+
+    it "should set a cookie domain explicitly if session_options specifies" do
+      @session_options[:domain] = "cookie domain"
+      @controller.send(:masked_authenticity_token)
+      expect(@controller.cookies['_csrf_token'][:domain]).to eq @session_options[:domain]
     end
   end
 end
 
-class Spec::MockController
+class RSpec::MockController
+  include Canvas::RequestForgeryProtection
   include AuthenticationMethods
 
   attr_reader :redirects, :params, :session, :request
@@ -149,5 +140,8 @@ class Spec::MockController
     options[:target]
   end
 
+  def cookies
+    @cookies ||= {}
+  end
 end
 

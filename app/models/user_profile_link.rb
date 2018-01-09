@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -12,12 +12,14 @@
 # A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
 # details.
 #
-# You should have received a copy of the GNU Affero General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 
 class UserProfileLink < ActiveRecord::Base
-  attr_accessible :url, :title
-
   belongs_to :user_profile
-  validates_length_of :title, :maximum => maximum_string_length, :allow_nil => true, :allow_blank => true
+
+  validates :title, length: { maximum: maximum_string_length, allow_nil: true, allow_blank: true }
+  validates :url, length: { maximum: 4.kilobytes-1, allow_nil: false, allow_blank: true }
+  include CustomValidations
+  validates_as_url :url
 end

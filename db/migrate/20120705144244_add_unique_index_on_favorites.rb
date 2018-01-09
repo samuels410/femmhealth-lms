@@ -1,10 +1,26 @@
-class AddUniqueIndexOnFavorites < ActiveRecord::Migration
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+class AddUniqueIndexOnFavorites < ActiveRecord::Migration[4.2]
   tag :postdeploy
 
   def self.up
     # cleanup must happen synchronously in order to create the unique index
-    # the extra subquery is necessary to avoid error 1093 on mysql
-    Favorite.where("id NOT IN (SELECT * FROM (SELECT MIN(id) FROM favorites GROUP BY user_id, context_id, context_type) x)").delete_all
+    Favorite.where("id NOT IN (SELECT * FROM (SELECT MIN(id) FROM #{Favorite.quoted_table_name} GROUP BY user_id, context_id, context_type) x)").delete_all
     add_index :favorites, [:user_id, :context_id, :context_type], :unique => true, :name => "index_favorites_unique_user_object"
   end
 

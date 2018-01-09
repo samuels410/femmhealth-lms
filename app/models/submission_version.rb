@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,10 +17,11 @@
 #
 
 class SubmissionVersion < ActiveRecord::Base
-  attr_accessible :context_id, :context_type, :user_id, :assignment_id, :version_id
-
-  belongs_to :context, :polymorphic => true
+  belongs_to :assignment
+  belongs_to :context, polymorphic: [:course]
   belongs_to :version
+
+  validates_presence_of :context_id, :version_id, :user_id, :assignment_id
 
   class << self
     def index_version(version)
@@ -38,9 +39,9 @@ class SubmissionVersion < ActiveRecord::Base
       # TODO make context extraction more efficient in bulk case
       model = if options[:ignore_errors]
         begin
-          return nil unless Submission.where(:id => version.versionable_id).exists?
+          return nil unless Submission.active.where(id: version.versionable_id).exists?
           version.model
-        rescue ArgumentError
+        rescue Psych::SyntaxError
           return nil
         end
       else

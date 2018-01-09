@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 - 2013 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,6 +16,8 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+require 'atom'
+
 # @API Groups
 #
 # Groups serve as the data for a few different ideas in Canvas.  The first is
@@ -30,93 +32,132 @@
 # context for many other types of functionality and interaction, such as
 # collections, discussions, wikis, and shared files.
 #
-# @object Group
+# @model Group
 #     {
-#       // The ID of the group.
-#       "id": 17,
-#
-#       // The display name of the group.
-#       "name": "Math Group 1",
-#
-#       // A description of the group. This is plain text.
-#       "description": null,
-#
-#       // Whether or not the group is public.  Currently only community groups
-#       // can be made public.  Also, once a group has been set to public, it
-#       // cannot be changed back to private.
-#       "is_public": false,
-#
-#       // How people are allowed to join the group.  For all groups except for
-#       // community groups, the user must share the group's parent course or
-#       // account.  For student organized or community groups, where a user
-#       // can be a member of as many or few as they want, the applicable
-#       // levels are "parent_context_auto_join", "parent_context_request", and
-#       // "invitation_only".  For class groups, where students are divided up
-#       // and should only be part of one group of the category, this value
-#       // will always be "invitation_only", and is not relevant.
-#       //
-#       // * If "parent_context_auto_join", anyone can join and will be
-#       //   automatically accepted.
-#       // * If "parent_context_request", anyone  can request to join, which
-#       //   must be approved by a group moderator.
-#       // * If "invitation_only", only those how have received an
-#       //   invitation my join the group, by accepting that invitation.
-#       "join_level": "invitation_only",
-#
-#       // The number of members currently in the group
-#       "members_count": 0,
-#
-#       // The url of the group's avatar
-#       "avatar_url": "https://<canvas>/files/avatar_image.png",
-#
-#       // The course or account that the group belongs to. The pattern here is
-#       // that whatever the context_type is, there will be an _id field named
-#       // after that type. So if instead context_type was "account", the
-#       // course_id field would be replaced by an account_id field.
-#       "context_type": "Course",
-#       "course_id": 3,
-#
-#       // Certain types of groups have special role designations. Currently,
-#       // these include: "communities", "student_organized", and "imported".
-#       // Regular course/account groups have a role of null.
-#       "role": null,
-#
-#       // The ID of the group's category.
-#       "group_category_id": 4,
-#
-#       // the storage quota for the group, in megabytes
-#       "storage_quota_mb": 50,
-#
-#       // optional: the permissions the user has for the group.
-#       // returned only for a single group and include[]=permissions
-#       "permissions": {
-#          "create_discussion_topic": true
-#        }
+#       "id": "Group",
+#       "description": "",
+#       "properties": {
+#         "id": {
+#           "description": "The ID of the group.",
+#           "example": 17,
+#           "type": "integer"
+#         },
+#         "name": {
+#           "description": "The display name of the group.",
+#           "example": "Math Group 1",
+#           "type": "string"
+#         },
+#         "description": {
+#           "description": "A description of the group. This is plain text.",
+#           "type": "string"
+#         },
+#         "is_public": {
+#           "description": "Whether or not the group is public.  Currently only community groups can be made public.  Also, once a group has been set to public, it cannot be changed back to private.",
+#           "example": false,
+#           "type": "boolean"
+#         },
+#         "followed_by_user": {
+#           "description": "Whether or not the current user is following this group.",
+#           "example": false,
+#           "type": "boolean"
+#         },
+#         "join_level": {
+#           "description": "How people are allowed to join the group.  For all groups except for community groups, the user must share the group's parent course or account.  For student organized or community groups, where a user can be a member of as many or few as they want, the applicable levels are 'parent_context_auto_join', 'parent_context_request', and 'invitation_only'.  For class groups, where students are divided up and should only be part of one group of the category, this value will always be 'invitation_only', and is not relevant. * If 'parent_context_auto_join', anyone can join and will be automatically accepted. * If 'parent_context_request', anyone  can request to join, which must be approved by a group moderator. * If 'invitation_only', only those how have received an invitation my join the group, by accepting that invitation.",
+#           "example": "invitation_only",
+#           "type": "string",
+#           "allowableValues": {
+#             "values": [
+#               "parent_context_auto_join",
+#               "parent_context_request",
+#               "invitation_only"
+#             ]
+#           }
+#         },
+#         "members_count": {
+#           "description": "The number of members currently in the group",
+#           "example": 0,
+#           "type": "integer"
+#         },
+#         "avatar_url": {
+#           "description": "The url of the group's avatar",
+#           "example": "https://<canvas>/files/avatar_image.png",
+#           "type": "string"
+#         },
+#         "context_type": {
+#           "description": "The course or account that the group belongs to. The pattern here is that whatever the context_type is, there will be an _id field named after that type. So if instead context_type was 'account', the course_id field would be replaced by an account_id field.",
+#           "example": "Course",
+#           "type": "string"
+#         },
+#         "course_id": {
+#           "example": 3,
+#           "type": "integer"
+#         },
+#         "role": {
+#           "description": "Certain types of groups have special role designations. Currently, these include: 'communities', 'student_organized', and 'imported'. Regular course/account groups have a role of null.",
+#           "type": "string",
+#           "allowableValues": {
+#             "values": [
+#               "communities",
+#               "student_organized",
+#               "imported"
+#             ]
+#           }
+#         },
+#         "group_category_id": {
+#           "description": "The ID of the group's category.",
+#           "example": 4,
+#           "type": "integer"
+#         },
+#         "sis_group_id": {
+#           "description": "The SIS ID of the group. Only included if the user has permission to view SIS information.",
+#           "example": "group4a",
+#           "type": "string"
+#         },
+#         "sis_import_id": {
+#           "description": "The id of the SIS import if created through SIS. Only included if the user has permission to manage SIS information.",
+#           "example": 14,
+#           "type": "integer"
+#         },
+#         "storage_quota_mb": {
+#           "description": "the storage quota for the group, in megabytes",
+#           "example": 50,
+#           "type": "integer"
+#         },
+#         "permissions": {
+#           "description": "optional: the permissions the user has for the group. returned only for a single group and include[]=permissions",
+#           "example": {"create_discussion_topic": true, "create_announcement": true},
+#           "type": "object",
+#           "key": { "type": "string" },
+#           "value": { "type": "boolean" }
+#         }
+#       }
 #     }
 #
 class GroupsController < ApplicationController
-  before_filter :get_context
-  before_filter :require_user, :only => %w[index]
+  before_action :get_context
+  before_action :require_user, :only => %w[index accept_invitation activity_stream activity_stream_summary]
 
   include Api::V1::Attachment
   include Api::V1::Group
   include Api::V1::GroupCategory
+  include Context
 
-  SETTABLE_GROUP_ATTRIBUTES = %w(name description join_level is_public group_category avatar_attachment storage_quota_mb)
+  SETTABLE_GROUP_ATTRIBUTES = %w(
+    name description join_level is_public group_category avatar_attachment
+    storage_quota_mb max_membership leader
+  ).freeze
 
   include TextHelper
 
   def context_group_members
     @group = @context
     if authorized_action(@group, @current_user, :read_roster)
-      respond_to do |format|
-        format.json { render :json => @group.members_json_cached }
-      end
+      render :json => @group.members_json_cached
     end
   end
 
   def unassigned_members
-    category = @context.group_categories.find_by_id(params[:category_id])
+    category = @context.group_categories.where(id: params[:category_id]).first
     return render :json => {}, :status => :not_found unless category
     page = (params[:page] || 1).to_i rescue 1
     per_page = Api.per_page_for(self, default: 15, max: 100)
@@ -126,84 +167,90 @@ class GroupsController < ApplicationController
       groups = []
     end
 
-    if CANVAS_RAILS2
-      scope = @context.users_not_in_groups(groups, order: User.sortable_name_order_by_clause('users'))
-      total_entries = scope.count('users.id', distinct: true)
-      users = scope.paginate(page: page, per_page: per_page, total_entries: total_entries)
-    else
-      users = @context.users_not_in_groups(groups, order: User.sortable_name_order_by_clause('users')).
-        paginate(page: page, per_page: per_page)
-    end
+    users = @context.users_not_in_groups(groups, order: User.sortable_name_order_by_clause('users')).
+      paginate(page: page, per_page: per_page)
 
     if authorized_action(@context, @current_user, :manage)
-      respond_to do |format|
-        format.json {
-          json = {
-            :pages => users.total_pages,
-            :current_page => users.current_page,
-            :next_page => users.next_page,
-            :previous_page => users.previous_page,
-            :total_entries => users.total_entries,
-            :users => users.map { |u| u.group_member_json(@context) }
-          }
-          json[:pagination_html] = render_to_string(:partial => 'user_pagination', :locals => { :users => users }) unless params[:no_html]
-          render :json => json
-        }
-      end
+      json = {
+        :pages => users.total_pages,
+        :current_page => users.current_page,
+        :next_page => users.next_page,
+        :previous_page => users.previous_page,
+        :total_entries => users.total_entries,
+        :users => users.map { |u| u.group_member_json(@context) }
+      }
+      json[:pagination_html] = render_to_string(:partial => 'user_pagination', :locals => { :users => users }) unless params[:no_html]
+      render :json => json
     end
   end
 
   # @API List your groups
   #
-  # Returns a list of active groups for the current user.
+  # Returns a paginated list of active groups for the current user.
   #
-  # @argument context_type [Optional, String, "Account"|"Course"]
+  # @argument context_type [String, "Account"|"Course"]
   #  Only include groups that are in this type of context.
   #
+  # @argument include[] [String, "tabs"]
+  #   - "tabs": Include the list of tabs configured for each group.  See the
+  #     {api:TabsController#index List available tabs API} for more information.
+  #
   # @example_request
-  #     curl https://<canvas>/api/v1/users/self/groups?context_type=Account \ 
+  #     curl https://<canvas>/api/v1/users/self/groups?context_type=Account \
   #          -H 'Authorization: Bearer <token>'
   #
   # @returns [Group]
   def index
     return context_index if @context
+    includes = {:include => params[:include]}
     groups_scope = @current_user.current_groups
     respond_to do |format|
       format.html do
-        @groups = groups_scope.with_each_shard{ |scope|
-          scope = scope.by_name
-          scope = scope.where(:context_type => params[:context_type]) if params[:context_type]
-          scope.includes(:group_category)
-        }
+        groups_scope = groups_scope.by_name
+        groups_scope = groups_scope.where(:context_type => params[:context_type]) if params[:context_type]
+        groups_scope = groups_scope.preload(:group_category, :context)
+
+        groups = groups_scope.shard(@current_user).to_a
+        groups.select!{|group| group.context_type != 'Course' || group.context.grants_right?(@current_user, :read)}
+
+        # Split the groups out into those in concluded courses and those not in concluded courses
+        @current_groups, @previous_groups = groups.partition do |group|
+          group.context_type != 'Course' || !group.context.concluded?('StudentEnrollment')
+        end
       end
 
       format.json do
-        @groups = BookmarkedCollection.with_each_shard(
-          Group::Bookmarker, groups_scope) { |scope|
-          scope = scope.scoped
+        @groups = ShardedBookmarkedCollection.build(Group::Bookmarker, groups_scope.order(:name, :id)) do |scope|
           scope = scope.where(:context_type => params[:context_type]) if params[:context_type]
-          scope.includes(:group_category) }
+          scope.preload(:group_category, :context)
+        end
         @groups = Api.paginate(@groups, self, api_v1_current_user_groups_url)
-        render :json => (@groups.map { |g| group_json(g, @current_user, session) })
+        render :json => (@groups.map { |g| group_json(g, @current_user, session,includes) })
       end
     end
   end
 
   # @API List the groups available in a context.
   #
-  # Returns the list of active groups in the given context that are visible to user.
+  # Returns the paginated list of active groups in the given context that are visible to user.
+  #
+  # @argument only_own_groups [Boolean]
+  #  Will only include groups that the user belongs to if this is set
+  #
+  # @argument include[] [String, "tabs"]
+  #   - "tabs": Include the list of tabs configured for each group.  See the
+  #     {api:TabsController#index List available tabs API} for more information.
   #
   # @example_request
-  #     curl https://<canvas>/api/v1/courses/1/groups \ 
+  #     curl https://<canvas>/api/v1/courses/1/groups \
   #          -H 'Authorization: Bearer <token>'
   #
   # @returns [Group]
   def context_index
     return unless authorized_action(@context, @current_user, :read_roster)
-
-    @groups      = all_groups = @context.groups.active.by_name
-    @categories  = @context.group_categories.order("role <> 'student_organized'", GroupCategory.best_unicode_collation_key('name'))
-    @user_groups = @current_user.group_memberships_for(@context) if @current_user
+    @groups      = all_groups = @context.groups.active
+                                  .order(GroupCategory::Bookmarker.order_by, Group::Bookmarker.order_by)
+                                  .eager_load(:group_category)
 
     unless api_request?
       if @context.is_a?(Account)
@@ -216,49 +263,63 @@ class GroupsController < ApplicationController
         @active_tab = "people"
         @group_user_type = "student"
         @allow_self_signup = true
+        if @context.grants_right? @current_user, session, :read_as_admin
+          js_env STUDENT_CONTEXT_CARDS_ENABLED: @domain_root_account.feature_enabled?(:student_context_cards)
+        end
       end
 
       add_crumb user_crumb, named_context_url(@context, :context_users_url)
       add_crumb t('#crumbs.groups', "Groups"), named_context_url(@context, :context_groups_url)
     end
 
-    unless @context.grants_right?(@current_user, session, :manage_groups)
-      @groups = @user_groups = @groups & (@user_groups || [])
-    end
-
     respond_to do |format|
       format.html do
-        if @context.grants_right?(@current_user, session, :manage_groups)
-          if @domain_root_account.enable_manage_groups2?
-            categories_json = @categories.map{ |cat| group_category_json(cat, @current_user, session, include: ["progress_url", "unassigned_users_count", "groups_count"]) }
-            uncategorized = @context.groups.uncategorized.all
-            if uncategorized.present?
-              json = group_category_json(GroupCategory.uncategorized, @current_user, session)
-              json["groups"] = uncategorized.map{ |group| group_json(group, @current_user, session) }
-              categories_json << json
-            end
+        @categories  = @context.group_categories.order("role <> 'student_organized'", GroupCategory.best_unicode_collation_key('name'))
+        @user_groups = @current_user.group_memberships_for(@context) if @current_user
 
-            js_env group_categories: categories_json,
-                   group_user_type: @group_user_type,
-                   allow_self_signup: @allow_self_signup
-            # since there are generally lots of users in an account, always do large roster view
-            @js_env[:IS_LARGE_ROSTER] ||= @context.is_a?(Account)
+        if @context.grants_right?(@current_user, session, :manage_groups)
+          categories_json = @categories.map{ |cat| group_category_json(cat, @current_user, session, include: ["progress_url", "unassigned_users_count", "groups_count"]) }
+          uncategorized = @context.groups.active.uncategorized.to_a
+          if uncategorized.present?
+            json = group_category_json(GroupCategory.uncategorized, @current_user, session)
+            json["groups"] = uncategorized.map{ |group| group_json(group, @current_user, session) }
+            categories_json << json
           end
-          render :action => 'context_manage_groups'
+
+          js_env group_categories: categories_json,
+                 group_user_type: @group_user_type,
+                 allow_self_signup: @allow_self_signup
+          if @context.is_a?(Course)
+            # get number of sections with students in them so we can enforce a min group size for random assignment on sections
+            js_env(:student_section_count => @context.enrollments.active_or_pending.where(:type => "StudentEnrollment").distinct.count(:course_section_id))
+          end
+          # since there are generally lots of users in an account, always do large roster view
+          @js_env[:IS_LARGE_ROSTER] ||= @context.is_a?(Account)
+          render :context_manage_groups
         else
+          return render_unauthorized_action if @context.is_a?(Account)
+          @groups = @user_groups = @groups & (@user_groups || [])
           @available_groups = (all_groups - @user_groups).select do |group|
             group.grants_right?(@current_user, :join)
           end
-          render :action => 'context_groups'
+          render :context_groups
         end
       end
 
-      format.atom { render :xml => @groups.to_atom.to_xml }
+      format.atom { render :xml => @groups.map { |group| group.to_atom }.to_xml }
 
       format.json do
         path = send("api_v1_#{@context.class.to_s.downcase}_user_groups_url")
-        paginated_groups = Api.paginate(@groups, self, path)
-        render :json => paginated_groups.map { |g| group_json(g, @current_user, session) }
+
+        if value_to_boolean(params[:only_own_groups])
+          all_groups = all_groups.merge(@current_user.current_groups)
+        end
+        @paginated_groups = Api.paginate(all_groups, self, path)
+        render :json => @paginated_groups.map { |g|
+          include_inactive_users = value_to_boolean(params[:include_inactive_users])
+          group_json(g, @current_user, session, :include => Array(params[:include]),
+                     :include_inactive_users => include_inactive_users)
+        }
       end
     end
   end
@@ -269,12 +330,14 @@ class GroupsController < ApplicationController
   # the rights to see it.
   #
   # @example_request
-  #     curl https://<canvas>/api/v1/groups/<group_id> \ 
+  #     curl https://<canvas>/api/v1/groups/<group_id> \
   #          -H 'Authorization: Bearer <token>'
   #
-  # @argument include[] [String, "permissions"]
+  # @argument include[] [String, "permissions", "tabs"]
   #   - "permissions": Include permissions the current user has
   #     for the group.
+  #   - "tabs": Include the list of tabs configured for each group.  See the
+  #     {api:TabsController#index List available tabs API} for more information.
   #
   # @returns Group
   def show
@@ -292,9 +355,13 @@ class GroupsController < ApplicationController
           flash[:notice] = t('notices.already_deleted', "That group has been deleted")
           redirect_to named_context_url(@group.context, :context_url)
           return
+        elsif @group.context.concluded? && !@group.context.grants_right?(@current_user, session, :read_roster)
+          flash[:error] = t("Cannot access group in concluded course")
+          redirect_to dashboard_url
+          return
         end
-        @current_conferences = @group.web_conferences.select{|c| c.active? && c.users.include?(@current_user) } rescue []
-        @scheduled_conferences = @context.web_conferences.select{|c| c.scheduled? && c.users.include?(@current_user)} rescue []
+        @current_conferences = @group.web_conferences.active.select{|c| c.active? && c.users.include?(@current_user) } rescue []
+        @scheduled_conferences = @context.web_conferences.active.select{|c| c.scheduled? && c.users.include?(@current_user)} rescue []
         @stream_items = @current_user.try(:cached_recent_stream_items, { :contexts => @context }) || []
         if params[:join] && @group.grants_right?(@current_user, :join)
           if @group.full?
@@ -304,7 +371,7 @@ class GroupsController < ApplicationController
           end
           @group.request_user(@current_user)
           if !@group.grants_right?(@current_user, session, :read)
-            render :action => 'membership_pending'
+            render :membership_pending
             return
           else
             flash[:notice] = t('notices.welcome', "Welcome to the group %{group_name}!", :group_name => @group.name)
@@ -361,40 +428,42 @@ class GroupsController < ApplicationController
   #   ignored if the caller does not have the manage_storage_quotas permission.
   #
   # @example_request
-  #     curl https://<canvas>/api/v1/groups \ 
-  #          -F 'name=Math Teachers' \ 
-  #          -F 'description=A place to gather resources for our classes.' \ 
-  #          -F 'is_public=true' \ 
-  #          -F 'join_level=parent_context_auto_join' \ 
+  #     curl https://<canvas>/api/v1/groups \
+  #          -F 'name=Math Teachers' \
+  #          -F 'description=A place to gather resources for our classes.' \
+  #          -F 'is_public=true' \
+  #          -F 'join_level=parent_context_auto_join' \
   #          -H 'Authorization: Bearer <token>'
   #
   # @returns Group
   def create
+    attrs = api_request? ? params : params.require(:group)
+    attrs = attrs.permit(:name, :description, :join_level, :is_public, :storage_quota_mb, :max_membership)
+
     if api_request?
       if params[:group_category_id]
-        group_category = GroupCategory.find(params[:group_category_id])
+        group_category = GroupCategory.active.find(params[:group_category_id])
         return render :json => {}, :status => bad_request unless group_category
         @context = group_category.context
-        params[:group_category] = group_category
+        attrs[:group_category] = group_category
         return unless authorized_action(group_category.context, @current_user, :manage_groups)
       else
         @context = @domain_root_account
-        params[:group_category] = GroupCategory.communities_for(@context)
+        attrs[:group_category] = GroupCategory.communities_for(@context)
       end
     elsif params[:group]
       group_category_id = params[:group].delete :group_category_id
       if group_category_id && @context.grants_right?(@current_user, session, :manage_groups)
-        group_category = @context.group_categories.find_by_id(group_category_id)
+        group_category = @context.group_categories.where(id: group_category_id).first
         return render :json => {}, :status => :bad_request unless group_category
-        params[:group][:group_category] = group_category
+        attrs[:group_category] = group_category
       else
-        params[:group][:group_category] = nil
+        attrs[:group_category] = nil
       end
     end
 
-    attrs = api_request? ? params : params[:group]
     attrs.delete :storage_quota_mb unless @context.grants_right? @current_user, session, :manage_storage_quotas
-    @group = @context.groups.new(attrs.slice(*SETTABLE_GROUP_ATTRIBUTES))
+    @group = @context.groups.temp_record(attrs.slice(*SETTABLE_GROUP_ATTRIBUTES))
 
     if authorized_action(@group, @current_user, :create)
       respond_to do |format|
@@ -403,9 +472,9 @@ class GroupsController < ApplicationController
           @group.invitees = params[:invitees]
           flash[:notice] = t('notices.create_success', 'Group was successfully created.')
           format.html { redirect_to group_url(@group) }
-          format.json { render :json => group_json(@group, @current_user, session) }
+          format.json { render :json => group_json(@group, @current_user, session, {include: ['users', 'group_category', 'permissions']}) }
         else
-          format.html { render :action => "new" }
+          format.html { render :new }
           format.json { render :json => @group.errors, :status => :bad_request }
         end
       end
@@ -440,37 +509,65 @@ class GroupsController < ApplicationController
   #   The allowed file storage for the group, in megabytes. This parameter is
   #   ignored if the caller does not have the manage_storage_quotas permission.
   #
+  # @argument members[] [String]
+  #   An array of user ids for users you would like in the group.
+  #   Users not in the group will be sent invitations. Existing group
+  #   members who aren't in the list will be removed from the group.
+  #
   # @example_request
-  #     curl https://<canvas>/api/v1/groups/<group_id> \ 
-  #          -X PUT \ 
-  #          -F 'name=Algebra Teachers' \ 
-  #          -F 'join_level=parent_context_request' \ 
+  #     curl https://<canvas>/api/v1/groups/<group_id> \
+  #          -X PUT \
+  #          -F 'name=Algebra Teachers' \
+  #          -F 'join_level=parent_context_request' \
   #          -H 'Authorization: Bearer <token>'
   #
   # @returns Group
   def update
     find_group
-    if !api_request? && params[:group] && params[:group][:group_category_id]
+    group_params = api_request? ? params : params.require(:group)
+    attrs = group_params.permit(:name, :description, :join_level, :is_public, :avatar_id, :storage_quota_mb, :max_membership,
+      :leader => strong_anything, :members => strong_anything)
+    attrs[:leader] = nil if group_params.has_key?(:leader) && !group_params[:leader].present?
+
+    if !api_request? && params[:group][:group_category_id]
       group_category_id = params[:group].delete :group_category_id
-      group_category = @context.group_categories.find_by_id(group_category_id)
+      group_category = @context.group_categories.where(id: group_category_id).first
       return render :json => {}, :status => :bad_request unless group_category
-      params[:group][:group_category] = group_category
+      attrs[:group_category] = group_category
     end
-    attrs = api_request? ? params : params[:group]
+
     attrs.delete :storage_quota_mb unless @group.context.grants_right? @current_user, session, :manage_storage_quotas
 
-    if avatar_id = (params[:avatar_id] || (params[:group] && params[:group][:avatar_id]))
-      attrs[:avatar_attachment] = @group.active_images.find_by_id(avatar_id)
+    attrs[:avatar_attachment] = @group.active_images.where(id: attrs[:avatar_id]).first if attrs[:avatar_id]
+
+    if attrs[:leader]
+      membership = @group.group_memberships.where(user_id: attrs[:leader][:id]).first
+      return render :json => {}, :status => :bad_request unless membership
+      attrs[:leader] = membership.user
     end
 
     if authorized_action(@group, @current_user, :update)
       respond_to do |format|
-        if @group.update_attributes(attrs.slice(*SETTABLE_GROUP_ATTRIBUTES))
+        @group.transaction do
+          @group.update_attributes(attrs.slice(*SETTABLE_GROUP_ATTRIBUTES))
+          if attrs[:members]
+            user_ids = Api.value_to_array(attrs[:members]).map(&:to_i).uniq
+            if @group.context
+              users = @group.context.users.where(id: user_ids)
+            else
+              users = User.where(id: user_ids)
+            end
+            @memberships = @group.set_users(users)
+          end
+        end
+
+        if !@group.errors.any?
+          @group.users.touch_all
           flash[:notice] = t('notices.update_success', 'Group was successfully updated.')
           format.html { redirect_to clean_return_to(params[:return_to]) || group_url(@group) }
-          format.json { render :json => group_json(@group, @current_user, session) }
+          format.json { render :json => group_json(@group, @current_user, session, {include: ['users', 'group_category', 'permissions']}) }
         else
-          format.html { render :action => "edit" }
+          format.html { render :edit }
           format.json { render :json => @group.errors, :status => :bad_request }
         end
       end
@@ -482,8 +579,8 @@ class GroupsController < ApplicationController
   # Deletes a group and removes all members.
   #
   # @example_request
-  #     curl https://<canvas>/api/v1/groups/<group_id> \ 
-  #          -X DELETE \ 
+  #     curl https://<canvas>/api/v1/groups/<group_id> \
+  #          -X DELETE \
   #          -H 'Authorization: Bearer <token>'
   #
   # @returns Group
@@ -512,18 +609,22 @@ class GroupsController < ApplicationController
   # Sends an invitation to all supplied email addresses which will allow the
   # receivers to join the group.
   #
-  # @argument invitees[] [String]
+  # @argument invitees[] [Required, String]
   #   An array of email addresses to be sent invitations.
   #
   # @example_request
-  #     curl https://<canvas>/api/v1/groups/<group_id>/invite \ 
-  #          -F 'invitees[]=leonard@example.com&invitees[]=sheldon@example.com' \ 
+  #     curl https://<canvas>/api/v1/groups/<group_id>/invite \
+  #          -F 'invitees[]=leonard@example.com' \
+  #          -F 'invitees[]=sheldon@example.com' \
   #          -H 'Authorization: Bearer <token>'
   def invite
     find_group
     if authorized_action(@group, @current_user, :manage)
       root_account = @group.context.try(:root_account) || @domain_root_account
-      ul = UserList.new(params[:invitees], :root_account => root_account, :search_method => :preferred)
+      ul = UserList.new(params[:invitees],
+                        root_account: root_account,
+                        search_method: :preferred,
+                        current_user: @current_user)
       @memberships = []
       ul.users.each{ |u| @memberships << @group.invite_user(u) }
       render :json => @memberships.map{ |gm| group_membership_json(gm, @current_user, session) }
@@ -531,7 +632,6 @@ class GroupsController < ApplicationController
   end
 
   def accept_invitation
-    require_user
     find_group
     @membership = @group.group_memberships.where(:uuid => params[:uuid]).first if @group
     @membership.accept! if @membership.try(:invited?)
@@ -566,7 +666,7 @@ class GroupsController < ApplicationController
   def remove_user
     @group = @context
     if authorized_action(@group, @current_user, :manage)
-      @membership = @group.group_memberships.find_by_user_id(params[:user_id])
+      @membership = @group.group_memberships.where(user_id: params[:user_id]).first
       @membership.destroy
       render :json => @membership
     end
@@ -575,11 +675,14 @@ class GroupsController < ApplicationController
   include Api::V1::User
   # @API List group's users
   #
-  # Returns a list of users in the group.
+  # Returns a paginated list of users in the group.
   #
-  # @argument search_term [Optional, String]
+  # @argument search_term [String]
   #   The partial name or full ID of the users to match and return in the
   #   results list. Must be at least 3 characters.
+  #
+  # @argument include[] [String, "avatar_url"]
+  #   - "avatar_url": Include users' avatar_urls.
   #
   # @example_request
   #     curl https://<canvas>/api/v1/groups/1/users \
@@ -590,31 +693,34 @@ class GroupsController < ApplicationController
     return unless authorized_action(@context, @current_user, :read)
 
     search_term = params[:search_term].presence
-
     if search_term
       users = UserSearch.for_user_in_context(search_term, @context, @current_user, session)
     else
       users = UserSearch.scope_for(@context, @current_user)
     end
 
+    includes = Array(params[:include])
     users = Api.paginate(users, self, api_v1_group_users_url)
-    render :json => users.map { |u| user_json(u, @current_user, session) }
-  end
+    json_users = users_json(users, @current_user, session, includes, @context, nil, Array(params[:exclude]))
 
-  def edit
-    account = @context.root_account
-    raise ActiveRecord::RecordNotFound unless account.canvas_network_enabled?
-
-    @group = (@context ? @context.groups : Group).find(params[:id])
-    @context = @group
-
-    folder   = @group.folders.active.first
-    folder ||= @group.folders.active.create! :name => 'Group Pictures'
-    js_env :GROUP_ID => @group.id, :FOLDER_ID => folder.id
-
-    if authorized_action(@group, @current_user, :update)
-      render :action => :edit
+    if includes.include?('group_submissions') && @context.context_type == "Course"
+      submissions_by_user = @context.group_category.submission_ids_by_user_id(users.map(&:id))
+      json_users.each do |user|
+        user[:group_submissions] = submissions_by_user[user[:id]]
+      end
     end
+
+    if (includes.include? 'active_status') && (@context.context.is_a? Course)
+      user_ids = users.pluck('id')
+      enrollments = Enrollment.where(user_id: user_ids, course_id: @context.context_id)
+
+      inactive_students = enrollments.select(&:inactive?).pluck('user_id').to_set
+      json_users.each do |user|
+        user[:is_inactive] = inactive_students.include?(user[:id])
+      end
+    end
+
+    render :json => json_users
   end
 
   def public_feed
@@ -628,13 +734,13 @@ class GroupsController < ApplicationController
     @entries = []
     @entries.concat @context.calendar_events.active
     @entries.concat @context.discussion_topics.active
-    @entries.concat @context.wiki.wiki_pages
+    @entries.concat @context.wiki_pages
     @entries = @entries.sort_by{|e| e.updated_at}
     @entries.each do |entry|
       feed.entries << entry.to_atom(:context => @context)
     end
     respond_to do |format|
-      format.atom { render :text => feed.to_xml }
+      format.atom { render :plain => feed.to_xml }
     end
   end
 
@@ -689,7 +795,7 @@ class GroupsController < ApplicationController
   def activity_stream
     get_context
     if authorized_action(@context, @current_user, :read)
-      api_render_stream_for_contexts([@context], :api_v1_group_activity_stream_url)
+      api_render_stream(contexts: [@context], paginate_url: :api_v1_group_activity_stream_url)
     end
   end
 
@@ -712,7 +818,7 @@ class GroupsController < ApplicationController
       @group = api_find(Group.active, params[:group_id])
     else
       @group = @context if @context.is_a?(Group)
-      @group ||= (@context ? @context.groups : Group).find(params[:id])
+      @group ||= api_find(@context ? @context.groups : Group, params[:id])
     end
   end
 

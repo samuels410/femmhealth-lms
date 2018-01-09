@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -22,10 +22,14 @@ class AssignmentOverrideStudent < ActiveRecord::Base
   belongs_to :user
   belongs_to :quiz, class_name: 'Quizzes::Quiz'
 
-  attr_accessible :user
+  after_save :destroy_override_if_needed
+  after_create :update_cached_due_dates
+  after_destroy :update_cached_due_dates
+  after_destroy :destroy_override_if_needed
 
   validates_presence_of :assignment_override, :user
-  validates_uniqueness_of :user_id, :scope => [:assignment_id, :quiz_id]
+  validates_uniqueness_of :user_id, :scope => [:assignment_id, :quiz_id],
+    :message => 'already belongs to an assignment override'
 
   validate :assignment_override do |record|
     if record.assignment_override && record.assignment_override.set_type != 'ADHOC'
@@ -40,7 +44,7 @@ class AssignmentOverrideStudent < ActiveRecord::Base
   end
 
   validate :user do |record|
-    if record.user && record.context_id && !record.user.student_enrollments.where(:course_id => record.context_id).exists?
+    if record.user && record.context_id && !record.user.student_enrollments.shard(record.shard).where(:course_id => record.context_id).exists?
       record.errors.add :user, "is not in the assignment's course"
     end
   end
@@ -53,8 +57,10 @@ class AssignmentOverrideStudent < ActiveRecord::Base
 
   def context_id
     if quiz
+      quiz.reload if quiz.id != quiz_id
       quiz.context_id
     elsif assignment
+      assignment.reload if assignment.id != assignment_id
       assignment.context_id
     end
   end
@@ -63,8 +69,34 @@ class AssignmentOverrideStudent < ActiveRecord::Base
   def default_values
     if assignment_override
       self.assignment_id = assignment_override.assignment_id
-      self.quiz_id       = assignment_override.quiz_id
+      self.quiz_id = assignment_override.quiz_id
     end
   end
   protected :default_values
+
+  def destroy_override_if_needed
+    assignment_override.destroy_if_empty_set
+  end
+  protected :destroy_override_if_needed
+
+  def self.clean_up_for_assignment(assignment)
+    return unless assignment.context_type == "Course"
+    return if assignment.new_record?
+
+    valid_student_ids = Enrollment
+      .where(course_id: assignment.context_id)
+      .where.not(workflow_state: "deleted")
+      .pluck(:user_id)
+
+    AssignmentOverrideStudent
+      .where(assignment: assignment)
+      .where.not(user_id: valid_student_ids)
+      .each(&:destroy)
+  end
+
+  private
+
+  def update_cached_due_dates
+    DueDateCacher.recompute(assignment) if assignment.present?
+  end
 end

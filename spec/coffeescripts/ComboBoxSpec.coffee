@@ -1,9 +1,26 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'compiled/widget/ComboBox'
   'helpers/simulateClick'
 ], ($, ComboBox, simulateClick)->
-  module 'ComboBox',
+  QUnit.module 'ComboBox',
     setup: ->
 
     teardown: ->
@@ -11,10 +28,7 @@ define [
       @combobox.$el.remove() if @combobox?
 
   confirmSelected = (combobox, item) ->
-    equal combobox.selected(), item
     equal combobox.$menu.val(), combobox._value item
-    equal $('.ui-selectmenu-item', combobox.$container).text(), combobox._label item
-    equal $('.ui-selectmenu-item-selected .ui-selectmenu-item', combobox.$selectmenu).text(), combobox._label item
 
   test 'constructor: dom setup', ->
     items = [
@@ -28,20 +42,15 @@ define [
     ok @combobox.$el.hasClass 'ui-combobox'
     ok @combobox.$prev.hasClass 'ui-combobox-prev'
     ok @combobox.$next.hasClass 'ui-combobox-next'
-    ok @combobox.$container.hasClass 'ui-combobox-container'
     ok @combobox.$menu[0].tagName, 'SELECT'
-    ok @combobox.$selectmenu.hasClass, 'ui-selectmenu-menu'
 
     # should have the options (both flavors) set up according to items
     options = $('option', @combobox.$menu)
-    selectmenuItems = $('.ui-selectmenu-item', @combobox.$selectmenu)
 
     equal options.length, 3
-    equal selectmenuItems.length, 3
     for item, i in items
       equal options.eq(i).prop('value'), item.value
       equal options.eq(i).text(), item.label
-      equal selectmenuItems.eq(i).text(), item.label
 
     # should have the first item selected
     confirmSelected @combobox, items[0]
@@ -69,10 +78,8 @@ define [
     @combobox = new ComboBox items, label: labelFunc
 
     options = $('option', @combobox.$menu)
-    selectmenuItems = $('.ui-selectmenu-item', @combobox.$selectmenu)
     for item, i in items
       equal options.eq(i).text(), labelFunc item
-      equal selectmenuItems.eq(i).text(), labelFunc item
 
   test 'constructor: selected', ->
     items = [
@@ -108,7 +115,7 @@ define [
       {label: 'label3', value: 'value3'}
     ]
     @combobox = new ComboBox items
-    spy = sinon.spy()
+    spy = @spy()
     @combobox.on 'change', spy
 
     # calling select should change selection and trigger callback with new
@@ -131,7 +138,7 @@ define [
       {label: 'label3', value: 'value3'}
     ]
     @combobox = new ComboBox items, selected: items[1].value
-    spy = sinon.spy()
+    spy = @spy()
     @combobox.on 'change', spy
 
     # clicking prev button selects previous element
@@ -150,7 +157,7 @@ define [
   test 'prev button: one item', ->
     items = [{label: 'label1', value: 'value1'}]
     @combobox = new ComboBox items
-    spy = sinon.spy()
+    spy = @spy()
     @combobox.on 'change', spy
 
     # clicking prev button does nothing
@@ -165,7 +172,7 @@ define [
       {label: 'label3', value: 'value3'}
     ]
     @combobox = new ComboBox items, selected: items[1].value
-    spy = sinon.spy()
+    spy = @spy()
     @combobox.on 'change', spy
 
     # clicking prev button selects previous element
@@ -184,7 +191,7 @@ define [
   test 'next button: one item', ->
     items = [{label: 'label1', value: 'value1'}]
     @combobox = new ComboBox items
-    spy = sinon.spy()
+    spy = @spy()
     @combobox.on 'change', spy
 
     # clicking prev button does nothing

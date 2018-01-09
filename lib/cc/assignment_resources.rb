@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,12 +17,14 @@
 #
 module CC
   module AssignmentResources
-    
-    def add_assignments
-      @course.assignments.active.no_graded_quizzes_or_topics.each do |assignment|
-        next unless export_object?(assignment)
 
-        title = assignment.title rescue I18n.t('course_exports.unknown_titles.assignment', "Unknown assignment")
+    def add_assignments
+      Assignments::ScopedToUser.new(@course, @user).scope.
+        no_submittables.each do |assignment|
+        next unless export_object?(assignment)
+        next if @user && assignment.locked_for?(@user, check_policies: true)
+
+        title = assignment.title || I18n.t('course_exports.unknown_titles.assignment', "Unknown assignment")
 
         if !assignment.can_copy?(@user)
           add_error(I18n.t('course_exports.errors.assignment_is_locked', "The assignment \"%{title}\" could not be copied because it is locked.", :title => title))
@@ -37,23 +39,69 @@ module CC
       end
     end
 
+    VERSION_1_3 = Gem::Version.new('1.3')
+
     def add_assignment(assignment)
-      migration_id = CCHelper.create_key(assignment)
+      add_exported_asset(assignment)
+
+      migration_id = create_key(assignment)
 
       lo_folder = File.join(@export_dir, migration_id)
       FileUtils::mkdir_p lo_folder
 
       file_name = "#{assignment.title.to_url}.html"
-      relative_path = File.join(migration_id, file_name)
       path = File.join(lo_folder, file_name)
+      html_path = File.join(migration_id, file_name)
 
       # Write the assignment description as an .html file
-      # That way at least the content of the assignment will
-      # appear when someone non-canvas imports the package
+      # That way at least the content of the assignment will appear
+      # for agents that support neither CC 1.3 nor Canvas assignments
       File.open(path, 'w') do |file|
         file << @html_exporter.html_page(assignment.description || '', "Assignment: " + assignment.title)
       end
 
+      if Gem::Version.new(@manifest.cc_version) >= VERSION_1_3
+        add_cc_assignment(assignment, migration_id, lo_folder, html_path)
+      else
+        add_canvas_assignment(assignment, migration_id, lo_folder, html_path)
+      end
+    end
+
+    def add_cc_assignment(assignment, migration_id, lo_folder, html_path)
+      File.open(File.join(lo_folder, CCHelper::ASSIGNMENT_XML), 'w') do |assignment_file|
+        document = Builder::XmlMarkup.new(:target => assignment_file, :indent => 2)
+        document.instruct!
+
+        document.assignment("identifier" => migration_id,
+                            "xmlns" => CCHelper::ASSIGNMENT_NAMESPACE,
+                            "xmlns:xsi"=>"http://www.w3.org/2001/XMLSchema-instance",
+                            "xsi:schemaLocation"=> "#{CCHelper::ASSIGNMENT_NAMESPACE} #{CCHelper::ASSIGNMENT_XSD_URI}"
+        ) do |a|
+          AssignmentResources.create_cc_assignment(a, assignment, migration_id, @html_exporter, @manifest)
+        end
+      end
+
+      xml_path = File.join(migration_id, CCHelper::ASSIGNMENT_XML)
+      @resources.resource(:identifier => migration_id,
+                          :type => CCHelper::ASSIGNMENT_TYPE,
+                          :href => xml_path
+      ) do |res|
+        res.file(:href => xml_path)
+      end
+
+      @resources.resource(:identifier => migration_id + "_fallback",
+                          :type => CCHelper::WEBCONTENT
+      ) do |res|
+        res.tag!('cpx:variant', :identifier => migration_id + "_variant",
+                                :identifierref => migration_id
+        ) do |var|
+          var.tag!('cpx:metadata')
+        end
+        res.file(:href => html_path)
+      end
+    end
+
+    def add_canvas_assignment(assignment, migration_id, lo_folder, html_path)
       assignment_file = File.new(File.join(lo_folder, CCHelper::ASSIGNMENT_SETTINGS), 'w')
       document = Builder::XmlMarkup.new(:target=>assignment_file, :indent=>2)
       document.instruct!
@@ -64,38 +112,80 @@ module CC
                           "xmlns:xsi"=>"http://www.w3.org/2001/XMLSchema-instance",
                           "xsi:schemaLocation"=> "#{CCHelper::CANVAS_NAMESPACE} #{CCHelper::XSD_URI}"
       ) do |a|
-        AssignmentResources.create_assignment(a, assignment)
+        AssignmentResources.create_canvas_assignment(a, assignment, @manifest)
       end
       assignment_file.close
 
       @resources.resource(
-              :identifier => migration_id,
-              "type" => CCHelper::LOR,
-              :href => relative_path
+        :identifier => migration_id,
+        "type" => CCHelper::LOR,
+        :href => html_path
       ) do |res|
-        res.file(:href=>relative_path)
+        res.file(:href=>html_path)
         res.file(:href=>File.join(migration_id, CCHelper::ASSIGNMENT_SETTINGS))
       end
     end
-    
-    def self.create_assignment(node, assignment)
+
+    SUBMISSION_TYPE_MAP = {
+        "online_text_entry" => "html",
+        "online_url" => "url",
+        "online_upload" => "file"
+    }.freeze
+
+    def self.create_cc_assignment(node, assignment, migration_id, html_exporter, manifest = nil)
+      node.title(assignment.title)
+      node.text(html_exporter.html_content(assignment.description), texttype: 'text/html')
+      if assignment.points_possible
+        node.gradable(assignment.graded?, points_possible: assignment.points_possible)
+      else
+        node.gradable(assignment.graded?)
+      end
+      node.submission_formats do |fmt|
+        assignment.submission_types.split(',').each do |st|
+          if cc_type = SUBMISSION_TYPE_MAP[st]
+            fmt.format(:type => cc_type)
+          end
+        end
+      end
+      node.extensions do |ext|
+        ext.assignment("identifier" => migration_id + "_canvas",
+                       "xmlns" => CCHelper::CANVAS_NAMESPACE,
+                       "xmlns:xsi"=>"http://www.w3.org/2001/XMLSchema-instance",
+                       "xsi:schemaLocation"=> "#{CCHelper::CANVAS_NAMESPACE} #{CCHelper::XSD_URI}"
+        ) do |a|
+          AssignmentResources.create_canvas_assignment(a, assignment, manifest)
+        end
+      end
+    end
+
+    def self.create_canvas_assignment(node, assignment, manifest = nil)
+      key_generator = manifest || CCHelper
       node.title assignment.title
-      node.due_at CCHelper::ims_datetime(assignment.due_at) if assignment.due_at
-      node.lock_at CCHelper::ims_datetime(assignment.lock_at) if assignment.lock_at
-      node.unlock_at CCHelper::ims_datetime(assignment.unlock_at) if assignment.unlock_at
+      node.due_at CCHelper::ims_datetime(assignment.due_at, nil)
+      node.lock_at CCHelper::ims_datetime(assignment.lock_at, nil)
+      node.unlock_at CCHelper::ims_datetime(assignment.unlock_at, nil)
+      if manifest && manifest.try(:user).present?
+        node.module_locked assignment.locked_by_module_item?(manifest.user, deep_check_if_needed: true).present?
+      end
       node.all_day_date CCHelper::ims_date(assignment.all_day_date) if assignment.all_day_date
       node.peer_reviews_due_at CCHelper::ims_datetime(assignment.peer_reviews_due_at) if assignment.peer_reviews_due_at
-      node.assignment_group_identifierref CCHelper.create_key(assignment.assignment_group)
-      node.grading_standard_identifierref CCHelper.create_key(assignment.grading_standard) if assignment.grading_standard
+      node.assignment_group_identifierref key_generator.create_key(assignment.assignment_group) if assignment.assignment_group && (!manifest || manifest.export_object?(assignment.assignment_group))
+      if assignment.grading_standard
+        if assignment.grading_standard.context == assignment.context
+          node.grading_standard_identifierref key_generator.create_key(assignment.grading_standard) if (!manifest || manifest.export_object?(assignment.grading_standard))
+        else
+          node.grading_standard_external_identifier assignment.grading_standard.id
+        end
+      end
       node.workflow_state assignment.workflow_state
       if assignment.rubric
         assoc = assignment.rubric_association
-        node.rubric_identifierref CCHelper.create_key(assignment.rubric)
+        node.rubric_identifierref key_generator.create_key(assignment.rubric)
         if assignment.rubric && assignment.rubric.context != assignment.context
           node.rubric_external_identifier assignment.rubric.id
         end
         node.rubric_use_for_grading assoc.use_for_grading
-        node.rubric_hide_score_total assoc.hide_score_total
+        node.rubric_hide_score_total !!assoc.hide_score_total
         if assoc.summary_data && assoc.summary_data[:saved_comments]
           node.saved_rubric_comments do |sc_node|
             assoc.summary_data[:saved_comments].each_pair do |key, vals|
@@ -106,18 +196,50 @@ module CC
           end
         end
       end
-      node.quiz_identifierref CCHelper.create_key(assignment.quiz) if assignment.quiz
+      node.assignment_overrides do |ao_node|
+        # Quizzes export their own overrides
+        assignment.assignment_overrides.active.where(set_type: 'Noop', quiz_id: nil).each do |o|
+          override_attrs = o.slice(:set_type, :set_id, :title)
+          AssignmentOverride.overridden_dates.each do |field|
+            next unless o.send("#{field}_overridden")
+            override_attrs[field] = o[field]
+          end
+          ao_node.override(override_attrs)
+        end
+      end
+      node.quiz_identifierref key_generator.create_key(assignment.quiz) if assignment.quiz
       node.allowed_extensions assignment.allowed_extensions.join(',') unless assignment.allowed_extensions.blank?
+      node.has_group_category assignment.has_group_category?
+      node.group_category assignment.group_category.try :name if assignment.group_category
       atts = [:points_possible, :grading_type,
-              :all_day, :submission_types, :position, :turnitin_enabled, :peer_review_count,
-              :peer_reviews_assigned, :peer_reviews, :automatic_peer_reviews,
-              :anonymous_peer_reviews, :grade_group_students_individually, :freeze_on_copy]
+              :all_day, :submission_types, :position, :turnitin_enabled, :vericite_enabled, :peer_review_count,
+              :peer_reviews, :automatic_peer_reviews, :moderated_grading,
+              :anonymous_peer_reviews, :grade_group_students_individually, :freeze_on_copy, :muted,
+              :omit_from_final_grade, :intra_group_peer_reviews, :only_visible_to_overrides, :post_to_sis]
       atts.each do |att|
         node.tag!(att, assignment.send(att)) if assignment.send(att) == false || !assignment.send(att).blank?
       end
       if assignment.external_tool_tag
-        node.external_tool_url assignment.external_tool_tag.url 
+        if (content = assignment.external_tool_tag.content) && content.is_a?(ContextExternalTool)
+          if content.context == assignment.context
+            node.external_tool_identifierref key_generator.create_key(content)
+          else
+            node.external_tool_external_identifier content.id
+          end
+        end
+        node.external_tool_url assignment.external_tool_tag.url
         node.external_tool_new_tab assignment.external_tool_tag.new_tab
+      end
+
+      node.tag!(:turnitin_settings, (assignment.send(:turnitin_settings).to_json)) if assignment.turnitin_enabled || assignment.vericite_enabled
+      if assignment.assignment_configuration_tool_lookup_ids.present?
+        resource_codes = assignment.tool_settings_tool.try(:resource_codes) || {}
+        node.similarity_detection_tool({
+          resource_type_code: resource_codes[:resource_type_code],
+          vendor_code: resource_codes[:vendor_code],
+          product_code: resource_codes[:product_code],
+          visibility: assignment.turnitin_settings.with_indifferent_access[:originality_report_visibility]
+        })
       end
     end
 

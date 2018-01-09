@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,7 +19,7 @@
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 
 describe ContentParticipationCount do
-  before do
+  before :once do
     course_with_teacher(:active_all => true)
     student_in_course(:active_all => true)
 
@@ -29,19 +29,19 @@ describe ContentParticipationCount do
   end
 
   describe "create_or_update" do
-    before do
-      @submission = @assignment.grade_student(@student, { :grade => 3 }).first
+    before :once do
+      @submission = @assignment.grade_student(@student, grade: 3, grader: @teacher).first
     end
 
     it "should count current unread objects correctly" do
       ["Submission"].each do |type|
         cpc = ContentParticipationCount.create_or_update(:context => @course, :user => @teacher, :content_type => type)
-        cpc.expects(:refresh_unread_count).never
-        cpc.unread_count.should == 0
+        expect(cpc).to receive(:refresh_unread_count).never
+        expect(cpc.unread_count).to eq 0
 
         cpc = ContentParticipationCount.create_or_update(:context => @course, :user => @student, :content_type => type)
-        cpc.expects(:refresh_unread_count).never
-        cpc.unread_count.should == 1
+        expect(cpc).to receive(:refresh_unread_count).never
+        expect(cpc.unread_count).to eq 1
       end
     end
 
@@ -49,8 +49,8 @@ describe ContentParticipationCount do
       cpc = ContentParticipationCount.create_or_update(:context => @course, :user => @student, :content_type => "Submission")
       ContentParticipationCount.create_or_update(:context => @course, :user => @student, :content_type => "Submission", :offset => -1)
       cpc.reload
-      cpc.expects(:refresh_unread_count).never
-      cpc.unread_count.should == 0
+      expect(cpc).to receive(:refresh_unread_count).never
+      expect(cpc.unread_count).to eq 0
     end
 
     it "should not save if not changed" do
@@ -58,36 +58,36 @@ describe ContentParticipationCount do
       cpc = ContentParticipationCount.create_or_update(:context => @course, :user => @student, :content_type => "Submission")
       ContentParticipationCount.where(:id => cpc).update_all(:updated_at => time)
       ContentParticipationCount.create_or_update(:context => @course, :user => @student, :content_type => "Submission")
-      cpc.reload.updated_at.to_i.should == time.to_i
+      expect(cpc.reload.updated_at.to_i).to eq time.to_i
     end
   end
 
   describe "unread_count_for" do
-    before do
-      @submission = @assignment.grade_student(@student, { :grade => 3 }).first
+    before :once do
+      @submission = @assignment.grade_student(@student, grade: 3, grader: @teacher).first
     end
 
     it "should find the unread count for different types" do
       ["Submission"].each do |type|
-        ContentParticipationCount.unread_count_for(type, @course, @teacher).should == 0
-        ContentParticipationCount.unread_count_for(type, @course, @student).should == 1
+        expect(ContentParticipationCount.unread_count_for(type, @course, @teacher)).to eq 0
+        expect(ContentParticipationCount.unread_count_for(type, @course, @student)).to eq 1
       end
     end
 
     it "should handle invalid contexts" do
       ["Submission"].each do |type|
-        ContentParticipationCount.unread_count_for(type, Account.default, @student).should == 0
+        expect(ContentParticipationCount.unread_count_for(type, Account.default, @student)).to eq 0
       end
     end
 
     it "should handle invalid types" do
-      ContentParticipationCount.unread_count_for("Assignment", @course, @student).should == 0
+      expect(ContentParticipationCount.unread_count_for("Assignment", @course, @student)).to eq 0
     end
 
     it "should handle missing contexts or users" do
       ["Submission"].each do |type|
-        ContentParticipationCount.unread_count_for(type, nil, @student).should == 0
-        ContentParticipationCount.unread_count_for(type, @course, nil).should == 0
+        expect(ContentParticipationCount.unread_count_for(type, nil, @student)).to eq 0
+        expect(ContentParticipationCount.unread_count_for(type, @course, nil)).to eq 0
       end
     end
   end
@@ -96,20 +96,24 @@ describe ContentParticipationCount do
     it "should not refresh if just created" do
       ["Submission"].each do |type|
         cpc = ContentParticipationCount.create_or_update(:context => @course, :user => @teacher, :content_type => type)
-        cpc.expects(:refresh_unread_count).never
-        cpc.unread_count.should == 0
+        expect(cpc).to receive(:refresh_unread_count).never
+        expect(cpc.unread_count).to eq 0
       end
     end
 
     it "should refresh if data could be stale" do
       ["Submission"].each do |type|
         cpc = ContentParticipationCount.create_or_update(:context => @course, :user => @teacher, :content_type => type)
-        cpc.expects(:refresh_unread_count).never
-        cpc.unread_count.should == 0
+        allowed = false
+        expect(cpc).to receive(:refresh_unread_count).and_wrap_original do |original|
+          raise "not allowed" unless allowed
+          original.call
+        end
+        expect(cpc.unread_count).to eq 0
         ContentParticipationCount.where(:id => cpc).update_all(:updated_at => Time.now.utc - 1.day)
         cpc.reload
-        cpc.expects(:refresh_unread_count)
-        cpc.unread_count.should == 0
+        allowed = true
+        expect(cpc.unread_count).to eq 0
       end
     end
   end
@@ -117,41 +121,47 @@ describe ContentParticipationCount do
   describe "unread_submission_count_for" do
     it "should be read if a submission exists with no grade" do
       @submission = @assignment.submit_homework(@student)
-      ContentParticipationCount.unread_submission_count_for(@course, @student).should == 0
+      expect(ContentParticipationCount.unread_submission_count_for(@course, @student)).to eq 0
     end
 
     it "should be unread after assignment is graded" do
-      @submission = @assignment.grade_student(@student, { :grade => 3 }).first
-      ContentParticipationCount.unread_submission_count_for(@course, @student).should == 1
+      @submission = @assignment.grade_student(@student, grade: 3, grader: @teacher).first
+      expect(ContentParticipationCount.unread_submission_count_for(@course, @student)).to eq 1
+    end
+
+    it "should not be unread if the assignment is unpublished after the submission is graded" do
+      @submission = @assignment.grade_student(@student, grade: 3, grader: @teacher).first
+      @assignment.update_attribute(:workflow_state, 'unpublished')
+      expect(ContentParticipationCount.unread_submission_count_for(@course, @student)).to eq 0
     end
 
     it "should be read after viewing the graded assignment" do
-      @submission = @assignment.grade_student(@student, { :grade => 3 }).first
+      @submission = @assignment.grade_student(@student, grade: 3, grader: @teacher).first
       @submission.change_read_state("read", @student)
-      ContentParticipationCount.unread_submission_count_for(@course, @student).should == 0
+      expect(ContentParticipationCount.unread_submission_count_for(@course, @student)).to eq 0
     end
 
     it "should be unread after submission is graded" do
       @assignment.submit_homework(@student)
-      @submission = @assignment.grade_student(@student, { :grade => 3 }).first
-      ContentParticipationCount.unread_submission_count_for(@course, @student).should == 1
+      @submission = @assignment.grade_student(@student, grade: 3, grader: @teacher).first
+      expect(ContentParticipationCount.unread_submission_count_for(@course, @student)).to eq 1
     end
 
     it "should be unread after submission is commented on by teacher" do
-      @submission = @assignment.grade_student(@student, { :grader => @teacher, :comment => "good!" }).first
-      ContentParticipationCount.unread_submission_count_for(@course, @student).should == 1
+      @submission = @assignment.update_submission(@student, { :commenter => @teacher, :comment => "good!" }).first
+      expect(ContentParticipationCount.unread_submission_count_for(@course, @student)).to eq 1
     end
 
     it "should be read after viewing the submission comment" do
-      @submission = @assignment.grade_student(@student, { :grader => @teacher, :comment => "good!" }).first
+      @submission = @assignment.update_submission(@student, { :commenter => @teacher, :comment => "good!" }).first
       @submission.change_read_state("read", @student)
-      ContentParticipationCount.unread_submission_count_for(@course, @student).should == 0
+      expect(ContentParticipationCount.unread_submission_count_for(@course, @student)).to eq 0
     end
 
     it "should be read after submission is commented on by self" do
       @submission = @assignment.submit_homework(@student)
       @comment = SubmissionComment.create!(:submission => @submission, :comment => "hi", :author => @student)
-      ContentParticipationCount.unread_submission_count_for(@course, @student).should == 0
+      expect(ContentParticipationCount.unread_submission_count_for(@course, @student)).to eq 0
     end
 
     it "should be read if other submission fields change" do
@@ -159,7 +169,7 @@ describe ContentParticipationCount do
       @submission.workflow_state = 'graded'
       @submission.graded_at = Time.now
       @submission.save!
-      ContentParticipationCount.unread_submission_count_for(@course, @student).should == 0
+      expect(ContentParticipationCount.unread_submission_count_for(@course, @student)).to eq 0
     end
   end
 end

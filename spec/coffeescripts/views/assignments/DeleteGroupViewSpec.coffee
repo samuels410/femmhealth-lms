@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'underscore'
   'Backbone'
@@ -7,9 +24,9 @@ define [
   'compiled/models/Assignment'
   'compiled/views/assignments/DeleteGroupView'
   'jquery'
+  'helpers/assertions'
   'helpers/jquery.simulate'
-  'helpers/fakeENV'
-], (_, Backbone, AssignmentGroupCollection, AssignmentCollection, AssignmentGroup, Assignment, DeleteGroupView, $) ->
+], (_, Backbone, AssignmentGroupCollection, AssignmentCollection, AssignmentGroup, Assignment, DeleteGroupView, $, assertions) ->
 
   group = (assignments=true, id) ->
     new AssignmentGroup
@@ -28,19 +45,26 @@ define [
     new DeleteGroupView
       model: ag_group
 
-  module 'DeleteGroupView'
+  QUnit.module 'DeleteGroupView',
+    setup: ->
+    teardown: ->
+      $("#fixtures").empty()
+      $("form.dialogFormView").remove()
+
+  test 'should be accessible', (assert) ->
+    view = createView(false, true)
+    done = assert.async()
+    assertions.isAccessible view, done, {'a11yReport': true}
 
   test 'it should delete a group without assignments', ->
-    confirm_stub = sinon.stub(window, "confirm", -> true )
+    @stub(window, "confirm").returns(true)
     view = createView(false, true)
-    destroy_stub = sinon.stub(view, "destroyModel", -> )
+    @stub(view, "destroyModel")
     view.render()
     view.open()
 
-    ok confirm_stub.called
-    ok destroy_stub.called
-    confirm_stub.restore()
-    destroy_stub.restore()
+    ok window.confirm.called
+    ok view.destroyModel.called
 
   test 'assignment and ag counts should be correct', ->
     view = createView(true, true)
@@ -66,7 +90,7 @@ define [
     view.close()
 
   test 'it should delete a group with assignments', ->
-    destroy_stub = sinon.stub(DeleteGroupView.prototype, "destroy", -> )
+    destroy_stub = @stub(DeleteGroupView.prototype, "destroy")
     view = createView(true, true)
     view.render()
     view.open()
@@ -74,18 +98,15 @@ define [
     view.$(".delete_group").click()
 
     ok destroy_stub.called
-    destroy_stub.restore()
     view.close()
 
   test 'it should not delete the last assignment group', ->
-    alert_stub = sinon.stub(window, "alert", -> true )
+    alert_stub = @stub(window, "alert").returns(true)
     view = createView(true, false)
-    destroy_spy = sinon.spy(view, "destroyModel")
+    destroy_spy = @spy(view, "destroyModel")
     view.render()
     view.open()
 
     ok alert_stub.called
     ok !destroy_spy.called
-    alert_stub.restore()
-    destroy_spy.restore()
     view.close()

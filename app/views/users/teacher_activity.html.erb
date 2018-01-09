@@ -1,4 +1,22 @@
-<% jammit_css :reports %>
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
+<% css_bundle :reports %>
 <% js_bundle :teacher_activity_report %>
 <% add_crumb(t('crumbs.interaction_report', "Student Interactions Report")) %>
 
@@ -14,11 +32,11 @@
 </style>
 <% end %>
 
-<h2><%= t('headings.teacher_activity', "Teacher Activity Report for %{teacher}", :teacher => @teacher.name) %></h2>
+<h1><%= t('headings.teacher_activity', "Teacher Activity Report for %{teacher}", :teacher => @teacher.name) %></h1>
 
 <% @courses.each do |course, students| %>
   <% has_user_notes = students.first.try(:key?, :last_user_note) %>
-  <h3><%= course.name %></h3>
+  <h2><%= course.name %></h2>
   <% if students.blank? %>
     <%= t 'no_students', 'There are no students to report on.' %>
   <% else %>
@@ -61,9 +79,9 @@
               <%= link_to(user_note_link, user_user_notes_url(student[:enrollment].user)) %>
             </td>
           <% end %>
-          <td><%= number_to_percentage(student[:enrollment].computed_current_score, :precision => 1) %></td>
-          <td><%= number_to_percentage(student[:enrollment].computed_final_score, :precision => 1) %></td>
-          <td data-number="<%= (student[:ungraded].map(&:submitted_at).compact.max || 1.day.from_now).to_i / 3600 %>">
+          <td><%= n(student[:enrollment].computed_current_score, percentage: true, precision: 1) %></td>
+          <td><%= n(student[:enrollment].computed_final_score, percentage: true, precision: 1) %></td>
+          <td data-number="<%= (student[:ungraded].map(&:submitted_at).compact.min || 1.day.from_now).to_i / 3600 %>">
             <% student[:ungraded].each do |submission| %>
               <%= link_to(submission.assignment.title, speed_grader_course_gradebook_path(course, :assignment_id => submission.assignment.id, :anchor => { :student_id => student[:enrollment].user_id }.to_json)) %><br/>
               <div style="padding-bottom: 5px; margin-top: -2px; padding-left: 20px; font-size: 0.8em; color: #888;">
@@ -75,7 +93,7 @@
           </td>
           <% if course.user_has_been_instructor?(@current_user) %>
           <td>
-            <a href="<%= message_user_path(student[:enrollment].user) %>" class="message_student_link" title="<%= t 'message_student', 'Message this student' %>"><i class="icon-email"></i></a>
+            <a href="<%= message_user_path(student[:enrollment].user, course) %>" class="message_student_link" title="<%= t 'message_student', 'Message this student' %>"><i class="icon-email"></i></a>
           </td>
           <% end %>
         </tr>

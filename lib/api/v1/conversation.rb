@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -39,14 +39,13 @@ module Api::V1::Conversation
     }.merge(options)
     result = conversation.as_json(options)
     participants = conversation.participants(options.slice(:include_participant_contexts, :include_indirect_participants))
-    explicit_participants = conversation.participants({:include_participant_contexts => include_private_conversation_enrollments})
+    explicit_participants = conversation.participants
     audience = conversation.other_participants(explicit_participants)
     result[:messages] = options[:messages].map{ |m| conversation_message_json(m, current_user, session) } if options[:messages]
-    result[:submissions] = options[:submissions].map { |s| submission_json(s, s.assignment, current_user, session, nil, ['assignment', 'submission_comments']) } if options[:submissions]
-    unless interleave_submissions
-      result['message_count'] = result[:submissions] ?
-        result['message_count'] - result[:submissions].size :
-        conversation.messages.human.where(:asset_id => nil).count
+    if options[:submissions]
+      result[:submissions] = options[:submissions].map do |s|
+        submission_json(s, s.assignment, current_user, session, nil, ['assignment', 'submission_comments'], params)
+      end
     end
     result[:audience] = audience.map(&:id)
     result[:audience].map!(&:to_s) if stringify_json_ids?
@@ -56,6 +55,9 @@ module Api::V1::Conversation
     result[:visible] = options.key?(:visible) ? options[:visible] : @set_visibility && infer_visibility(conversation)
     result[:context_name] = conversation.context_name if options[:include_context_name]
     result[:context_code] = conversation.conversation.context_code
+    if options[:include_reply_permission_check] && conversation.conversation.replies_locked_for?(current_user)
+      result[:cannot_reply] = true
+    end
     if options[:include_beta]
       result[:beta] = !!conversation.conversation.context_id
     end
@@ -68,13 +70,30 @@ module Api::V1::Conversation
     result['media_comment'] = media_comment_json(result['media_comment']) if result['media_comment']
     result['attachments'] = result['attachments'].map{ |attachment| attachment_json(attachment, current_user) }
     result['forwarded_messages'] = result['forwarded_messages'].map{ |m| conversation_message_json(m, current_user, session) }
-    result['submission'] = submission_json(message.submission, message.submission.assignment, current_user, session, nil, ['assignment', 'submission_comments']) if message.submission
+    if message.submission
+      submission = message.submission
+      assignment = submission.assignment
+      includes = %w|assignment submission_comments|
+      result['submission'] = submission_json(submission, assignment, current_user, session, nil, includes, params)
+    end
     result
   end
 
+  # ensure the common contexts for those users are fetched and cached in
+  # bulk, if not already done
+  def preload_common_contexts(current_user, recipients)
+    address_book = current_user.address_book
+    users = recipients.select{ |recipient| recipient.is_a?(User) && !address_book.cached?(recipient) }
+    address_book.preload_users(users)
+  end
+
   def conversation_recipients_json(recipients, current_user, session)
+    ActiveRecord::Associations::Preloader.new.preload(recipients.select{|r| r.is_a?(User)},
+      {:pseudonym => :account}) # for avatar_url
+
+    preload_common_contexts(current_user, recipients)
     recipients.map do |recipient|
-      if recipient.is_a?(MessageableUser)
+      if recipient.is_a?(User)
         conversation_user_json(recipient, current_user, session,
           :include_participant_avatars => true,
           :include_participant_contexts => true)
@@ -90,17 +109,23 @@ module Api::V1::Conversation
       :include_participant_avatars => true,
       :include_participant_contexts => true
     }.merge(options)
+    if options[:include_participant_avatars]
+      ActiveRecord::Associations::Preloader.new.preload(users, {:pseudonym => :account}) # for avatar_url
+    end
+
+    preload_common_contexts(current_user, users) if options[:include_participant_contexts]
     users.map { |user| conversation_user_json(user, current_user, session, options) }
   end
 
   def conversation_user_json(user, current_user, session, options = {})
     result = {
       :id => user.id,
-      :name => user.short_name
+      :name => user.short_name,
+      :full_name => user.name
     }
     if options[:include_participant_contexts]
-      result[:common_courses] = user.common_courses
-      result[:common_groups] = user.common_groups
+      result[:common_courses] = current_user.address_book.common_courses(user)
+      result[:common_groups] = current_user.address_book.common_groups(user)
     end
     result[:avatar_url] = avatar_url_for_user(user, blank_fallback) if options[:include_participant_avatars]
     result
@@ -115,5 +140,13 @@ module Api::V1::Conversation
     result[:message] = conversation_message_json(batch.root_conversation_message, current_user, session)
     result[:tags] = batch.local_tags
     result
+  end
+
+  def deleted_conversation_json(conversation_message_participant, current_user, session)
+    hash = conversation_message_json(conversation_message_participant.conversation_message, current_user, session)
+    hash['deleted_at'] = conversation_message_participant.deleted_at
+    hash['user_id'] = conversation_message_participant.user_id
+    hash['conversation_id'] = conversation_message_participant.conversation_message.conversation_id
+    hash
   end
 end

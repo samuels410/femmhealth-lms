@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,12 +18,11 @@
 
 module EportfolioPage
   def eportfolio_page_attributes
-    @portfolio.setup_defaults
     @categories = @portfolio.eportfolio_categories
-    if @portfolio.grants_rights?(@current_user, session, :manage)[:manage]
-      @recent_submissions = @current_user.submissions.order("created_at DESC").all if @current_user && @current_user == @portfolio.user
+    if @portfolio.grants_right?(@current_user, session, :manage)
+      @recent_submissions = @current_user.submissions.order("created_at DESC").to_a if @current_user && @current_user == @portfolio.user
       @files = @current_user.attachments.to_a
-      @folders = @current_user.active_folders_detailed.to_a
+      @folders = @current_user.active_folders.preload(:active_sub_folders, :active_file_attachments).to_a
     end
     @recent_submissions ||= []
     @files ||= []
@@ -44,9 +43,9 @@ module EportfolioPage
     if @owner_view
       add_crumb(t('#crumbs.eportfolio_welcome', "Welcome to Your ePortfolio"))
     else
-      add_crumb(@category.name, eportfolio_named_category_path(@portfolio.id, @category.slug))
-      add_crumb(@page.name, eportfolio_named_category_entry_path(@portfolio.id, @category.slug, @page.slug))
+      add_crumb(@category.name, eportfolio_named_category_path(@portfolio.id, @category.slug)) if @category.slug.present?
+      add_crumb(@page.name, eportfolio_named_category_entry_path(@portfolio.id, @category.slug, @page.slug)) if @category.slug.present? && @page.slug.present?
     end
   end
-  
+
 end

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -23,10 +23,10 @@ describe "/assignments/text_entry_page" do
   it "should render" do
     course_with_student
     view_context(@course, @user)
-    assigns[:assignment] = @course.assignments.create!(:title => "some assignment")
-    assigns[:submission] = assigns[:assignment].submit_homework(@user)
+    ass = assign(:assignment, @course.assignments.create!(:title => "some assignment"))
+    assign(:submission, ass.submit_homework(@user))
     render 'assignments/text_entry_page'
-    response.should_not be_nil
+    expect(response).not_to be_nil
   end
 end
 

@@ -1,25 +1,51 @@
-# requires jquery and date.js
-require [
-  'compiled/calendar/TimeBlockList'
-], (TimeBlockList) ->
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 
-  module "TimeBlockList",
+# requires jquery and date.js
+define [
+  'jquery'
+  'compiled/calendar/TimeBlockList'
+  'moment'
+  'compiled/util/fcUtil'
+], ($, TimeBlockList, moment, fcUtil) ->
+
+  QUnit.module "TimeBlockList",
     setup: ->
-      @$holder = $('<table>').appendTo(document.body)
-      @$splitter = $('<a>').appendTo(document.body)
+      wrappedDate = (str) ->
+        moment( new Date(str))
+
+      @$holder = $('<table>').appendTo("#fixtures")
+      @$splitter = $('<a>').appendTo("#fixtures")
       # make all of these dates in next year to gaurentee the are in the future
       nextYear = new Date().getFullYear() + 1
       @blocks = [
-        [new Date("2/3/#{nextYear} 5:32"), new Date("2/3/#{nextYear} 10:32") ]
+        [wrappedDate("2/3/#{nextYear} 5:32"), wrappedDate("2/3/#{nextYear} 10:32") ]
         # a locked one
-        [new Date("2/3/#{nextYear} 11:15"), new Date("2/3/#{nextYear} 15:01"), true ]
-        [new Date("2/3/#{nextYear} 16:00"), new Date("2/3/#{nextYear} 19:00")]
+        [wrappedDate("2/3/#{nextYear} 11:15"), wrappedDate("2/3/#{nextYear} 15:01"), true]
+        [wrappedDate("2/3/#{nextYear} 16:00"), wrappedDate("2/3/#{nextYear} 19:00")]
       ]
-      @me = new TimeBlockList(@$holder, @$splitter, @blocks)
+      @blankRow = { date: fcUtil.wrap(new Date(2017, 2, 3)) }
+      @me = new TimeBlockList(@$holder, @$splitter, @blocks, @blankRow)
 
     teardown: ->
       @$holder.detach()
       @$splitter.detach()
+      $("#fixtures").empty()
+      $(".ui-tooltip").remove()
 
   test "should init properly", ->
     equal @me.rows.length, 3+1, 'three rows + 1 blank'
@@ -27,6 +53,8 @@ require [
   test "should not include locked or blank rows in .blocks()", ->
     deepEqual @me.blocks(), [@blocks[0], @blocks[2]]
 
+  test "should not render custom date in blank row if more than one time block already", ->
+    equal(@me.rows[3].$date.val(), '')
 
   test "should handle intialization of locked / unlocked rows", ->
     ok !@me.rows[0].locked, 'first row should not be locked'
@@ -49,20 +77,29 @@ require [
     equal @me.rows.length, rowsBefore + 1
     ok $.contains(@me.element, row.$row), 'make sure the element got appended to my <tbody>'
 
+  test "should validate if all rows are valid and complete or blank", ->
+    ok @me.validate(), 'should validate'
+
   test "should not not validate if all rows are not valid", ->
-    ok @me.validate(), 'should validate if has valid dates'
+    row = @me.addRow()
+    row.$date.val('asdfasdf').change()
+    ok !@me.validate(), 'should not validate'
 
-    # make an invalid row
-    row =  @me.addRow()
-    row.updateDom('date', 'asdfasdf').change()
+  test "should not validate if a row is incomplete", ->
+    row = @me.addRow()
+    row.$start_time.val('7pm').change()
+    ok !@me.validate(), 'should not validate'
 
-    # todo, use sinon to mock alert when it lands in master
-    _alert = window.alert
-    calledAlert = false
-    window.alert = -> calledAlert = true
-    ok !@me.validate(), 'should not validate with asdf dates'
-    ok calledAlert, 'should `alert` a message'
-    window.alert = _alert #restore native alert
+  test "should still validate if a row is fully blank", ->
+    row = @me.addRow()
+    ok @me.validate(), 'should validate'
+
+  test "should alert when invalid", ->
+    row = @me.addRow()
+    row.$date.val('asdfasdf').change()
+    spy = @spy(window, 'alert')
+    @me.validate()
+    ok spy.called, 'should `alert` a message'
 
   test "should split correctly", ->
     @me.rows[2].remove()
@@ -70,3 +107,23 @@ require [
 
     equal @me.rows.length, 12
     equal @me.blocks().length, 10
+
+  QUnit.module "TimeBlockList with no time blocks",
+    setup: ->
+      wrappedDate = (str) ->
+        moment( new Date(str))
+
+      @$holder = $('<table>').appendTo("#fixtures")
+      @$splitter = $('<a>').appendTo("#fixtures")
+      @blocks = []
+      @blankRow = { date: fcUtil.wrap(new Date(2050, 2, 3)) }
+      @me = new TimeBlockList(@$holder, @$splitter, @blocks, @blankRow)
+
+    teardown: ->
+      @$holder.detach()
+      @$splitter.detach()
+      $("#fixtures").empty()
+      $(".ui-tooltip").remove()
+
+  test "should render custom date in blank row if provided", ->
+    equal(@me.rows[0].$date.val(), 'Thu Mar 3, 2050')

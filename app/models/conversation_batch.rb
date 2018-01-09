@@ -1,19 +1,36 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 class ConversationBatch < ActiveRecord::Base
   include SimpleTags
   include Workflow
 
   belongs_to :user
   belongs_to :root_conversation_message, :class_name => 'ConversationMessage'
-  belongs_to :context, :polymorphic => true
+  belongs_to :context, polymorphic: [:account, :course, { context_group: 'Group' }]
 
   before_save :serialize_conversation_message_ids
   after_create :queue_delivery
 
   validates_presence_of :user_id, :workflow_state, :root_conversation_message_id
+  validates_length_of :subject, :maximum => maximum_string_length, :allow_nil => true
 
-  scope :in_progress, where(:workflow_state => ['created', 'sending'])
+  scope :in_progress, -> { where(:workflow_state => ['created', 'sending']) }
 
-  attr_accessible
   attr_accessor :mode
 
   attr_reader :conversations
@@ -26,16 +43,21 @@ class ConversationBatch < ActiveRecord::Base
     update_attribute :workflow_state, 'sending'
 
     ModelCache.with_cache(:conversations => existing_conversations, :users => {:id => user_map}) do
+
+      should_cc_author = true
+
       recipient_ids.each_slice(chunk_size) do |ids|
         ids.each do |id|
           is_group = self.group?
           conversation = user.initiate_conversation([user_map[id]], !is_group,
             subject: subject, context_type: context_type, context_id: context_id)
           @conversations << conversation
-          message = conversation.add_message(root_conversation_message.clone,
-                                             update_for_sender: false,
-                                             tags: tags)
+          message = root_conversation_message.clone
+          message.generate_user_note = self.generate_user_note
+          conversation.add_message(message, update_for_sender: false, tags: tags, cc_author: should_cc_author)
           conversation_message_ids << message.id
+
+          should_cc_author = false
         end
         # update it in chunks, not on every message
         save! if update_progress
@@ -73,7 +95,7 @@ class ConversationBatch < ActiveRecord::Base
 
   attr_writer :user_map
   def user_map
-    @user_map ||= User.find_all_by_id(recipient_ids + [user_id]).index_by(&:id)
+    @user_map ||= User.where(id: recipient_ids + [user_id]).index_by(&:id)
   end
 
   def recipient_ids
@@ -132,6 +154,7 @@ class ConversationBatch < ActiveRecord::Base
     user_map = recipients.index_by(&:id)
     user_map[batch.user_id] = batch.user
     batch.user_map = user_map
+    batch.generate_user_note = root_message.generate_user_note
     batch.save!
     batch
   end

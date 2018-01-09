@@ -1,4 +1,21 @@
-define ['underscore', 'Backbone'], (_, Backbone) ->
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+define ['jquery', 'underscore', 'Backbone'], ($, _, Backbone) ->
 
   class FeatureFlag extends Backbone.Model
 
@@ -12,27 +29,26 @@ define ['underscore', 'Backbone'], (_, Backbone) ->
     urlRoot: ->
       "/api/v1/#{@contextType()}s/#{@contextId()}/features/flags"
 
-    flagContext: ->
-      flag = @get('flag')
-      "#{flag.context_type}_#{flag.context_id}".toLowerCase()
+    flag: ->
+      @get('feature_flag')
 
-    hasContext: ->
-      flag = @get('flag')
-      flag.context_type and flag.context_id
+    state: ->
+      @flag().state
 
     isAllowed: ->
-      @get('state') == 'allowed'
+      @state() == 'allowed'
 
     isOn: ->
-      @get('state') == 'on'
+      @state() == 'on'
 
-    isOff: (forDisplay = false) ->
-      cond1 = _.include(['off', 'hidden'], @get('state'))
-      cond2 = !@currentContextIsAccount() and @isAllowed()
-      if forDisplay then cond1 or cond2 else cond1
+    isOff: ->
+      _.include(['off', 'hidden'], @state()) or (!@currentContextIsAccount() and @isAllowed())
 
     isHidden: ->
-      @get('hidden')
+      @flag().hidden
+
+    isLocked: ->
+      @flag().locked
 
     isSiteAdmin: ->
       !!ENV.ACCOUNT?.site_admin
@@ -53,33 +69,52 @@ define ['underscore', 'Backbone'], (_, Backbone) ->
       settings = @transitions()[action]
       return if settings?.message then settings else false
 
-    updateTransitions: =>
-      $.getJSON(@url()).then ({transitions}) =>
-        @get('feature_flag').transitions = transitions
+    shouldDelete: (action) ->
+      @isHidden() && action == 'off'
+
+    updateState: (new_state) =>
+      if @shouldDelete(new_state)
+        $.ajaxJSON @url(), "DELETE", {}, =>
+          # get inherited state
+          $.ajaxJSON @url(), "GET", {}, (data) =>
+            @updateLocalState(data)
+      else
+        $.ajaxJSON @url(), "PUT", {state: new_state}, (data) =>
+          @updateLocalState(data)
+
+    updateLocalState: (data) ->
+      @flag().state = data.state
+      @flag().transitions = data.transitions
 
     transitions: ->
       @get('feature_flag').transitions
 
+    transitionLocked: (action) ->
+      settings = @transitions()[action]
+      # the button remains enabled if there's an associated message
+      return settings?.locked && !settings.message
+
     toJSON: ->
       _.extend(super, isAllowed: @isAllowed(), isHidden: @isHidden(),
-        isOff: @isOff(true), isOn: @isOn(), isSiteAdmin: @isSiteAdmin(),
-        currentContextIsAccount: @isContext('account'))
+        isOff: @isOff(), isOn: @isOn(), isSiteAdmin: @isSiteAdmin() && !@isOn() && !@isLocked(),
+        currentContextIsAccount: @isContext('account'),
+        threeState: @currentContextIsAccount() && !@transitionLocked('allowed'),
+        disableOn: @isLocked() || @isSiteAdmin() || @transitionLocked('on'),
+        disableAllow: @isLocked() || @transitionLocked('allowed'),
+        disableOff: @isLocked() || @transitionLocked('off'),
+        disableToggle: @isLocked() || @transitionLocked('on') || @transitionLocked('off'))
 
     parse: (json) ->
       _.extend(json, @attributes)
       feature =
         appliesTo: json.applies_to.toLowerCase()
         id: json.feature
+        isExpanded: json.autoexpand
         title: json.display_name
-        isLocked: json.feature_flag.locked
-        flag: json.feature_flag
         releaseOn: if json.enable_at then new Date(json.enable_at) else null
         releaseNotesUrl: json.release_notes_url
-        state: json.feature_flag?.state
         labels: []
-      feature.flag = json.feature_flag if json.feature_flag
-      feature.state = json.feature_flag.state if json.feature_flag
       feature.labels.push(FeatureFlag::LABEL.beta)        if json.beta
-      feature.labels.push(FeatureFlag::LABEL.hidden)      if json.hidden
+      feature.labels.push(FeatureFlag::LABEL.hidden)      if json.feature_flag.hidden
       feature.labels.push(FeatureFlag::LABEL.development) if json.development
       _.extend(json, feature)

@@ -1,8 +1,26 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
   'Backbone'
   'compiled/views/feature_flags/FeatureFlagDialog'
   'jst/feature_flags/featureFlag'
-], (Backbone, FeatureFlagDialog, template) ->
+], ($, Backbone, FeatureFlagDialog, template) ->
 
   class FeatureFlagView extends Backbone.View
 
@@ -13,14 +31,25 @@ define [
     template: template
 
     els:
-      '.element_toggler': '$detailToggle'
+      '.element_toggler i': '$detailToggle'
 
     events:
-      'click button':           'onToggleValue'
+      'change .ff_button': 'onClickThreeState'
+      'change .ff_toggle': 'onClickToggle'
       'click .element_toggler': 'onToggleDetails'
+      'keyclick .element_toggler': 'onToggleDetails'
 
-    onToggleValue: (e) ->
-      @toggleValue($(e.currentTarget))
+    afterRender: ->
+      @$('.ui-buttonset').buttonset()
+
+    onClickThreeState: (e) ->
+      $target = $(e.currentTarget)
+      action = $target.data('action')
+      @applyAction(action)
+
+    onClickToggle: (e) ->
+      $target = $(e.currentTarget)
+      @applyAction(if $target.is(':checked') then 'on' else 'off')
 
     onToggleDetails: (e) ->
       @toggleDetailsArrow()
@@ -29,15 +58,13 @@ define [
       @$detailToggle.toggleClass('icon-mini-arrow-right')
       @$detailToggle.toggleClass('icon-mini-arrow-down')
 
-    shouldDelete: (action) ->
-      ENV.ACCOUNT?.site_admin && @model.get('hidden') && action == 'off'
-
-    toggleValue: ($target) ->
-      action = $target.data('action')
-      $.when(@canUpdate(action)).then =>
-        $target.siblings().removeClass('active').attr('aria-checked', false)
-        $target.addClass('active').attr('aria-checked', true)
-        if @shouldDelete(action) then @deleteFlag() else @updateFlag(action)
+    applyAction: (action) ->
+      $.when(@canUpdate(action)).then(
+        =>
+          @model.updateState(action)
+        =>
+          @render() # undo UI change if user cancels
+      )
 
     canUpdate: (action) ->
       deferred = $.Deferred()
@@ -51,9 +78,3 @@ define [
       view.render()
       view.show()
       deferred
-
-    deleteFlag: ->
-      @model.destroy(silent: true)
-
-    updateFlag: (action) ->
-      @model.save(state: action).then(@model.updateTransitions)

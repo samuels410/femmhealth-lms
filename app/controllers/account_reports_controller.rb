@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 - 2014 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -39,6 +39,10 @@
 #           "example": "https://example.com/some/path",
 #           "type": "string"
 #         },
+#         "attachment": {
+#           "description": "The attachment api object of the report. Only available after the report has completed.",
+#           "$ref": "File"
+#         },
 #         "status": {
 #           "description": "The status of the report",
 #           "example": "complete",
@@ -46,12 +50,18 @@
 #         },
 #         "parameters": {
 #           "description": "The report parameters",
+#           "example": {"course_id": 2, "start_at": "2012-07-13T10:55:20-06:00", "end_at": "2012-07-13T10:55:20-06:00"},
 #           "$ref": "ReportParameters"
 #         },
 #         "progress": {
 #           "description": "The progress of the report",
 #           "example": "100",
-#           "type": "string"
+#           "type": "integer"
+#         },
+#         "current_line": {
+#           "description": "This is the current line count being written to the report. It updates every 1000 records.",
+#           "example": "12000",
+#           "type": "integer"
 #         }
 #       }
 #     }
@@ -141,10 +151,11 @@
 #           "example": false,
 #           "type": "boolean"
 #         },
-#         "enrollment_state[]": {
+#         "enrollment_state": {
 #           "description": "Include enrollment state. Defaults to 'all' Options: ['active'| 'invited'| 'creation_pending'| 'deleted'| 'rejected'| 'completed'| 'inactive'| 'all']",
-#           "example": "['all']",
-#           "type": "string"
+#           "example": ["all"],
+#           "type": "array",
+#           "items": {"type": "string"}
 #         },
 #         "start_at": {
 #           "description": "The beginning date for submissions. Max time range is 2 weeks.",
@@ -160,21 +171,21 @@
 #     }
 #
 class AccountReportsController < ApplicationController
-  before_filter :require_user
-  before_filter :get_context
+  before_action :require_user
+  before_action :get_context
 
   include Api::V1::Account
   include Api::V1::AccountReport
 
 # @API List Available Reports
 #
-# Returns the list of reports for the current context.
+# Returns a paginated list of reports for the current context.
 #
 # @response_field name The name of the report.
 # @response_field parameters The parameters will vary for each report
 #
 # @example_request
-#     curl -H 'Authorization: Bearer <token>' \ 
+#     curl -H 'Authorization: Bearer <token>' \
 #          https://<canvas>/api/v1/accounts/<account_id>/reports/
 #
 # @example_response
@@ -199,15 +210,15 @@ class AccountReportsController < ApplicationController
 #
   def available_reports
     if authorized_action(@account, @current_user, :read_reports)
-      available_reports = AccountReport.available_reports(@account)
+      available_reports = AccountReport.available_reports
 
       results = []
 
       available_reports.each do |key, value|
-        last_run = @account.account_reports.where(:report_type => key).order('created_at DESC').first
+        last_run = @account.account_reports.active.where(:report_type => key).order('created_at DESC').first
         last_run = account_report_json(last_run, @current_user, session) if last_run
         report = {
-          :title => value[:title],
+          :title => value.title,
           :parameters => nil,
           :report => key,
           :last_run => last_run
@@ -234,13 +245,14 @@ class AccountReportsController < ApplicationController
 #
 # @argument [parameters] The parameters will vary for each report
 #
-# @returns report
+# @returns Report
 #
   def create
     if authorized_action(@context, @current_user, :read_reports)
-      available_reports = AccountReport.available_reports(@account).keys
+      available_reports = AccountReport.available_reports.keys
       raise ActiveRecord::RecordNotFound unless available_reports.include? params[:report]
-      report = @account.account_reports.build(:user=>@current_user, :report_type=>params[:report], :parameters=>params[:parameters])
+      parameters = params[:parameters]&.to_unsafe_h
+      report = @account.account_reports.build(:user=>@current_user, :report_type=>params[:report], :parameters=>parameters)
       report.workflow_state = :running
       report.progress = 0
       report.save
@@ -257,7 +269,7 @@ class AccountReportsController < ApplicationController
 # Shows all reports that have been run for the account of a specific type.
 #
 # @example_request
-#     curl -H 'Authorization: Bearer <token>' \ 
+#     curl -H 'Authorization: Bearer <token>' \
 #          https://<canvas>/api/v1/accounts/<account_id>/reports/<report_type>
 #
 # @returns [Report]
@@ -265,7 +277,7 @@ class AccountReportsController < ApplicationController
   def index
     if authorized_action(@context, @current_user, :read_reports)
 
-      reports = Api.paginate(type_scope.order('start_at DESC'), self, url_for({:action => :index, :controller => :account_reports}))
+      reports = Api.paginate(type_scope.active.order('id DESC'), self, url_for({action: :index, controller: :account_reports}))
 
       render :json => account_reports_json(reports, @current_user, session)
     end
@@ -273,10 +285,9 @@ class AccountReportsController < ApplicationController
 
 # @API Status of a Report
 # Returns the status of a report.
-# @argument report_id [Integer] The report id.
 #
 # @example_request
-#     curl -H 'Authorization: Bearer <token>' \ 
+#     curl -H 'Authorization: Bearer <token>' \
 #          https://<canvas>/api/v1/accounts/<account_id>/reports/<report_type>/<report_id>
 #
 # @returns Report
@@ -284,7 +295,7 @@ class AccountReportsController < ApplicationController
   def show
     if authorized_action(@context, @current_user, :read_reports)
 
-      report = type_scope.find(params[:id])
+      report = type_scope.active.find(params[:id])
       render :json => account_report_json(report, @current_user, session)
     end
   end
@@ -293,15 +304,15 @@ class AccountReportsController < ApplicationController
 #
 # Deletes a generated report instance.
 # @example_request
-#     curl -H 'Authorization: Bearer <token>' \ 
-#          -X DELETE \ 
+#     curl -H 'Authorization: Bearer <token>' \
+#          -X DELETE \
 #          https://<canvas>/api/v1/accounts/<account_id>/reports/<report_type>/<id>
 #
 # @returns Report
 #
   def destroy
     if authorized_action(@context, @current_user, :read_reports)
-      report = type_scope.find(params[:id])
+      report = type_scope.active.find(params[:id])
 
       report.destroy
       if report.destroy

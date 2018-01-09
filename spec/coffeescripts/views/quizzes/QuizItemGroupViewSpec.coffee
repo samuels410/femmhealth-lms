@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'Backbone'
   'compiled/models/Quiz'
@@ -16,7 +33,7 @@ define [
     view.$el.appendTo $('#fixtures')
     view.render()
 
-  module 'QuizItemGroupView',
+  QUnit.module 'QuizItemGroupView',
     setup: -> fakeENV.setup()
     teardown: -> fakeENV.teardown()
 
@@ -36,13 +53,37 @@ define [
     ok view.isEmpty()
 
 
-  test 'should rerender on :hidden change', ->
+  test 'should filter models with title that doesnt match term', ->
     collection = new QuizCollection([{id: 1}, {id: 2}])
+    view = createView(collection)
+    model = new Quiz(title: "Foo Name")
+
+    ok  view.filter(model, "name")
+    ok !view.filter(model, "zzz")
+
+  test 'should not use regexp to filter models', ->
+    collection = new QuizCollection([{id: 1}, {id: 2}])
+    view = createView(collection)
+    model = new Quiz(title: "Foo Name")
+
+    ok !view.filter(model, ".*name")
+    ok !view.filter(model, "zzz")
+
+  test 'should filter models with multiple terms', ->
+    collection = new QuizCollection([{id: 1}, {id: 2}])
+    view = createView(collection)
+    model = new Quiz(title: "Foo Name bar")
+
+    ok  view.filter(model, "name bar")
+    ok !view.filter(model, "zzz")
+
+
+  test 'should rerender on filter change', ->
+    collection = new QuizCollection([{id: 1, title: 'hey'}, {id: 2, title: 'foo'}])
     view = createView(collection)
     equal view.$el.find('.collectionViewItems li').length, 2
 
-    quiz = collection.get(1)
-    quiz.set('hidden', true)
+    view.filterResults('hey')
     equal view.$el.find('.collectionViewItems li').length, 1
 
   test 'should not render no content message if quizzes are available', ->

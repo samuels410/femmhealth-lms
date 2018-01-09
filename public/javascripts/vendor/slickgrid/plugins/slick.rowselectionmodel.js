@@ -1,3 +1,6 @@
+import jQuery from 'jquery'
+import 'vendor/slickgrid/slick.core'
+
 (function ($) {
   // register namespace
   $.extend(true, window, {

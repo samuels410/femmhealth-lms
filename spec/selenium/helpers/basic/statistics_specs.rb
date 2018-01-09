@@ -1,12 +1,29 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 shared_examples_for "statistics basic tests" do
-  include_examples "in-process server selenium tests"
+  include_context "in-process server selenium tests"
 
   def item_lists
     ff('.item_list')
   end
 
   def validate_item_list(css, header_text)
-    f(css).text.should include_text(header_text)
+    expect(f(css)).to include_text(header_text)
   end
 
   context "with admin initially logged in" do
@@ -17,14 +34,14 @@ shared_examples_for "statistics basic tests" do
       admin_logged_in
     end
 
-    it "should validate recently started courses display" do
-      pending('list is not available on sub account level') if account != Account.default
+    it "should validate recently created courses display" do
+      skip('list is not available on sub account level') if account != Account.default
       get url
       validate_item_list(list_css[:created], @course.name)
     end
 
     it "should validate recently started courses display" do
-      pending('spec is broken on sub account level') if account != Account.default
+      skip('spec is broken on sub account level') if account != Account.default
       get url
       validate_item_list(list_css[:started], @course.name)
     end
@@ -35,14 +52,14 @@ shared_examples_for "statistics basic tests" do
     end
 
     it "should validate link works in list" do
-      pending('spec is broken on sub account level') if account != Account.default
+      skip('spec is broken on sub account level') if account != Account.default
       get url
       expect_new_page_load { f(list_css[:started]).find_element(:css, '.header').click }
-      f('#section-tabs-header').should include_text(@course.name)
+      expect(f('#breadcrumbs .home + li a')).to include_text(@course.name)
     end
 
     it "should validate recently ended courses display" do
-      pending('spec is broken on sub account level') if account != Account.default
+      skip('spec is broken on sub account level') if account != Account.default
       concluded_course = Course.create!(:name => 'concluded course', :account => account)
       concluded_course.update_attributes(:conclude_at => 1.day.ago)
       get url
@@ -53,12 +70,10 @@ shared_examples_for "statistics basic tests" do
   it "should validate recently logged-in courses display" do
     course = Course.create!(:name => 'new course', :account => account)
     course.offer!
-    student = User.create!(:name => 'Example Student')
-    student.register!
+    student = user_factory(active_user: true)
     pseudonym = student.pseudonyms.create!(:unique_id => 'student@example.com', :password => 'asdfasdf', :password_confirmation => 'asdfasdf')
     course.enroll_user(student, 'StudentEnrollment').accept!
     login_as(pseudonym.unique_id, 'asdfasdf')
-    driver.navigate.to(app_host + '/logout')
     admin_logged_in
     get url
     validate_item_list(list_css[:logged_in], student.name)

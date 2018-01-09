@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,15 +18,19 @@
 
 class DelayedNotification < ActiveRecord::Base
   include Workflow
-  belongs_to :asset, :polymorphic => true
-  belongs_to :notification
-  belongs_to :asset_context, :polymorphic => true
-  attr_accessible :asset, :notification, :recipient_keys, :asset_context, :data
+
+  belongs_to :asset, polymorphic:
+    [:assessment_request, :attachment, :content_migration, :content_export, :collaborator, :submission,
+     :assignment, :communication_channel, :calendar_event, :conversation_message, :discussion_entry,
+     :submission_comment, { quiz_submission: 'Quizzes::QuizSubmission' }, :discussion_topic, :course, :enrollment,
+     :wiki_page, :group_membership, :web_conference], polymorphic_prefix: true, exhaustive: false
+  include NotificationPreloader
+
   attr_accessor :data
   validates_presence_of :notification_id, :asset_id, :asset_type, :workflow_state
-  
+
   serialize :recipient_keys
-  
+
   workflow do
     state :to_be_processed do
       event :do_process, :transitions_to => :processed
@@ -34,30 +38,31 @@ class DelayedNotification < ActiveRecord::Base
     state :processed
     state :errored
   end
-  
-  def self.process(asset, notification, recipient_keys, asset_context, data)
-    dn = DelayedNotification.new(:asset => asset, :notification => notification, :recipient_keys => recipient_keys,
-      :asset_context => asset_context, :data => data)
-    dn.process
+
+  def self.process(asset, notification, recipient_keys, data)
+    DelayedNotification.new(
+      asset: asset,
+      notification: notification,
+      recipient_keys: recipient_keys,
+      data: data
+    ).process
   end
-  
+
   def process
     tos = self.to_list
     if self.asset && !tos.empty?
-      res = self.notification.create_message(self.asset, tos, :asset_context => self.asset_context, :data => self.data)
+      res = self.notification.create_message(self.asset, tos, data: self.data)
     end
     self.do_process unless self.new_record?
     res
   rescue => e
-    ErrorReport.log_exception(:default, e, {
-      :message => "Delayed Notification processing failed",
-    })
+    Canvas::Errors.capture(e, message: "Delayed Notification processing failed")
     logger.error "delayed notification processing failed: #{e.message}\n#{e.backtrace.join "\n"}"
     self.workflow_state = 'errored'
     self.save
     []
   end
-  
+
   def to_list
     return @to_list if @to_list
     lookups = {}
@@ -72,7 +77,7 @@ class DelayedNotification < ActiveRecord::Base
     lookups.each do |klass, ids|
       includes = []
       includes = [:user] if klass == CommunicationChannel
-      res += klass.where(:id => ids).includes(includes).all rescue []
+      res += klass.where(:id => ids).preload(includes).to_a rescue []
     end
     @to_list = res.uniq
   end

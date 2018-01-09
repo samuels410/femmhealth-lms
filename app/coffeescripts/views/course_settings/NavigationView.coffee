@@ -1,7 +1,30 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'i18n!course_navigation'
   'jquery'
   'Backbone'
-], ($, Backbone) ->
+  'str/htmlEscape'
+  'jsx/move_item'
+], (I18n, $, Backbone, htmlEscape, MoveItem) ->
+  ###
+  xsslint jqueryObject.identifier dragObject current_item
+  ###
 
   class NavigationView extends Backbone.View
 
@@ -10,13 +33,67 @@ define [
       38: 'UpArrow'
       40: 'DownArrow'
 
+    events:
+      'click .disable_nav_item_link': 'disableNavLink'
+      'click .move_nav_item_link'   : 'moveNavLink'
+      'click .enable_nav_item_link' : 'enableNavLink'
+
     els:
       '#nav_enabled_list' : '$enabled_list'
       '#nav_disabled_list' : '$disabled_list'
+      '.navitem' : '$navitems'
+
+    disableNavLink: (e) ->
+      $targetItem = $(e.currentTarget).closest('.navitem')
+      @$disabled_list.append($targetItem)
+      $(e.currentTarget)
+        .attr('class', '')
+        .attr('class', 'icon-plus enable_nav_item_link')
+        .text("Enable")
+      $targetItem.find('a.al-trigger').focus()
+
+    enableNavLink: (e) ->
+      $targetItem = $(e.currentTarget).closest('.navitem')
+      @$enabled_list.append($targetItem)
+      $(e.currentTarget)
+        .attr('class', '')
+        .attr('class', 'icon-x disable_nav_item_link')
+        .text("Disable")
+      $targetItem.find('a.al-trigger').focus()
+
+    moveNavLink: (e) ->
+      selectedItem = $(e.currentTarget).closest '.navitem'
+      navList = $(e.currentTarget).closest '.nav_list'
+      navOptions = navList.children('.navitem').map (key, item) ->
+        id: item.getAttribute('id')
+        title: item.getAttribute('aria-label')
+      .toArray()
+
+      @moveTrayProps =
+        title: I18n.t('Move Navigation Item')
+        items: [
+          id: selectedItem.attr('id')
+          title: selectedItem.attr('aria-label')
+        ]
+        moveOptions:
+          siblings: navOptions
+        onMoveSuccess: (res) =>
+          MoveItem.reorderElements(res.data, @$enabled_list[0], (id) => '#' + id)
+        focusOnExit: (item) => document.querySelector("##{item.id} a.al-trigger")
+
+      MoveItem.renderTray(@moveTrayProps, document.getElementById('not_right_side'))
+
+    focusKeyboardHelp: (e) ->
+      $('.drag_and_drop_warning').removeClass('screenreader-only')
+
+    hideKeyboardHelp: (e) ->
+      $('.drag_and_drop_warning').addClass('screenreader-only')
 
     afterRender: ->
       @keyCodes = Object.freeze? @keyCodes
       $("li.navitem").on 'keydown', @onKeyDown
+      $('#navigation_tab').on 'blur', @focusKeyboardHelp
+      $('.drag_and_drop_warning').on 'blur', @hideKeyboardHelp
 
     onKeyDown: (e) =>
       $target = $(e.target)

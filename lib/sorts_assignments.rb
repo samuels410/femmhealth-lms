@@ -1,17 +1,29 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 class SortsAssignments
 
-  AssignmentsSortedByDueDate = Struct.new(
-    :past,
-    :overdue,
-    :undated,
-    :ungraded,
-    :upcoming,
-    :future
-  )
+  VALID_BUCKETS = [:past, :overdue, :undated, :ungraded, :unsubmitted, :upcoming, :future]
+  AssignmentsSortedByDueDate = Struct.new(*VALID_BUCKETS)
 
   def self.by_due_date(opts)
     assignments = opts.fetch( :assignments )
     user = opts.fetch( :user )
+    current_user = opts[:current_user] || opts.fetch( :user )
     session = opts.fetch( :session )
     submissions = opts.fetch( :submissions )
     upcoming_limit = opts[:upcoming_limit] || 1.week.from_now
@@ -20,7 +32,8 @@ class SortsAssignments
       past(assignments),
       overdue(assignments, user, session, submissions),
       undated(assignments),
-      ungraded_for_user_and_session(assignments, user, session),
+      ungraded_for_user_and_session(assignments, user, current_user, session),
+      unsubmitted_for_user_and_session(assignments, user, current_user, session),
       upcoming(assignments, upcoming_limit),
       future(assignments)
     )
@@ -41,6 +54,15 @@ class SortsAssignments
     assignments.select{ |assignment| assignment.due_at == nil }
   end
 
+  def self.unsubmitted_for_user_and_session(assignments, user, current_user, session)
+    assignments ||= []
+    assignments.select do |assignment|
+      assignment.grants_right?(current_user, session, :grade) &&
+        assignment.expects_submission? &&
+        assignment.submission_for_student(user)[:id].blank?
+    end
+  end
+
   def self.upcoming(assignments, limit=1.week.from_now)
     assignments ||= []
     dated(assignments).select{ |a| due_between?(a,Time.now,limit) }
@@ -58,12 +80,12 @@ class SortsAssignments
     dated(assignments).select{ |assignment| assignment.due_at > time }
   end
 
-  def self.ungraded_for_user_and_session(assignments,user,session)
+  def self.ungraded_for_user_and_session(assignments, user, current_user, session)
     assignments ||= []
     assignments.select do |assignment|
-      assignment.grants_right?(user, session, :grade) &&
+      assignment.grants_right?(current_user, session, :grade) &&
         assignment.expects_submission? &&
-        assignment.needs_grading_count_for_user(user) > 0
+        Assignments::NeedsGradingCountQuery.new(assignment, user).count > 0
     end
   end
 
@@ -91,6 +113,27 @@ class SortsAssignments
     assignments = past(assignments)
     user_allowed_to_submit(assignments, user, session) &
       without_graded_submission(assignments, submissions)
+  end
+
+  def self.bucket_filter(given_scope, bucket, session, user, current_user, context, submissions_for_user)
+    overridden_assignments = given_scope.map{|a| a.overridden_for(user)}
+
+    observed_students = ObserverEnrollment.observed_students(context, user)
+    user_for_sorting = if observed_students.count == 1
+      observed_students.keys.first
+    else
+      user
+    end
+
+    sorted_assignments = self.by_due_date(
+      :assignments => overridden_assignments,
+      :user => user_for_sorting,
+      :current_user => current_user,
+      :session => session,
+      :submissions => submissions_for_user
+    )
+    filtered_assignment_ids = sorted_assignments.send(bucket).map(&:id)
+    given_scope.where(id: filtered_assignment_ids)
   end
 
   private

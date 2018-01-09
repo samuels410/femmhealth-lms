@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 - 2013 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,7 +18,7 @@
 
 class AccountReport < ActiveRecord::Base
   include Workflow
-  attr_accessible :user, :account, :report_type, :parameters
+
   belongs_to :account
   belongs_to :user
   belongs_to :attachment
@@ -32,15 +32,19 @@ class AccountReport < ActiveRecord::Base
     state :running
     state :complete
     state :error
+    state :aborted
     state :deleted
   end
 
-  scope :last_complete_of_type, lambda{ |type|
-    last_of_type(type).where(:progress => '100')  }
+  scope :complete, -> { where(progress: 100) }
+  scope :most_recent, -> { order(updated_at: :desc).limit(1) }
+  scope :active, -> { where.not(workflow_state: 'deleted') }
 
-  scope :last_of_type, lambda {|type|
-    where(:report_type => type).order("updated_at DESC").limit(1)
-  }
+  alias_method :destroy_permanently!, :destroy
+  def destroy
+    self.workflow_state = 'deleted'
+    save!
+  end
 
   def context
     self.account
@@ -56,9 +60,9 @@ class AccountReport < ActiveRecord::Base
 
   def run_report(type=nil)
     self.report_type ||= type
-    if AccountReport.available_reports(self.account)[self.report_type]
+    if AccountReport.available_reports[self.report_type]
       begin
-        Canvas::AccountReports.generate_report(self)
+        AccountReports.generate_report(self)
       rescue
         self.workflow_state = :error
         self.save
@@ -74,9 +78,9 @@ class AccountReport < ActiveRecord::Base
     self.parameters.is_a?(Hash) && self.parameters[key].presence
   end
 
-  def self.available_reports(account)
+  def self.available_reports
     # check if there is a reports plugin for this account
-    Canvas::AccountReports.for_account(account.root_account.id)
+    AccountReports.available_reports
   end
 
 end

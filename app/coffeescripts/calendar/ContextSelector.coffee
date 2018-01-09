@@ -1,10 +1,28 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'underscore'
+  'i18n!context_sector'
   'jst/calendar/contextSelector'
   'jst/calendar/contextSelectorItem'
   'compiled/fn/preventDefault'
-], ($, _, contextSelectorTemplate, contextSelectorItemTemplate, preventDefault) ->
+], ($, _, I18n, contextSelectorTemplate, contextSelectorItemTemplate, preventDefault) ->
 
   class ContextSelectorItem
     constructor: (@context) ->
@@ -22,9 +40,15 @@ define [
       @$sectionCheckboxes = @$listItem.find('[name="sections[]"]')
       @$sectionCheckboxes.change @sectionChange
 
-    toggleSections: (jsEvent) =>
-      $(jsEvent.target).toggleClass('ag-sections-expanded')
+    toggleSections: (e) =>
       @$sectionsList.toggleClass('hidden')
+      $toggle = @$listItem.find('.ag_sections_toggle')
+      $toggle.toggleClass('ag-sections-expanded')
+
+      if $toggle.hasClass('ag-sections-expanded')
+        $toggle.find('.screenreader-only').text(I18n.t('Hide course sections for course %{name}', { name: @context.name }))
+      else
+        $toggle.find('.screenreader-only').text(I18n.t('Show course sections for course %{name}', { name: @context.name }))
 
     change: =>
       newState =  switch @state
@@ -58,23 +82,25 @@ define [
         else
           @setState('partial')
 
-    disable: ->
+    disableSelf: ->
       @$contentCheckbox.prop('disabled', true)
-      @disableSections()
 
     disableSections: ->
       @$sectionCheckboxes.prop('disabled', true)
 
+    disableAll: ->
+      @disableSelf()
+      @disableSections()
+
     lock: ->
       @locked = true
-      @disable()
-      @disableSections()
+      @disableAll()
 
     isChecked: -> @state != 'off'
 
     sections: ->
       checked = @$sectionCheckboxes.filter(':checked')
-      if checked.length == @$sectionCheckboxes.length
+      if checked.length == @$sectionCheckboxes.length && !@$contentCheckbox.attr('disabled')
         []
       else
         _.map(checked, (cb) -> cb.value)
@@ -104,6 +130,7 @@ define [
           item.lock()
       else
         contextsBySubContext = {}
+
         for c in @contexts
           for section in c.course_sections
             contextsBySubContext[section.asset_string] = c.asset_string
@@ -120,6 +147,11 @@ define [
           if item.state == 'off'
             item.setState('on')
             item.lock()
+
+        for c, item of @contextSelectorItems
+          unless item.locked || item.context.can_create_appointment_groups.all_sections
+            item.toggleSections()
+            item.disableSelf()
 
       $('.ag_contexts_done').click preventDefault closeCB
 

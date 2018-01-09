@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -12,38 +12,19 @@
 # A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
 # details.
 #
-# You should have received a copy of the GNU Affero General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
 class CrocodocSessionsController < ApplicationController
-  before_filter :require_user
+  before_action :require_user
+  include HmacHelper
 
-  def create
-    attachment = Attachment.find(params[:attachment_id])
-    submission = Submission.find(params[:submission_id]) if params[:submission_id]
-
-    if submission
-      if params[:version]
-        submission = submission.submission_history[params[:version].to_i]
-      end
-
-      # make sure the attachment is tied to this submission
-      attachment_ids = (submission.attachment_ids || "").split(',')
-      unless attachment_ids.include? attachment.id.to_s
-        raise ActiveRecord::RecordNotFound
-      end
-
-      unless submission.grants_right? @current_user, session, :read
-        render :text => 'unauthorized', :status => :unauthorized
-        return
-      end
-    else
-      unless attachment.grants_right? @current_user, session, :download
-        render :text => 'unauthorized', :status => :unauthorized
-        return
-      end
-    end
+  def show
+    blob = extract_blob(params[:hmac], params[:blob],
+                        "user_id" => @current_user.global_id,
+                        "type" => "crocodoc")
+    attachment = Attachment.find(blob["attachment_id"])
 
     if attachment.crocodoc_available?
       annotations = params[:annotations] ?
@@ -51,13 +32,28 @@ class CrocodocSessionsController < ApplicationController
         true
 
       crocodoc = attachment.crocodoc_document
-      session_url = crocodoc.session_url :user => @current_user,
-                                         :annotations => annotations
-      respond_to do |format|
-        format.json { render :json => {:session_url => session_url} }
+      url = crocodoc.session_url(:user => @current_user,
+                                 :annotations => annotations,
+                                 :enable_annotations => blob["enable_annotations"],
+                                 :moderated_grading_whitelist => blob["moderated_grading_whitelist"])
+
+      # For the purposes of reporting student viewership, we only
+      # care if the original attachment owner is looking
+      # Depending on how the attachment came to exist that might be
+      # either the context of the attachment or the attachments' user
+      if (attachment.context == @current_user) || (attachment.user == @current_user)
+        attachment.touch(:viewed_at)
       end
+
+      redirect_to url
     else
-      raise ActiveRecord::RecordNotFound
+      render :plain => "Not found", :status => :not_found
     end
+
+  rescue HmacHelper::Error
+    render :plain => 'unauthorized', :status => :unauthorized
+  rescue Timeout::Error
+    render :plain => "Service is currently unavailable. Try again later.",
+           :status => :service_unavailable
   end
 end

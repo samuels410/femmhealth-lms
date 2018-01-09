@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,9 +18,9 @@
 
 class AssessmentQuestion < ActiveRecord::Base
   include Workflow
-  attr_accessible :name, :question_data, :form_question_data
-  has_many :quiz_questions
-  has_many :attachments, :as => :context
+
+  has_many :quiz_questions, :class_name => 'Quizzes::QuizQuestion'
+  has_many :attachments, :as => :context, :inverse_of => :context
   delegate :context, :context_id, :context_type, :to => :assessment_question_bank
   attr_accessor :initial_context
   belongs_to :assessment_question_bank, :touch => true
@@ -40,8 +40,12 @@ class AssessmentQuestion < ActiveRecord::Base
 
   serialize :question_data
 
+  include MasterCourses::CollectionRestrictor
+  self.collection_owner_association = :assessment_question_bank
+  restrict_columns :content, [:name, :question_data]
+
   set_policy do
-    given{|user, session| cached_context_grants_right?(user, session, :manage_assignments) }
+    given{|user, session| self.context.grants_right?(user, session, :manage_assignments) }
     can :read and can :create and can :update and can :delete
   end
 
@@ -72,14 +76,58 @@ class AssessmentQuestion < ActiveRecord::Base
     end
   end
 
+  def translate_link_regex
+    @regex ||= Regexp.new(%{/#{context_type.downcase.pluralize}/#{context_id}/(?:files/(\\d+)/(?:download|preview)|file_contents/(course%20files/[^'"?]*))(?:\\?([^'"]*))?})
+  end
+
+  def file_substitutions
+    @file_substitutions ||= {}
+  end
+
+  def translate_file_link(link, match_data=nil)
+    match_data ||= link.match(translate_link_regex)
+    return link unless match_data
+
+    id = match_data[1]
+    path = match_data[2]
+    id_or_path = id || path
+
+    if !file_substitutions[id_or_path]
+      if id
+        file = Attachment.where(context_type: context_type, context_id: context_id, id: id_or_path).first
+      elsif path
+        path = URI.unescape(id_or_path)
+        file = Folder.find_attachment_in_context_with_path(assessment_question_bank.context, path)
+      end
+      if file && file.replacement_attachment_id
+        file = file.replacement_attachment
+      end
+      begin
+        new_file = file.try(:clone_for, self)
+      rescue => e
+        new_file = nil
+        er_id = Canvas::Errors.capture_exception(:file_clone_during_translate_links, e)[:error_report]
+        logger.error("Error while cloning attachment during"\
+                           " AssessmentQuestion#translate_links: "\
+                           "id: #{self.id} error_report: #{er_id}")
+      end
+      new_file.save if new_file
+      file_substitutions[id_or_path] = new_file
+    end
+    if sub = file_substitutions[id_or_path]
+      query_rest = match_data[3] ? "&#{match_data[3]}" : ''
+      "/assessment_questions/#{self.id}/files/#{sub.id}/download?verifier=#{sub.uuid}#{query_rest}"
+    else
+      link
+    end
+  end
+
   def translate_links
     # we can't translate links unless this question has a context (through a bank)
     return unless assessment_question_bank && assessment_question_bank.context
 
     # This either matches the id from a url like: /courses/15395/files/11454/download
     # or gets the relative path at the end of one like: /courses/15395/file_contents/course%20files/unfiled/test.jpg
-    regex = Regexp.new(%{/#{context_type.downcase.pluralize}/#{context_id}/(?:files/(\\d+)/(?:download|preview)|file_contents/(course%20files/[^'"?]*))(?:\\?([^'"]*))?})
-    file_substitutions = {}
 
     deep_translate = lambda do |obj|
       if obj.is_a?(Hash)
@@ -87,31 +135,8 @@ class AssessmentQuestion < ActiveRecord::Base
       elsif obj.is_a?(Array)
         obj.map {|v| deep_translate.call(v) }
       elsif obj.is_a?(String)
-        obj.gsub(regex) do |match|
-          id_or_path = $1 || $2
-          if !file_substitutions[id_or_path]
-            if $1
-              file = Attachment.find_by_context_type_and_context_id_and_id(context_type, context_id, id_or_path)
-            elsif $2
-              path = URI.unescape(id_or_path)
-              file = Folder.find_attachment_in_context_with_path(assessment_question_bank.context, path)
-            end
-            begin
-              new_file = file.clone_for(self)
-            rescue => e
-              new_file = nil
-              er = ErrorReport.log_exception(:file_clone_during_translate_links, e)
-              logger.error("Error while cloning attachment during AssessmentQuestion#translate_links: id: #{self.id} error_report: #{er.id}")
-            end
-            new_file.save if new_file
-            file_substitutions[id_or_path] = new_file
-          end
-          if sub = file_substitutions[id_or_path]
-            query_rest = $3 ? "&#{$3}" : ''
-            "/assessment_questions/#{self.id}/files/#{sub.id}/download?verifier=#{sub.uuid}#{query_rest}"
-          else
-            match
-          end
+        obj.gsub(translate_link_regex) do |match|
+          translate_file_link(match, $~)
         end
       else
         obj
@@ -119,11 +144,13 @@ class AssessmentQuestion < ActiveRecord::Base
     end
 
     hash = deep_translate.call(self.question_data)
-    self.question_data = hash
+    if hash != self.question_data
+      self.question_data = hash
 
-    @skip_translate_links = true
-    self.save!
-    @skip_translate_links = false
+      @skip_translate_links = true
+      self.save!
+      @skip_translate_links = false
+    end
   end
 
   def data
@@ -164,7 +191,8 @@ class AssessmentQuestion < ActiveRecord::Base
   def question_data
     if data = read_attribute(:question_data)
       if data.class == Hash
-        data = write_attribute(:question_data, data.with_indifferent_access)
+         write_attribute(:question_data, data.with_indifferent_access)
+         data = read_attribute(:question_data)
       end
     end
 
@@ -186,6 +214,8 @@ class AssessmentQuestion < ActiveRecord::Base
       false
     elsif self.assessment_question_bank && self.assessment_question_bank.title != AssessmentQuestionBank.default_unfiled_title
       false
+    elsif question.is_a?(Quizzes::QuizQuestion) && question.generated?
+      false
     elsif self.new_record? || (quiz_questions.count <= 1 && question.assessment_question_id == self.id)
       true
     else
@@ -193,11 +223,58 @@ class AssessmentQuestion < ActiveRecord::Base
     end
   end
 
-  def create_quiz_question
-    qq = quiz_questions.new
-    qq.migration_id = self.migration_id
-    qq.write_attribute(:question_data, question_data)
-    qq
+  def self.find_or_create_quiz_questions(assessment_questions, quiz_id, quiz_group_id, duplicate_index = 0)
+    return [] if assessment_questions.empty?
+
+    # prepopulate version_number
+    current_versions = Version.shard(Shard.shard_for(quiz_id)).
+        where(versionable_type: 'AssessmentQuestion', versionable_id: assessment_questions).
+        group(:versionable_id).
+        maximum(:number)
+    # cache all the known quiz_questions
+    scope = Quizzes::QuizQuestion.
+        shard(Shard.shard_for(quiz_id)).
+        where(quiz_id: quiz_id, workflow_state: 'generated')
+    # we search for nil quiz_group_id and duplicate_index to find older questions
+    # generated before we added proper race condition checking
+    existing_quiz_questions = scope.
+        where(assessment_question_id: assessment_questions,
+              quiz_group_id: [nil, quiz_group_id],
+              duplicate_index: [nil, duplicate_index]).
+        order("id, quiz_group_id NULLS LAST").
+        group_by(&:assessment_question_id)
+
+    assessment_questions.map do |aq|
+      aq.force_version_number(current_versions[aq.id] || 0)
+      qq = existing_quiz_questions[aq.id].try(:first)
+      if !qq
+        begin
+          Quizzes::QuizQuestion.transaction(requires_new: true) do
+            qq = aq.create_quiz_question(quiz_id, quiz_group_id, duplicate_index)
+          end
+        rescue ActiveRecord::RecordNotUnique
+          qq = scope.where(assessment_question_id: aq,
+                           quiz_group_id: quiz_group_id,
+                           duplicate_index: duplicate_index).take!
+          qq.update_assessment_question!(aq, quiz_group_id, duplicate_index)
+        end
+      else
+        qq.update_assessment_question!(aq, quiz_group_id, duplicate_index)
+      end
+      qq
+    end
+  end
+
+  def create_quiz_question(quiz_id, quiz_group_id = nil, duplicate_index = nil)
+    quiz_questions.new.tap do |qq|
+      qq.write_attribute(:question_data, question_data)
+      qq.quiz_id = quiz_id
+      qq.quiz_group_id = quiz_group_id
+      qq.assessment_question = self
+      qq.workflow_state = 'generated'
+      qq.duplicate_index = duplicate_index
+      qq.save_without_callbacks
+    end
   end
 
   def self.scrub(text)
@@ -207,36 +284,43 @@ class AssessmentQuestion < ActiveRecord::Base
     text
   end
 
-  alias_method :destroy!, :destroy
+  alias_method :destroy_permanently!, :destroy
   def destroy
     self.workflow_state = 'deleted'
+    self.deleted_at = Time.now.utc
     self.save
   end
 
 
   def self.parse_question(qdata, assessment_question=nil)
     qdata = qdata.to_hash.with_indifferent_access
-    previous_data = assessment_question.question_data rescue {}
-    previous_data ||= {}
+    qdata[:question_name] ||= qdata[:name]
 
-    question = QuizQuestion::QuestionData.generate(
-      id: qdata[:id] || previous_data[:id],
-      regrade_option: qdata[:regrade_option] || previous_data[:regrade_option],
-      points_possible: qdata[:points_possible] || previous_data[:points_possible],
-      correct_comments: qdata[:correct_comments] || previous_data[:correct_comments],
-      incorrect_comments: qdata[:incorrect_comments] || previous_data[:incorrect_comments],
-      neutral_comments: qdata[:neutral_comments] || previous_data[:neutral_comments],
-      question_type: qdata[:question_type] || previous_data[:question_type],
-      question_name: qdata[:question_name] || qdata[:name] || previous_data[:question_name],
-      question_text: qdata[:question_text] || previous_data[:question_text],
-      answers: qdata[:answers] || previous_data[:answers],
-      formulas: qdata[:formulas] || previous_data[:formulas],
-      variables: qdata[:variables] || previous_data[:variables],
-      answer_tolerance: qdata[:answer_tolerance] || previous_data[:answer_tolerance],
-      formula_decimal_places: qdata[:formula_decimal_places] || previous_data[:formula_decimal_places],
-      matching_answer_incorrect_matches: qdata[:matching_answer_incorrect_matches] || previous_data[:matching_answer_incorrect_matches],
-      matches: qdata[:matches] || previous_data[:matches]
+    previous_data = if assessment_question.present?
+                      assessment_question.question_data || {}
+                    else
+                      {}
+                    end.with_indifferent_access
+
+    data = previous_data.merge(qdata.delete_if {|k, v| !v}).slice(
+      :id, :regrade_option, :points_possible, :correct_comments, :incorrect_comments,
+      :neutral_comments, :question_type, :question_name, :question_text, :answers,
+      :formulas, :variables, :answer_tolerance, :formula_decimal_places,
+      :matching_answer_incorrect_matches, :matches,
+      :correct_comments_html, :incorrect_comments_html, :neutral_comments_html
     )
+
+    [
+      [:correct_comments_html, :correct_comments],
+      [:incorrect_comments_html, :incorrect_comments],
+      [:neutral_comments_html, :neutral_comments],
+    ].each do |html_key, non_html_key|
+      if qdata.has_key?(html_key) && qdata[html_key].blank? && qdata[non_html_key].blank?
+        data.delete(non_html_key)
+      end
+    end
+
+    question = Quizzes::QuizQuestion::QuestionData.generate(data)
 
     question[:assessment_question_id] = assessment_question.id rescue nil
     question
@@ -256,182 +340,5 @@ class AssessmentQuestion < ActiveRecord::Base
     dup
   end
 
-  def self.process_migration(data, migration)
-    question_data = {:aq_data=>{}, :qq_data=>{}}
-    questions = data['assessment_questions'] ? data['assessment_questions']['assessment_questions'] : []
-    questions ||= []
-    to_import = migration.to_import 'quizzes'
-    total = questions.length
-
-    # If a question doesn't have a specified question bank
-    # we want to put it in a bank named after the assessment it's in
-    bank_map = {}
-    assessments = data['assessments'] ? data['assessments']['assessments'] : []
-    assessments ||= []
-    assessments.each do |assmnt|
-      next unless assmnt['questions']
-      assmnt['questions'].each do |q|
-        if q["question_type"] == "question_reference"
-          bank_map[q['migration_id']] = [assmnt['title'], assmnt['migration_id']] if q['migration_id']
-        elsif q["question_type"] == "question_group"
-          q['questions'].each do |ref|
-            bank_map[ref['migration_id']] = [assmnt['title'], assmnt['migration_id']] if ref['migration_id']
-          end
-        end
-      end
-    end
-    if migration.to_import('assessment_questions') != false || (to_import && !to_import.empty?)
-
-      existing_questions = migration.context.assessment_questions.
-          except(:select).
-          select("assessment_questions.id, assessment_questions.migration_id").
-          where("assessment_questions.migration_id IS NOT NULL").
-          index_by(&:migration_id)
-      questions.each do |q|
-        existing_question = existing_questions[q['migration_id']]
-        q['assessment_question_id'] = existing_question.id if existing_question
-      end
-
-      logger.debug "adding #{total} assessment questions"
-
-      default_bank = migration.question_bank_id ? migration.context.assessment_question_banks.find_by_id(migration.question_bank_id) : nil
-      banks = {}
-      questions.each do |question|
-        question_bank = nil
-        question[:question_bank_name] = nil if question[:question_bank_name] == ''
-        question[:question_bank_name], question[:question_bank_migration_id] = bank_map[question[:migration_id]] if question[:question_bank_name].blank?
-        if default_bank
-          question_bank = default_bank
-        else
-          question[:question_bank_name] ||= migration.question_bank_name
-          question[:question_bank_name] ||= AssessmentQuestionBank.default_imported_title
-        end
-        if question[:assessment_question_migration_id]
-          question_data[:qq_data][question['migration_id']] = question
-          next
-        end
-        next if question[:question_bank_migration_id] &&
-            !migration.import_object?("quizzes", question[:question_bank_migration_id]) &&
-            !migration.import_object?("assessment_question_banks", question[:question_bank_migration_id])
-
-        if !question_bank
-          hash_id = "#{question[:question_bank_id]}_#{question[:question_bank_name]}"
-          if !banks[hash_id]
-            bank_mig_id = question[:question_bank_id] || question[:question_bank_migration_id]
-            unless bank = migration.context.assessment_question_banks.find_by_title_and_migration_id(question[:question_bank_name], bank_mig_id)
-              bank = migration.context.assessment_question_banks.new
-              bank.title = question[:question_bank_name]
-              bank.migration_id = bank_mig_id
-              bank.save!
-            end
-            if bank.workflow_state == 'deleted'
-              bank.workflow_state = 'active'
-              bank.save!
-            end
-            banks[hash_id] = bank
-          end
-          question_bank = banks[hash_id]
-        end
-
-        begin
-          question = AssessmentQuestion.import_from_migration(question, migration.context, question_bank)
-
-          # If the question appears to have links, we need to translate them so that file links point
-          # to the AssessmentQuestion. Ideally we would just do this before saving the question, but
-          # the link needs to include the id of the AQ, which we don't have until it's saved. This will
-          # be a problem as long as we use the question as a context for its attachments. (We're turning this
-          # hash into a string so we can quickly check if anywhere in the hash might have a URL.)
-          if question.to_s =~ %r{/files/\d+/(download|preview)}
-            AssessmentQuestion.find(question[:assessment_question_id]).translate_links
-          end
-
-          question_data[:aq_data][question['migration_id']] = question
-        rescue
-          migration.add_import_warning(t('#migration.quiz_question_type', "Quiz Question"), question[:question_name], $!)
-        end
-      end
-    end
-
-    question_data
-  end
-
-  def self.import_from_migration(hash, context, bank=nil, options={})
-    hash = hash.with_indifferent_access
-    if !bank
-      hash[:question_bank_name] = nil if hash[:question_bank_name] == ''
-      hash[:question_bank_name] ||= AssessmentQuestionBank::default_imported_title
-      migration_id = hash[:question_bank_id] || hash[:question_bank_migration_id]
-      unless bank = AssessmentQuestionBank.find_by_context_type_and_context_id_and_title_and_migration_id(context.class.to_s, context.id, hash[:question_bank_name], migration_id)
-        bank ||= context.assessment_question_banks.new
-        bank.title = hash[:question_bank_name]
-        bank.migration_id = migration_id
-        bank.save!
-      end
-      if bank.workflow_state == 'deleted'
-        bank.workflow_state = 'active'
-        bank.save!
-      end
-    end
-    hash.delete(:question_bank_migration_id) if hash.has_key?(:question_bank_migration_id)
-    context.imported_migration_items << bank if context.imported_migration_items && !context.imported_migration_items.include?(bank)
-    prep_for_import(hash, context)
-    question_data = AssessmentQuestion.connection.quote hash.to_yaml
-    question_name = AssessmentQuestion.connection.quote hash[:question_name]
-    if id = hash['assessment_question_id']
-      query = "UPDATE assessment_questions"
-      query += " SET name = #{question_name}, question_data = #{question_data}, workflow_state = 'active', created_at = '#{Time.now.to_s(:db)}',"
-      query += " updated_at = '#{Time.now.to_s(:db)}', assessment_question_bank_id = #{bank.id}"
-      query += " WHERE id = #{id}"
-      AssessmentQuestion.connection.execute(query)
-    else
-      query = "INSERT INTO assessment_questions (name, question_data, workflow_state, created_at, updated_at, assessment_question_bank_id, migration_id)"
-      query += " VALUES (#{question_name},#{question_data},'active', '#{Time.now.to_s(:db)}', '#{Time.now.to_s(:db)}', #{bank.id}, '#{hash[:migration_id]}')"
-      id = AssessmentQuestion.connection.insert(query, "#{name} Create",
-                                                primary_key, nil, sequence_name)
-      hash['assessment_question_id'] = id
-    end
-    if context.respond_to?(:content_migration) && context.content_migration
-      hash[:missing_links].each do |field, missing_links|
-        context.content_migration.add_missing_content_links(:class => self.to_s,
-         :id => hash['assessment_question_id'], :field => field, :missing_links => missing_links,
-         :url => "/#{context.class.to_s.underscore.pluralize}/#{context.id}/question_banks/#{bank.id}#question_#{hash['assessment_question_id']}_question_text")
-      end
-      if hash[:import_warnings]
-        hash[:import_warnings].each do |warning|
-          context.content_migration.add_warning(warning, {
-              :fix_issue_html_url => "/#{context.class.to_s.underscore.pluralize}/#{context.id}/question_banks/#{bank.id}#question_#{hash['assessment_question_id']}_question_text"
-          })
-        end
-      end
-    end
-    hash.delete(:missing_links)
-    hash
-  end
-
-  def self.prep_for_import(hash, context)
-    hash[:missing_links] = {}
-    [:question_text, :correct_comments_html, :incorrect_comments_html, :neutral_comments_html, :more_comments_html].each do |field|
-      hash[:missing_links][field] = []
-      hash[field] = ImportedHtmlConverter.convert(hash[field], context, {:missing_links => hash[:missing_links][field], :remove_outer_nodes_if_one_child => true}) if hash[field].present?
-    end
-    [:correct_comments, :incorrect_comments, :neutral_comments, :more_comments].each do |field|
-      html_field = "#{field}_html".to_sym
-      if hash[field].present? && hash[field] == hash[html_field]
-        hash.delete(html_field)
-      end
-    end
-    hash[:answers].each_with_index do |answer, i|
-      [:html, :comments_html, :left_html].each do |field|
-        hash[:missing_links]["answer #{i} #{field}"] = []
-        answer[field] = ImportedHtmlConverter.convert(answer[field], context, {:missing_links => hash[:missing_links]["answer #{i} #{field}"], :remove_outer_nodes_if_one_child => true}) if answer[field].present?
-      end
-      if answer[:comments].present? && answer[:comments] == answer[:comments_html]
-        answer.delete(:comments_html)
-      end
-    end if hash[:answers]
-    hash[:prepped_for_import] = true
-    hash
-  end
-
-  scope :active, where("assessment_questions.workflow_state<>'deleted'")
+  scope :active, -> { where("assessment_questions.workflow_state<>'deleted'") }
 end

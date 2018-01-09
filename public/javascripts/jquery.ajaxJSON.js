@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 - 2012 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,15 +12,15 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
+
 /*jshint evil:true*/
 
-define([
-  'INST' /* INST */,
-  'jquery' /* $ */
-], function(INST, $) {
+import INST from './INST'
+import $ from 'jquery'
+import authenticity_token from 'compiled/behaviors/authenticity_token'
 
   var _getJSON = $.getJSON;
   $.getJSON = function(url, data, callback) {
@@ -37,15 +37,15 @@ define([
       return;
     }
     url = url || ".";
-    if(submit_type != "GET") {
+    if(
+      submit_type != "GET" &&
+      // if it's a json request and has already been JSON.stringify'ed,
+      //  then we can't attach properties to `data` since it's already a string
+      typeof data !== 'string'
+    ) {
       data._method = submit_type;
       submit_type = "POST";
-      if(!data.authenticity_token) {
-        data.authenticity_token = $("#ajax_authenticity_token").text();
-      }
-    }
-    if($("#page_view_id").length > 0 && !data.page_view_id && (!options || !options.skipPageViewLog)) {
-      data.page_view_id = $("#page_view_id").text();
+      data.authenticity_token = authenticity_token();
     }
     var ajaxError = function(xhr, textStatus, errorThrown) {
       var data = xhr;
@@ -70,12 +70,11 @@ define([
       dataType: "json",
       type: submit_type,
       success: function(data, textStatus, xhr) {
-        updateCSRFToken(xhr);
         data = data || {};
-        var page_view_id = null;
-        if(xhr && xhr.getResponseHeader && (page_view_id = xhr.getResponseHeader("X-Canvas-Page-View-Id"))) {
+        var page_view_update_url = null;
+        if(xhr && xhr.getResponseHeader && (page_view_update_url = xhr.getResponseHeader("X-Canvas-Page-View-Update-Url"))) {
           setTimeout(function() {
-            $(document).triggerHandler('page_view_id_received', page_view_id);
+            $(document).triggerHandler('page_view_update_url_received', page_view_update_url);
           }, 50);
         }
         if(!data.length && data.errors) {
@@ -90,7 +89,6 @@ define([
         }
       },
       error: function(xhr) {
-        updateCSRFToken(xhr);
         ajaxError.apply(this, arguments);
       },
       complete: function(xhr) {
@@ -129,16 +127,18 @@ define([
     return null;
   };
 
-  function updateCSRFToken(xhr) {
-    // in case the server has generated a new one, e.g. session reset on
-    // login actions
-    var token = xhr.getResponseHeader('X-CSRF-Token');
-    if (token) {
-      ENV.AUTHENTICITY_TOKEN = token;
-      // TODO: stop using me
-      $("#ajax_authenticity_token").text(token);
+  $.ajaxJSON.isUnauthenticated = function(xhr) {
+    if (xhr.status != 401) {
+      return false;
     }
-  }
+
+    var json_data;
+    try {
+      json_data = $.parseJSON(xhr.responseText);
+    } catch(e) {}
+
+    return !!json_data && json_data.status == 'unauthenticated';
+  };
 
   // Defines a default error for all ajax requests.  Will always be called
   // in the development environment, and as a last-ditch error catching
@@ -149,7 +149,7 @@ define([
       var inProduction = (INST.environment == "production");
       var unhandled = ($.inArray(request, $.ajaxJSON.unhandledXHRs) != -1);
       var ignore = ($.inArray(request, $.ajaxJSON.ignoredXHRs) != -1);
-      if((!inProduction || unhandled) && !ignore) {
+      if((!inProduction || unhandled || $.ajaxJSON.isUnauthenticated(request)) && !ignore) {
         $.ajaxJSON.unhandledXHRs = $.grep($.ajaxJSON.unhandledXHRs, function(xhr, i) {
           return xhr != request;
         });
@@ -162,4 +162,3 @@ define([
     };
     this.ajaxError($.fn.defaultAjaxError.func);
   };
-});

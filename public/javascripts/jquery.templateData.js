@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,14 +12,13 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-define([
-  'jquery' /* $ */,
-  'str/htmlEscape',
-  'jquery.instructure_misc_helpers' /* replaceTags */
-], function($, htmlEscape) {
+
+import $ from 'jquery'
+import htmlEscape from './str/htmlEscape'
+import './jquery.instructure_misc_helpers' /* replaceTags */
 
   // Fills the selected object(s) with data values as specified.  Plaintext values should be specified in the
   //  data: data used to fill template.
@@ -64,7 +63,7 @@ define([
                 options.data[item] = "";
               }
               if(options.htmlValues && $.inArray(item, options.htmlValues) != -1) {
-                $found.html(options.data[item].toString());
+                $found.html($.raw(options.data[item].toString()));
                 if($found.hasClass('user_content')) {
                   contentChange = true;
                   $found.removeClass('enhanced');
@@ -87,11 +86,14 @@ define([
           var $obj = $(this), 
               oldHref, oldRel, oldName;
           for(var i in options.hrefValues) {
+            if(!options.hrefValues.hasOwnProperty(i)) {
+              continue;
+            }
             var name = options.hrefValues[i];
             if(oldHref = $obj.attr('href')) {
               var newHref = $.replaceTags(oldHref, name, encodeURIComponent(options.data[name]));
-              var orig = $obj.text() == $obj.html() ? $obj.text() : null;
-              if(oldHref != newHref) {
+              var orig = $obj.text() === $obj.html() ? $obj.text() : null;
+              if(oldHref !== newHref) {
                 $obj.attr('href', newHref);
                 if(orig) {
                   $obj.text(orig);
@@ -125,15 +127,16 @@ define([
     }
     var result = {}, item, val;
     if(options.textValues) {
-      for(item in options.textValues) {
-        var $item = this.find("." + options.textValues[item].replace(/\[/g, '\\[').replace(/\]/g, '\\]') + ":first");
+      var _this = this;
+      options.textValues.forEach(function(item) {
+        var $item = _this.find("." + item.replace(/\[/g, '\\[').replace(/\]/g, '\\]') + ":first");
         val = $.trim($item.text());
-        if($item.html() == "&nbsp;") { val = ""; }
-        if(val.length == 1 && val.charCodeAt(0) == 160) {
+        if($item.html() === "&nbsp;") { val = ""; }
+        if(val.length === 1 && val.charCodeAt(0) === 160) {
           val = "";
         }
-        result[options.textValues[item]] = val;
-      }
+        result[item] = val;
+      });
     }
     if(options.dataValues) {
       for(item in options.dataValues) {
@@ -162,5 +165,3 @@ define([
     var opts = $.extend({}, options, {textValues: [value]});
     return this.getTemplateData(opts)[value];
   };
-
-});

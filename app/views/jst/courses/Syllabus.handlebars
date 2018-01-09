@@ -8,31 +8,34 @@
     &nbsp;
   {{/if}}
 </div>
-<table id="syllabus">
+<table id="syllabus" class="ic-Table ic-Table--condensed">
   <thead>
     <tr>
-      <th scope="col" style="width: 10%;">{{#t "headers.date"}}Date{{/t}}</th>
-      <th scope="col" style="width: 10%;">{{#t "headers.day"}}Day{{/t}}</th>
-      <th scope="col" style="width: 80%;">
-      <div style="float: right;"></div>
-      {{#t "headers.details"}}Details{{/t}}
+      <th scope="col" style="width: 25%;">{{#t "headers.date"}}Date{{/t}}</th>
+      <th scope="col" style="width: 75%;">
+        <div style="float: right;"></div>
+        {{#t "headers.details"}}Details{{/t}}
       </th>
     </tr>
   </thead>
   <tbody>
     {{#each dates}}
     <tr class="date{{#if passed}} date_passed{{/if}}{{#if date}} events_{{strftime date "%Y_%m_%d"}}{{/if}}">
-      <th scope="row" class="day_date" data-date="{{#if date}}{{strftime date "%Y_%m_%d"}}{{/if}}" title="{{#if date}}{{tDateToString date "short_weekday"}}{{else}}{{#t "syllabus.other_day"}}Other{{/t}}{{/if}}">
+      <td scope="row" valign="top" class="day_date" data-date="{{#if date}}{{strftime date "%Y_%m_%d"}}{{/if}}">
         {{#if date}}
-          {{tDateToString date "short"}}
+          {{tDateToString date "medium_with_weekday"}}
         {{/if}}
-      </th>
-      <th scope="row">{{#if date}}{{tDateToString date "short_weekday"}}{{else}}{{#t "syllabus.other_day"}}Other{{/t}}{{/if}}</th>
+      </td>
       <td class="details">
         <table class="detail_list">
           {{#each events}}
           <tr class="syllabus_{{type}} related-{{related_id}}{{#if override}} special_date{{/if}}">
             <td class="name{{#unless last}} not_last{{/unless}}">
+              {{#ifEqual type 'assignment'}}
+                {{addIcon 'assignment'}}
+              {{else}}
+                {{addIcon 'calendar-month'}}
+              {{/ifEqual}}
               {{#if html_url}}
                 <a href="{{html_url}}">{{title}}</a>
               {{else}}
@@ -45,16 +48,18 @@
             <td class="dates{{#unless last}} not_last{{/unless}}">
               {{#if start_at}}
                 {{#if due_at}}
-                  due by {{tTimeHours due_at}}
+                  {{t "due by"}} <span {{contextSensitiveDatetimeTitle (unfudge due_at)}} >{{tTimeHours due_at}}</span>
                 {{else}}
-                  {{tTimeHours start_at}}
+                  <span {{contextSensitiveDatetimeTitle (unfudge start_at)}} >{{tTimeHours start_at}}</span>
                   {{#unless same_time}}
-                    to
-                    {{#if same_day}}
-                      {{tTimeHours end_at}}
-                    {{else}}
-                      {{tEventToString end_at}}
-                    {{/if}}
+                    {{t "to" }}
+                    <span {{contextSensitiveDatetimeTitle (unfudge end_at)}} >
+                      {{#if same_day}}
+                        {{tTimeHours end_at}}
+                      {{else}}
+                        {{tEventToString end_at 'short' 'tiny_on_the_hour'}}
+                      {{/if}}
+                   </span>
                   {{/unless}}
                 {{/if}}
               {{else}}

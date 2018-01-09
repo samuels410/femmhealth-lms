@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'compiled/views/groups/manage/GroupView'
@@ -13,7 +30,7 @@ define [
   group = null
   users = null
 
-  module 'GroupView',
+  QUnit.module 'GroupView',
     setup: ->
       fakeENV.setup()
       group = new Group
@@ -31,11 +48,12 @@ define [
       groupDetailView = new GroupDetailView {model: group, users}
       view = new GroupView {groupUsersView, groupDetailView, model: group}
       view.render()
-      view.$el.appendTo($(document.body))
+      view.$el.appendTo($("#fixtures"))
 
     teardown: ->
       fakeENV.teardown()
       view.remove()
+      document.getElementById("fixtures").innerHTML = ""
 
   assertCollapsed = (view) ->
     ok view.$el.hasClass('group-collapsed'), 'expand visible'
@@ -65,8 +83,7 @@ define [
       'Content-Type': 'application/json'
       JSON.stringify {}
     ]
-    confirmStub = sinon.stub window, 'confirm'
-    confirmStub.returns true
+    @stub(window, 'confirm').returns(true)
 
     # when
     view.$('.delete-group').click()
@@ -75,4 +92,3 @@ define [
     ok not view.$el.hasClass('hidden'), 'group hidden'
 
     server.restore()
-    confirmStub.restore()

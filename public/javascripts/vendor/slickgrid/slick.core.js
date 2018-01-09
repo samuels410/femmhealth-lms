@@ -1,3 +1,6 @@
+import $ from 'jquery'
+import 'vendor/slickgrid/lib/jquery.event.drag-2.2'
+
 /***
  * Contains core SlickGrid classes.
  * @module Core
@@ -454,6 +457,4 @@
       return (activeEditController ? activeEditController.cancelCurrentEdit() : true);
     };
   }
-})(jQuery);
-
-
+})($);

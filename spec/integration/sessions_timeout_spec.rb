@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -26,32 +26,35 @@ describe "Session Timeout" do
 
     context "when a user logs in" do 
       before do
-        course_with_student(:active_all => true, :user => user_with_pseudonym)
-        login_as
+        course_with_student(:active_all => true, :user => user_with_pseudonym(:active_user => true))
       end
 
       it "should time out after 40 minutes of inactivity" do
+        login_as
+
         now = Time.now
         get "/"
-        response.should be_success
+        expect(response).to be_success
 
-        Time.stubs(:now).returns(now + 40.minutes)
+        allow(Time).to receive(:now).and_return(now + 40.minutes)
         get "/"
-        response.should redirect_to "http://www.example.com/login"
+        expect(response).to redirect_to "http://www.example.com/login"
       end
 
       it "should not time out if the user remains active" do
+        login_as
+
         now = Time.now
         get "/"
-        response.should be_success
+        expect(response).to be_success
 
-        Time.stubs(:now).returns(now + 20.minutes)
+        allow(Time).to receive(:now).and_return(now + 20.minutes)
         get "/"
-        response.should be_success
+        expect(response).to be_success
 
-        Time.stubs(:now).returns(now + 40.minutes)
+        allow(Time).to receive(:now).and_return(now + 40.minutes)
         get "/"
-        response.should be_success
+        expect(response).to be_success
       end
     end
   end

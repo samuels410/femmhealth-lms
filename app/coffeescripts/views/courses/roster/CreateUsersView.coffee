@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'compiled/models/CreateUserList'
   'underscore'
@@ -5,7 +22,6 @@ define [
   'compiled/views/DialogFormView'
   'jst/courses/roster/createUsers'
   'jst/EmptyDialogFormWrapper'
-  'vendor/jquery.placeholder'
 ], (CreateUserList, _, I18n, DialogFormView, template, wrapper) ->
 
   class CreateUsersView extends DialogFormView
@@ -23,8 +39,8 @@ define [
     events: _.extend({}, @::events,
       'click .createUsersStartOver': 'startOver'
       'click .createUsersStartOverFrd': 'startOverFrd'
-      'change #enrollment_type': 'changeEnrollment'
-      'click #enrollment_type': 'changeEnrollment'
+      'change #role_id': 'changeEnrollment'
+      'click #role_id': 'changeEnrollment'
       'click .dialog_closer': 'close'
     )
 
@@ -38,21 +54,15 @@ define [
 
     attach: ->
       @model.on 'change:step', @render, this
-      @model.on 'change:enrollment_type', @maybeShowPrivileges
-
-    maybeShowPrivileges: =>
-      role = _.findWhere(@model.get('roles'), name: @model.get('enrollment_type'))
-      if role and role.base_role_name in ['TeacherEnrollment', 'TaEnrollment']
-        @$privileges.show()
-      else
-        @$privileges.hide()
+      @model.on 'change:step', @focusX, this
 
     changeEnrollment: (event) ->
-      @model.set 'enrollment_type', event.target.value
+      @model.set 'role_id', event.target.value
 
     openAgain: ->
       @startOverFrd()
       super
+      @focusX()
 
     hasUsers: ->
       @model.get('users')?.length
@@ -60,7 +70,7 @@ define [
     onSaveSuccess: ->
       @model.incrementStep()
       if @model.get('step') is 3
-        role = @rolesCollection.where({name: @model.get('enrollment_type')})[0]
+        role = @rolesCollection.where({id: @model.get('role_id')})[0]
         role?.increment 'count', @model.get('users').length
         newUsers = @model.get('users').length
         @courseModel?.increment 'pendingInvitationsCount', newUsers
@@ -88,7 +98,6 @@ define [
                                                     json.limit_privileges_to_course_section == "1"
       json
 
-    afterRender: ->
-      @$('[placeholder]').placeholder()
-      @maybeShowPrivileges()
+    focusX: ->
+      $('.ui-dialog-titlebar-close', @el.parentElement).focus()
 

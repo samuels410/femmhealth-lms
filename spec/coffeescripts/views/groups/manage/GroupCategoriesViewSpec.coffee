@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'compiled/views/groups/manage/GroupCategoriesView'
@@ -8,8 +25,10 @@ define [
   clock = null
   view = null
   categories = null
+  wrapper = null
+  sanbox = null
 
-  module 'GroupCategoriesView',
+  QUnit.module 'GroupCategoriesView',
     setup: ->
       fakeENV.setup()
       ENV.group_categories_url = '/api/v1/courses/1/group_categories'
@@ -18,16 +37,19 @@ define [
         {id: 1, name: "group set 1"}
         {id: 2, name: "group set 2"}
       ]
+      @stub(categories, "fetch").returns([])
       view = new GroupCategoriesView
         collection: categories
       view.render()
-      view.$el.appendTo($(document.body))
+      wrapper = document.getElementById("fixtures")
+      wrapper.innerHTML = ""
+      view.$el.appendTo($("#fixtures"))
 
     teardown: ->
       fakeENV.teardown()
       clock.restore()
       view.remove()
-      $('.group_categories_area').remove()
+      wrapper.innerHTML = ""
 
   test 'render tab and panel elements', ->
     # find the tabs

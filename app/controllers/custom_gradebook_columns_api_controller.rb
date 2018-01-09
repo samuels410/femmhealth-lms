@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,27 +21,39 @@
 # API for adding additional columns to the gradebook.  Custom gradebook
 # columns will be displayed with the other frozen gradebook columns.
 #
-# @object CustomColumn
-#    {
-#      // header text
-#      "title": "Stuff",
+# @model CustomColumn
+#     {
+#       "id": "CustomColumn",
+#       "description": "",
+#       "properties": {
+#         "title": {
+#           "description": "header text",
+#           "example": "Stuff",
+#           "type": "string"
+#         },
+#         "position": {
+#           "description": "column order",
+#           "example": 1,
+#           "type": "integer"
+#         },
+#         "hidden": {
+#           "description": "won't be displayed if hidden is true",
+#           "example": false,
+#           "type": "boolean"
+#         }
+#       }
+#     }
 #
-#      // column order
-#      "position": 1,
-#
-#      // won't be displayed if hidden is true
-#      "hidden": false
-#    }
 class CustomGradebookColumnsApiController < ApplicationController
-  before_filter :require_context, :require_user
+  before_action :require_context, :require_user
 
   include Api::V1::CustomGradebookColumn
 
   # @API List custom gradebook columns
   #
-  # List all custom gradebook columns for a course
+  # A paginated list of all custom gradebook columns for a course
   #
-  # @param include_hidden [Boolean]
+  # @argument include_hidden [Boolean]
   #   Include hidden parameters (defaults to false)
   #
   # @returns [CustomColumn]
@@ -64,18 +76,18 @@ class CustomGradebookColumnsApiController < ApplicationController
   #
   # Create a custom gradebook column
   #
-  # @argument column[title] [String]
-  # @argument column[position] [Int]
+  # @argument column[title] [Required, String]
+  # @argument column[position] [Integer]
   #   The position of the column relative to other custom columns
-  # @argument column[hidden] [Optional, Boolean]
+  # @argument column[hidden] [Boolean]
   #   Hidden columns are not displayed in the gradebook
-  # @argument column[teacher_notes] [Optional, Boolean]
+  # @argument column[teacher_notes] [Boolean]
   #   Set this if the column is created by a teacher.  The gradebook only
   #   supports one teacher_notes column.
   #
   # @returns CustomColumn
   def create
-    column = @context.custom_gradebook_columns.build(params[:column])
+    column = @context.custom_gradebook_columns.build(column_params)
     update_column(column)
   end
 
@@ -86,7 +98,7 @@ class CustomGradebookColumnsApiController < ApplicationController
   # @returns CustomColumn
   def update
     column = @context.custom_gradebook_columns.not_deleted.find(params[:id])
-    column.attributes = params[:column]
+    column.attributes = column_params
     update_column(column)
   end
 
@@ -116,6 +128,7 @@ class CustomGradebookColumnsApiController < ApplicationController
     render :status => 200, :json => {}
   end
 
+  private
   def update_column(column)
     if authorized_action? column, @current_user, :manage
       if column.save
@@ -126,5 +139,8 @@ class CustomGradebookColumnsApiController < ApplicationController
       end
     end
   end
-  private :update_column
+
+  def column_params
+    params.require(:column).permit(:title, :position, :teacher_notes, :hidden)
+  end
 end

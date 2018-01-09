@@ -1,13 +1,31 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!conversations'
+  'jquery'
   'underscore'
   'Backbone'
   'compiled/views/conversations/SearchableSubmenuView'
   'jst/conversations/courseOptions'
   'jquery.instructure_date_and_time'
-  'use!vendor/bootstrap/bootstrap-dropdown'
-  'use!vendor/bootstrap-select/bootstrap-select'
-], (I18n, _, {View, Collection}, SearchableSubmenuView, template) ->
+  'vendor/bootstrap/bootstrap-dropdown'
+  'vendor/bootstrap-select/bootstrap-select'
+], (I18n, $, _, {View, Collection}, SearchableSubmenuView, template) ->
 
   class CourseSelectionView extends View
     events:
@@ -22,6 +40,10 @@ define [
         .find('.dropdown-toggle').on('focus', @loadAll)
       @options.courses.favorites.on('reset', @render)
       @options.courses.all.on('reset', @render)
+      @options.courses.all.on('add', @render)
+      @options.courses.groups.on('reset', @render)
+      @options.courses.groups.on('add', @render)
+      @$picker = @$el.next()
       @render()
 
     render: () =>
@@ -31,24 +53,38 @@ define [
       now = $.fudgeDateForProfileTimezone(new Date)
       @options.courses.all.each((course) =>
         if @options.courses.favorites.get(course.id) then return
-        is_complete = course.get('workflow_state') == 'completed' ||
-          (course.get('end_at') && new Date(course.get('end_at')) < now) ||
-          (course.get('term').end_at && new Date(course.get('term').end_at) < now)
+        if course.get('access_restricted_by_date') then return
+
+        is_complete = @is_complete(course, now)
+
         collection = if is_complete then concluded else more
         collection.push(course.toJSON())
       )
+
+      group_json = @options.courses.groups.toJSON()
+
+      if @options.messageableOnly
+        group_json = _.filter(group_json, (g) -> g.can_message)
       data =
         defaultOption: @options.defaultOption,
         favorites: @options.courses.favorites.toJSON(),
         more: more,
-        concluded: concluded
+        concluded: concluded,
+        groups: group_json
+
       @truncate_course_name_data(data)
       @$el.html(template(data))
       @$el.selectpicker('refresh')
-      @$picker = @$el.next()
       @$picker.find('.paginatedLoadingIndicator').remove()
+      @getAriaLabel()
       @createSearchViews()
       if !@renderValue() then @loadAll()
+
+    is_complete: (course, asOf) ->
+      if course.get('workflow_state') == 'completed' then return true
+      if course.get('end_at') && course.get('restrict_enrollments_to_course_dates') then return (new Date(course.get('end_at')) < asOf)
+      if course.get('term') && course.get('term').end_at then return (new Date(course.get('term').end_at) < asOf)
+      false
 
     createSearchViews: ->
       searchViews = []
@@ -61,6 +97,7 @@ define [
       if all._loading then return
       all.fetch()
       all._loading = true
+      @options.courses.groups.fetchAll()
       @$picker.find('> .dropdown-menu').append($('<div />').attr('class', 'paginatedLoadingIndicator').css('clear', 'both'))
 
     _value: ''
@@ -79,23 +116,34 @@ define [
       return if @silenced
       @_value = @$el.val()
       @triggerEvent()
+      @getAriaLabel()
       @searchViews.forEach (view) ->
         view.clearSearch()
 
-    getCurrentCourse: ->
-      course_id = @_value.replace('course_', '')
-      course = @options.courses.favorites.get(course_id)
-      course = @options.courses.all.get(course_id) if !course
-      return if course then {name: course.get('name'), id: @_value} else {}
+    getAriaLabel: ->
+      return if ENV.CONVERSATIONS.CAN_MESSAGE_ACCOUNT_CONTEXT
+      label = @getCurrentContext().name || I18n.t("Select course: a selection is required before recipients field will become available")
+      @$picker.find('button').attr("aria-label", label)
+
+    getCurrentContext: ->
+      matches = @_value.match(/(\w+)_(\d+)/)
+      return {} unless matches
+      [match, type, id] = matches
+      context = if type == 'course'
+        course = @options.courses.favorites.get(id) ||
+          @options.courses.all.get(id)
+      else
+        @options.courses.groups.get(id)
+      return if context then {name: context.get('name'), id: @_value} else {}
 
     triggerEvent: ->
-      @trigger('course', @getCurrentCourse())
+      @trigger('course', @getCurrentContext())
 
     focus: ->
       @$el.next().find('.dropdown-toggle').focus()
 
     truncate_course_name_data: (course_data) ->
-      _.each(['favorites', 'more', 'concluded'], (key) =>
+      _.each(['favorites', 'more', 'concluded', 'groups'], (key) =>
         @truncate_course_names(course_data[key])
         )
 
@@ -109,8 +157,7 @@ define [
         course['truncated_name'] = truncated
 
     middle_truncate: (name) ->
-      # This implementation ignores non-BMP character encoding issues in favor of simplicity
       if name.length > 25
-        name.slice(0, 10) + "&hellip;" + name.slice(-10)
+        name.slice(0, 10) + "…" + name.slice(-10)
       else
         name

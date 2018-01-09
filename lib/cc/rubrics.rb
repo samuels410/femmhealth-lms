@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -22,7 +22,7 @@ module CC
 
       # There can be multiple rubric associations to the same rubric, only export each rubric once
       imported_rubrics = {}
-      
+
       if document
         rubrics_file = nil
         rel_path = nil
@@ -42,13 +42,19 @@ module CC
           rubric = assoc.rubric
           next if rubric.nil? || !rubric.active? || imported_rubrics[rubric.id]
           if !export_object?(rubric)
-            if assoc.association_type != "Assignment" || !export_object?(assoc.association_object)
-              next
-            end
+            next if assoc.association_type != "Assignment"
+
+            assignment = assoc.association_object
+            next unless [assignment, assignment.quiz, assignment.discussion_topic, assignment.wiki_page].compact.any?{|o| export_object?(o)}
           end
           imported_rubrics[rubric.id] = true
+          rubric.learning_outcome_alignments.each do |align|
+            add_item_to_export(align.learning_outcome, 'learning_outcomes')
+          end
 
-          migration_id = CCHelper.create_key(rubric)
+          add_exported_asset(rubric)
+
+          migration_id = create_key(rubric)
           rubrics_node.rubric(:identifier=>migration_id) do |r_node|
             atts = [:read_only, :title, :reusable, :public, :points_possible,
                     :hide_score_total, :free_form_criterion_comments]
@@ -83,10 +89,11 @@ module CC
         c_node.mastery_points criterion[:mastery_points] if criterion[:mastery_points]
         c_node.ignore_for_scoring criterion[:ignore_for_scoring] unless criterion[:ignore_for_scoring].nil?
         c_node.description criterion[:description]
-        c_node.long_description criterion[:long_description] unless criterion[:long_description].blank?
+        c_node.long_description criterion[:long_description] if criterion[:long_description].present?
+        c_node.criterion_use_range criterion[:criterion_use_range] if criterion[:criterion_use_range].present?
         if criterion[:learning_outcome_id].present?
           if lo = @course.available_outcome(criterion[:learning_outcome_id])
-            c_node.learning_outcome_identifierref CCHelper.create_key(lo)
+            c_node.learning_outcome_identifierref create_key(lo)
           end
         end
 

@@ -43,7 +43,9 @@ module YARD::Templates::Helpers::BaseHelper
       if topic
         html_file = "#{topicize topic.first}.html"
         action = $2
-        link_url("#{html_file}#method.#{topicize(controller.name.to_s).sub("_controller", "")}.#{action}", args[1])
+        name = controller.name.to_s
+        name = "#{controller.namespace.name.to_s}/#{name}" if controller.namespace.name != :root
+        link_url("#{html_file}#method.#{topicize(name).sub("_controller", "")}.#{action}", args[1])
       else
         raise "couldn't find API link for #{args.first}"
       end
@@ -88,11 +90,11 @@ module YARD::Templates::Helpers::BaseHelper
   alias_method :linkify_without_api, :linkify
   alias_method :linkify, :linkify_with_api
 
-  def lookup_topic(controller_name)
+  def lookup_topic(controller_path)
     controller = nil
     topic = options[:resources].find { |r,cs|
       cs.any? { |c|
-        controller = c if c.name.to_s == controller_name
+        controller = c if c.path.to_s == controller_path
         !controller.nil?
       }
     }
@@ -204,10 +206,12 @@ def generate_swagger_json
   generate_swagger("api-docs.json", resource_listing)
 end
 
-def serialize(object)
+def serialize(object, page_title: nil)
+  file_opts = {}
+  file_opts[:page_title] = page_title + " - " + options[:page_title] if page_title
   options[:object] = object
   Templates::Engine.with_serializer(object, options[:serializer]) do
-    T('layout').run(options)
+    T('layout').run(options.merge(file_opts))
   end
 end
 
@@ -215,7 +219,7 @@ def serialize_resource(resource, controllers)
   options[:object] = resource
   options[:controllers] = controllers
   Templates::Engine.with_serializer("#{topicize resource}.html", options[:serializer]) do
-    T('layout').run(options)
+    T('layout').run(options.merge(page_title: resource + " - " + options[:page_title]))
   end
   options.delete(:controllers)
 end
@@ -233,7 +237,7 @@ end
 def generate_assets
   require 'pathname'
   asset_root = Pathname.new(File.dirname(__FILE__))
-  (Dir[asset_root + "css/**/*.css"] + Dir[asset_root + "js/**/*.js"]).each do |file|
+  (Dir[asset_root + "css/**/*.css"] + Dir[asset_root + "js/**/*.js"] + [asset_root + "live.html"]).each do |file|
     file = Pathname.new(file).relative_path_from(asset_root).to_s
     asset(file, file(file, true))
   end
@@ -260,11 +264,15 @@ HTML
   end
 end
 
+def extract_page_title_from_markdown(file)
+  File.open(file).readline
+end
+
 def serialize_static_pages
   Dir.glob("doc/api/*.md").each do |file|
     options[:file] = file
     filename = File.split(file).last.sub(/\..*$/, '.html')
-    serialize("file." + filename)
+    serialize("file." + filename, page_title: extract_page_title_from_markdown(file))
     serialize_redirect(filename)
     options.delete(:file)
   end

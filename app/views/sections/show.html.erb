@@ -1,20 +1,36 @@
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
 <% content_for :page_title do %><%= @section.name %><% end %>
 
 <% content_for :right_side do %>
-  <div class="rs-margin-all">
-    <% if can_do(@section, @current_user, :update) %>
-      <a href="#" class="btn button-sidebar-wide edit_section_link"><i class="icon-edit"></i> <%= t('buttons.edit_section', 'Edit Section') %></a>
-      <% if @section.nonxlist_course_id %>
-        <% if can_do(@section.nonxlist_course, @current_user, :manage_sections) %>
-          <a href="#" class="btn button-sidebar-wide uncrosslist_link"><i class="icon-off"></i> <%= t('buttons.uncrosslist_section', 'De-Cross-List this Section') %></a>
-        <% end %>
-        <a href="#" class="btn button-sidebar-wide crosslist_link"><i class="icon-off"></i> <%= t('buttons.recrosslist_section', 'Re-Cross-List this Section') %></a>
-      <% else %>
-        <a href="#" class="btn button-sidebar-wide crosslist_link"><i class="icon-off"></i> <%= t('buttons.crosslist_section', 'Cross-List this Section') %></a>
+  <% if can_do(@section, @current_user, :update) %>
+    <a href="#" class="btn button-sidebar-wide edit_section_link"><i class="icon-edit"></i> <%= t('buttons.edit_section', 'Edit Section') %></a>
+    <% if @section.nonxlist_course_id %>
+      <% if can_do(@section.nonxlist_course, @current_user, :manage_sections) %>
+        <a href="#" class="btn button-sidebar-wide uncrosslist_link"><i class="icon-off"></i> <%= t('buttons.uncrosslist_section', 'De-Cross-List this Section') %></a>
       <% end %>
+      <a href="#" class="btn button-sidebar-wide crosslist_link"><i class="icon-off"></i> <%= t('buttons.recrosslist_section', 'Re-Cross-List this Section') %></a>
+    <% else %>
+      <a href="#" class="btn button-sidebar-wide crosslist_link"><i class="icon-off"></i> <%= t('buttons.crosslist_section', 'Cross-List this Section') %></a>
     <% end %>
-    <a href="<%= context_url(@context, :context_details_url) %>" class="btn button-sidebar-wide"><i class="icon-settings"></i> <%= t('buttons.back_to_course', 'Back to Course Settings') %></a>
-  </div>
+  <% end %>
+  <a href="<%= context_url(@context, :context_settings_url) %>" class="btn button-sidebar-wide"><i class="icon-settings"></i> <%= t('buttons.back_to_course', 'Back to Course Settings') %></a>
 <% end %>
 
 <% content_for :stylesheets do %>
@@ -85,7 +101,7 @@ ul.user_list li.user.pending {
   color: #888;
   font-style: italic;
 }
-h3 .tally { 
+h3 .tally {
   font-family: arial,sans-serif;
   font-size: 12px;
   padding-left: 5px;
@@ -111,12 +127,12 @@ h3 .tally {
     <td><%= f.blabel :name, :en => "Section Name" %></td>
     <td><%= f.text_field :name %></td>
   </tr>
-  <% if @section.sis_source_id && can_do(@context.root_account, @current_user, :read_sis) || can_do(@context.root_account, @current_user, :manage_sis) %>
+  <% if @section.sis_source_id && can_do(@context, @current_user, :read_sis) || can_do(@context, @current_user, :manage_sis) %>
     <tr>
       <td><%= f.blabel :sis_source_id, :en => "SIS ID" %></td>
       <td>
         <span class="course_form">
-          <% if can_do(@context.root_account, @current_user, :manage_sis) %>
+          <% if can_do(@context, @current_user, :manage_sis) %>
             <%= f.text_field :sis_source_id, :style => "width: 50px;", :title => "SIS ID", :value => @section.sis_source_id %>
           <% else %>
             <%= @section.sis_source_id %>
@@ -126,12 +142,40 @@ h3 .tally {
     </tr>
   <% end %>
   <tr>
-    <td><%= f.blabel :start_at, :en => "Starts" %></td>
-    <td><%= f.text_field :start_at, :class => "datetime_field", :value => datetime_string(@section.start_at), :style => 'width: 120px;' %></td>
+    <td>
+      <%= f.blabel :start_at, en: "Starts" %>
+      <label class="screenreader-only" id="section_starts_at_label">
+        <%= t("Section starts at") %>
+        <%= datepicker_screenreader_prompt %>
+      </label>
+    </td>
+    <td>
+      <%= f.text_field :start_at,
+                       class: "datetime_field",
+                       value: datetime_string(@section.start_at),
+                       style: 'width: 120px;',
+                       "aria-labelledby" => "section_starts_at_label",
+                       "data-tooltip" => "",
+                       title: accessible_date_format %>
+    </td>
   </tr>
   <tr>
-    <td><%= f.blabel :end_at, :en => "Ends" %></td>
-    <td><%= f.text_field :end_at, :class => "datetime_field", :value => datetime_string(@section.end_at), :style => 'width: 120px;' %></td>
+    <td>
+      <%= f.blabel :end_at, en: "Ends" %>
+      <label class="screenreader-only" id="section_ends_at_label">
+        <%= t("Section ends at") %>
+        <%= datepicker_screenreader_prompt %>
+      </label>
+    </td>
+    <td>
+      <%= f.text_field :end_at,
+                       class: "datetime_field",
+                       value: datetime_string(@section.end_at),
+                       style: 'width: 120px;',
+                       "aria-labelledby" => "section_ends_at_label",
+                       "data-tooltip" => "",
+                       title: accessible_date_format %>
+    </td>
   </tr>
   <tr>
     <td colspan="2">
@@ -173,21 +217,21 @@ h3 .tally {
     <% end %>
     </table>
   </div>
-  <% if @section && ( @section.sis_source_id && can_do(@context.root_account, @current_user, :read_sis) || can_do(@context.root_account, @current_user, :manage_sis))%>
+  <% if @section && ( @section.sis_source_id && can_do(@context, @current_user, :read_sis) || can_do(@context, @current_user, :manage_sis))%>
     <div><%= before_label('sis_id', "SIS ID") %> <span class="sis_source_id"><%= @section.sis_source_id %></span></div>
   <% end %>
   <% if @section.start_at || @section.end_at %>
     <div>
       <% if @section.start_at && @section.end_at %>
-        <%= t('run_dates', 'Runs from %{start_date} to %{end_date}', :start_date => datetime_string(@section.start_at), :end_date => datetime_string(@section.end_at)) %>
+        <%= t('run_dates', 'Runs from %{start_date} to %{end_date}', :start_date => friendly_datetime(@section.start_at, context: @context).html_safe, :end_date => friendly_datetime(@section.end_at, context: @context).html_safe) %>
       <% elsif @section.end_at %>
-        <%= t('runs_until', 'Runs until %{end_date}', :end_date => datetime_string(@section.end_at)) %>
+        <%= t('runs_until', 'Runs until %{end_date}', :end_date => friendly_datetime(@section.end_at, context: @context).html_safe) %>
       <% elsif @section.start_at %>
-        <%= t('run_from', 'Runs from %{start_date} with no end date', :start_date => datetime_string(@section.start_at)) %>
+        <%= t('run_from', 'Runs from %{start_date} with no end date', :start_date => friendly_datetime(@section.start_at, context: @context).html_safe) %>
       <% end %>
     </div>
     <div style="margin-left: 10px; font-size: 0.8em;">
-      <%= t('student_access_dates', 'Students can only access the course between these dates') if @section.restrict_enrollments_to_section_dates %>
+      <%= t('Students can only participate in the course between these dates') if @section.restrict_enrollments_to_section_dates %>
     </div>
   <% end %>
 </div>
@@ -206,14 +250,14 @@ h3 .tally {
 <% js_bundle :section %>
 
 <div style="display: none;">
-  <%= form_tag context_url(@context, :context_section_crosslist_url, @section.id), :id => "crosslist_course_form", :class => "no-margin-bottom", :title => t('titles.crosslist_this_section', 'Cross-List this Section'), :method => :post do %>
+  <%= form_tag context_url(@context, :context_section_crosslist_url, @section.id), :id => "crosslist_course_form", :class => "form-dialog no-margin-bottom", :title => t('titles.crosslist_this_section', 'Cross-List this Section'), :method => :post do %>
     <h2><%= t('titles.cross_listed_sections', 'Cross-List Section') %></h2>
     <p>
       <%= t('crosslist_description', %{
       Cross-listing allows you to create a section in one account and
-      then move it to a course on a different account.  
+      then move it to a course on a different account.
       To cross-list this course, you'll need to find the course you
-      want to move it to, either using the search tool or by 
+      want to move it to, either using the search tool or by
       entering the course's ID. }) %>
     </p>
     <table class="formtable">
@@ -233,20 +277,20 @@ h3 .tally {
       </tr><tr>
         <td colspan="2">
           <div id="course_autocomplete_name_holder" style="margin-top: 20px;">
-            <%= before_label('labels.selected_course', 'Selected Course') %> 
+            <%= before_label('labels.selected_course', 'Selected Course') %>
             <div style="margin-left: 20px;">
               <div id="course_autocomplete_name" style="font-weight: bold;"></div>
               <div id="sis_id_holder" style="display: none;"><%= before_label('labels.sis_id', 'SIS ID') %> <span class="sis_id">&nbsp;</span></div>
               <div id="account_name_holder" style="display: none;"><%= before_label('labels.account', 'Account') %> <span class="account_name"></span></div>
             </div>
-            <div class="button-container">
-              <button type="submit" class="btn submit_button"><%= t('buttons.crosslist_this_section', 'Cross-List This Section') %></button>
-              <button type="button" class="btn btn button-secondary cancel_button"><%= t('buttons.cancel', 'Cancel') %></button>
-            </div>
           </div>
         </td>
       </tr>
     </table>
+    <div class="form-controls">
+      <button type="submit" class="btn btn-primary submit_button"><%= t('buttons.crosslist_this_section', 'Cross-List This Section') %></button>
+      <button type="button" class="btn button-secondary cancel_button"><%= t('buttons.cancel', 'Cancel') %></button>
+    </div>
   <% end %>
 
   <%= form_tag context_url(@context, :context_section_uncrosslist_url, @section.id), :id => "uncrosslist_form", :title => t('titles.decrosslist_section', 'De-Cross-List this Section'), :method => :delete do %>
@@ -261,7 +305,7 @@ h3 .tally {
       <p>
         <%= t('decrosslist_long_description', %{
         All grades for students in this course will no longer be visible.
-        You can retrieve the grades later by re-cross-listing the course, 
+        You can retrieve the grades later by re-cross-listing the course,
         but in the mean time the grades for these students will come from the original course.
         }) %>
       </p>

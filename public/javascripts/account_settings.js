@@ -1,32 +1,87 @@
-define([
-  'i18n!account_settings',
-  'jquery', // $
-  'jquery.ajaxJSON', // ajaxJSON
-  'jquery.instructure_date_and_time', // date_field, time_field, datetime_field, /\$\.datetime/
-  'jquery.instructure_forms', // formSubmit, getFormData, validateForm
-  'jqueryui/dialog',
-  'jquery.instructure_misc_helpers', // replaceTags
-  'jquery.instructure_misc_plugins', // confirmDelete, showIf, /\.log/
-  'jquery.loadingImg', // loadingImg, loadingImage
-  'compiled/tinymce',
-  'tinymce.editor_box', // editorBox
-  'vendor/date', // Date.parse
-  'vendor/jquery.scrollTo', // /\.scrollTo/
-  'jqueryui/tabs' // /\.tabs/
-], function(I18n, $) {
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
+ *
+ * This file is part of Canvas.
+ *
+ * Canvas is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License.
+ *
+ * Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+ * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+import 'jqueryui/dialog'
+import I18n from 'i18n!account_settings'
+import $ from 'jquery'
+import htmlEscape from 'str/htmlEscape'
+import RichContentEditor from 'jsx/shared/rce/RichContentEditor'
+import 'jqueryui/tabs'
+import globalAnnouncements from './global_announcements'
+import './jquery.ajaxJSON'
+import './jquery.instructure_date_and_time' // date_field, time_field, datetime_field, /\$\.datetime/
+import './jquery.instructure_forms' // formSubmit, getFormData, validateForm
+import './jquery.instructure_misc_helpers' // replaceTags
+import './jquery.instructure_misc_plugins' // confirmDelete, showIf, /\.log/
+import './jquery.loadingImg'
+import './vendor/date' // Date.parse
+import './vendor/jquery.scrollTo'
+
+  export function openReportDescriptionLink (event) {
+    event.preventDefault();
+    var title = $(this).parents('.title').find('span.title').text();
+    var $desc = $(this).parent('.reports').find('.report_description');
+    $desc.clone().dialog({
+      title: title,
+      width: 800
+    });
+  }
+
+  export function addUsersLink (event) {
+    event.preventDefault();
+    var $enroll_users_form = $('#enroll_users_form');
+    $(this).hide();
+    $enroll_users_form.show();
+    $('html,body').scrollTo($enroll_users_form);
+    $enroll_users_form.find('#admin_role_id').focus().select();
+  }
 
   $(document).ready(function() {
+    function checkFutureListingSetting () {
+      if ($('#account_settings_restrict_student_future_view_value').is(':checked')) {
+        $('.future_listing').show();
+      } else {
+        $('.future_listing').hide();
+      }
+    }
+    checkFutureListingSetting();
+    $('#account_settings_restrict_student_future_view_value').change(checkFutureListingSetting);
+
     $("#account_settings").submit(function() {
       var $this = $(this);
+      var remove_ip_filters = true;
       $(".ip_filter .value").each(function() {
         $(this).removeAttr('name');
       }).filter(":not(.blank)").each(function() {
         var name = $.trim($(this).parents(".ip_filter").find(".name").val().replace(/\[|\]/g, '_'));
         if(name) {
+          remove_ip_filters = false;
           $(this).attr('name', 'account[ip_filters][' + name + ']');
         }
       });
-      var validations = {
+
+      if (remove_ip_filters) {
+        $this.append("<input class='remove_ip_filters' type='hidden' name='account[remove_ip_filters]' value='1'/>");
+      } else {
+        $this.find('.remove_ip_filters').remove(); // just in case it's left over after a failed validation
+      }
+
+      var account_validations = {
         object_name: 'account',
         required: ['name'],
         property_validations: {
@@ -35,59 +90,33 @@ define([
           }
         }
       };
-      var result = $this.validateForm(validations);
-      if(!result) {
-        return false;
-      }
-    });
-    $(".datetime_field").datetime_field();
-    $("#add_notification_form textarea").editorBox().width('100%');
-    $("#add_notification_form .datetime_field").bind('blur change', function() {
-      var date = Date.parse($(this).val());
-      if(date) {
-        date = date.toString($.datetime.defaultFormat);
-      }
-      $(this).val(date);
-    });
-    $("#add_notification_form").submit(function(event) {
-      var $this = $(this);
-      var $confirmation = $this.find('#confirm_global_announcement:visible:not(:checked)');
-      if ($confirmation.length > 0) {
-        $confirmation.errorBox(I18n.t('confirms.global_announcement', "You must confirm the global announcement"));
-        return false;
-      }
-      var validations = {
-        object_name: 'account_notification',
-        required: ['start_at', 'end_at', 'subject', 'message'],
-        date_fields: ['start_at', 'end_at'],
-        numbers: []
-      };
-      if ($('#account_notification_months_in_display_cycle').length > 0) {
-        validations.numbers.push('months_in_display_cycle');
-      }
-      var result = $this.validateForm(validations);
-      if(!result) {
-        return false;
-      }
-    });
-    $("#account_notification_required_account_service").click(function(event) {
-      $this = $(this);
-      $("#confirm_global_announcement_field").showIf(!$this.is(":checked"));
-      $("#account_notification_months_in_display_cycle").prop("disabled", !$this.is(":checked"));
-    });
-    $(".delete_notification_link").click(function(event) {
-      event.preventDefault();
-      var $link = $(this);
-      $link.parents("li").confirmDelete({
-        url: $link.attr('rel'),
-        message: I18n.t('confirms.delete_announcement', "Are you sure you want to delete this announcement?"),
-        success: function() {
-          $(this).slideUp(function() {
-            $(this).remove();
-          });
+
+      var result = $this.validateForm(account_validations)
+
+      // Work around for Safari to enforce help menu name validation until `required` is supported
+      if ($('#custom_help_link_settings').length > 0) {
+        var help_menu_validations = {
+          object_name: 'account[settings]',
+          required: ['help_link_name'],
+          property_validations: {
+            'help_link_name': function(value){
+              if (value && value.length > 30) { return I18n.t("help_menu_name_too_long", "Help menu name is too long")}
+            }
+          }
         }
-      });
+        result = (result && $this.validateForm(help_menu_validations));
+      }
+
+      if(!result) {
+        return false;
+      }
     });
+    $("#account_notification_start_at,#account_notification_end_at").datetime_field({addHiddenInput: true});
+    $(".datetime_field").datetime_field();
+
+    globalAnnouncements.augmentView()
+    globalAnnouncements.bindDomEvents()
+
     $("#account_settings_tabs").tabs().show();
     $(".add_ip_filter_link").click(function(event) {
       event.preventDefault();
@@ -108,18 +137,6 @@ define([
         width: 400
       });
     });
-
-    $("#account_settings_enable_scheduler").change(function() {
-      var $enableCalendar2 = $("#account_settings_enable_scheduler");
-      var $showScheduler = $("#show_scheduler_checkbox");
-      if ($enableCalendar2.attr('checked')) {
-        $showScheduler.show();
-      }
-      else {
-        $showScheduler.hide();
-      }
-    });
-    $("#account_settings_enable_scheduler").trigger('change');
 
     $(".open_registration_delegated_warning_link").click(function(event) {
       event.preventDefault();
@@ -168,13 +185,25 @@ define([
       });
     });
 
-    $("#turnitin, #account_settings_global_includes, #enable_equella").change(function() {
-      var $myFieldset = $('#'+ $(this).attr('id') + '_settings'),
-          iAmChecked = $(this).attr('checked');
+    $('#enable_equella, ' +
+      '#account_settings_sis_syncing_value, ' +
+      '#account_settings_sis_default_grade_export_value').change(function () {
+        var $myFieldset = $('#'+ $(this).attr('id') + '_settings');
+        var iAmChecked = $(this).prop('checked');
       $myFieldset.showIf(iAmChecked);
       if (!iAmChecked) {
-        $myFieldset.find("input,textarea").val("");
+        $myFieldset.find(":text").val("");
+        $myFieldset.find(":checkbox").prop("checked", false);
       }
+    }).change();
+
+    $('#account_settings_sis_syncing_value,' +
+      '#account_settings_sis_default_grade_export_value,' +
+      '#account_settings_sis_assignment_name_length_value').change(function() {
+        var attr_id = $(this).attr('id');
+        var $myFieldset = $('#'+ attr_id + '_settings');
+        var iAmChecked = $(this).attr('checked');
+        $myFieldset.showIf(iAmChecked);
     }).change();
 
     $(".turnitin_account_settings").change(function() {
@@ -203,23 +232,9 @@ define([
     });
 
     // Admins tab
-    $(".add_users_link").click(function(event) {
-        var $enroll_users_form = $("#enroll_users_form");
-        $(this).hide();
-        event.preventDefault();
-        $enroll_users_form.show();
-        $("html,body").scrollTo($enroll_users_form);
-        $enroll_users_form.find("textarea").focus().select();
-      });
+    $(".add_users_link").click(addUsersLink);
 
-    $(".open_report_description_link").click(function(event) {
-      event.preventDefault();
-      var title = $(this).parents(".title").find("span.title").text();
-      $(this).parent(".reports").find(".report_description").dialog({
-        title: title,
-        width: 800
-      });
-    });
+    $(".open_report_description_link").click(openReportDescriptionLink);
 
     $(".run_report_link").click(function(event) {
       event.preventDefault();
@@ -269,8 +284,11 @@ define([
         width: 560
       });
 
-      $('<a href="#"><i class="icon-question standalone-icon"></i></a>')
-        .click(function(event){
+      $(`<button class="Button Button--icon-action" type="button">
+        <i class="icon-question"></i>
+        <span class="screenreader-only">${htmlEscape(I18n.t("About this service"))}</span>
+      </button>`)
+        .click((event) => {
           event.preventDefault();
           $dialog.dialog('open');
         })
@@ -278,15 +296,15 @@ define([
     });
 
     function displayCustomEmailFromName(){
-      var displayText = $('#account_settings_outgoing_email_default_name').val();
+      let displayText = $('#account_settings_outgoing_email_default_name').val();
       if (displayText == '') {
         displayText = I18n.t('custom_text_blank', '[Custom Text]');
       }
       $('#custom_default_name_display').text(displayText);
     }
-    $('.notification_from_name_option').on('change', function(){
-      var $useCustom = $('#account_settings_outgoing_email_default_name_option_custom');
-      var $customName = $('#account_settings_outgoing_email_default_name');
+    $('.notification_from_name_option').on('change', () => {
+      const $useCustom = $('#account_settings_outgoing_email_default_name_option_custom');
+      const $customName = $('#account_settings_outgoing_email_default_name');
       if ($useCustom.attr('checked')) {
         $customName.removeAttr('disabled');
         $customName.focus()
@@ -295,15 +313,46 @@ define([
         $customName.attr('disabled', 'disabled');
       }
     });
-    $('#account_settings_outgoing_email_default_name').on('keyup', function(){
+    $('#account_settings_outgoing_email_default_name').on('keyup', () =>{
       displayCustomEmailFromName();
     });
     // Setup initial display state
     displayCustomEmailFromName();
     $('.notification_from_name_option').trigger('change');
 
+    $('#account_settings_self_registration').change(function() {
+      $('#self_registration_type_radios').toggle(this.checked);
+    }).trigger('change');
+
+    $('#account_settings_global_includes').change(function() {
+      $('#global_includes_warning_message_wrapper').toggleClass('alert', this.checked);
+    }).trigger('change');
+
+    const $rce_container = $('#custom_tos_rce_container')
+    $('#terms_of_service_modal').hide()
+    if ($rce_container.length > 0) {
+      const $textarea = $rce_container.find('textarea');
+      RichContentEditor.preloadRemoteModule();
+      if ($("#account_terms_of_service_terms_type").find(":selected").text() === 'Custom') {
+        $('#terms_of_service_modal').show()
+        $rce_container.show();
+        setTimeout (() => {
+          RichContentEditor.loadNewEditor($textarea, { manageParent: true, defaultContent: ENV.TERMS_OF_SERVICE_CUSTOM_CONTENT || ''})
+        }, 1000);
+      }
+      $( "#account_terms_of_service_terms_type" ).change(function() {
+        if (this.value === 'custom') {
+          $('#terms_of_service_modal').show()
+          $rce_container.show();
+          RichContentEditor.loadNewEditor($textarea, {
+            focus: true,
+            manageParent: true,
+            defaultContent: ENV.TERMS_OF_SERVICE_CUSTOM_CONTENT || ''
+          });
+        } else {
+          $rce_container.hide();
+          $('#terms_of_service_modal').hide()
+        }
+      });
+    }
   });
-
-});
-
-

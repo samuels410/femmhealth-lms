@@ -1,7 +1,26 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
   'compiled/collections/PaginatedCollection'
   'compiled/models/DiscussionTopic'
-], (PaginatedCollection, DiscussionTopic) ->
+  'compiled/util/NumberCompare'
+], ($, PaginatedCollection, DiscussionTopic, numberCompare) ->
 
   class DiscussionTopicsCollection extends PaginatedCollection
 
@@ -15,18 +34,25 @@ define [
 
       if aDate < bDate
         1
-      else if aDate is bDate
-        0
-      else
+      else if aDate > bDate
         -1
+      else
+        @idCompare(a, b)
 
     @positionComparator: (a, b) ->
       aPosition = a.get('position')
       bPosition = b.get('position')
+      c = numberCompare(aPosition, bPosition)
+      if c isnt 0 then c else @idCompare(a, b)
 
-      if aPosition < bPosition
-        -1
-      else if aPosition is bPosition
-        0
-      else
-        1
+    idCompare: (a, b) ->
+      numberCompare(parseInt(a.get('id')), parseInt(b.get('id')), descending: true)
+
+    reorderURL: -> @url()+'/reorder'
+
+    reorder: ->
+      @each (model, i) ->
+        model.set(position: i+1)
+      ids = @pluck('id')
+      $.post @reorderURL(), order: ids
+      @reset @models

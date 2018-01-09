@@ -1,3 +1,23 @@
+/*
+ * Copyright (C) 2013 - present Instructure, Inc.
+ *
+ * This file is part of Canvas.
+ *
+ * Canvas is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License.
+ *
+ * Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+ * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+@import "base/environment";
+
 .group-user {
   border: 1px solid #ccc;
   background: #fff;
@@ -14,8 +34,6 @@
   }
   &.group-user-highlight {
     animation: highlight-shadow-fade ease-in 1s;
-    -webkit-animation: highlight-shadow-fade ease-in 1s;
-    -moz-animation: highlight-shadow-fade ease-in 1s;
   }
   .al-trigger {
     padding: 0;
@@ -30,7 +48,7 @@
   right: 3px;
   top: 1px;
   i:before {
-    color: #aaa;
+    color: $ic-icon-link-color;
     font-size: 0.8em;
   }
   .icon-mini-arrow-down{
@@ -40,8 +58,8 @@
 
 .assign-to-group {
   position: absolute;
-  top: 0px;
-  right: 1px;
+  top: 1px;
+  right: 8px;
 }
 
 .group .group-users {
@@ -53,26 +71,47 @@
   }
 }
 
+.group-leader {
+  color: #555;
+
+  a {
+    font-size: 0.85em;
+  }
+}
+
+.group-header {
+  .group-summary {
+    font-size: 0.85em;
+  }
+}
+
 .group .group-user {
   float: left;
   width: 31%;
   margin: 0 2% 3px 0;
+  box-sizing: border-box;
+
   .group-category-contents-condensed & {
     width: 23.5%;
     margin: 0 1% 3px 0;
   }
-  box-sizing: border-box;
+
   .group-user-name {
     margin-right: 0;
+  }
+
+  .group-leader {
+    position: absolute;
+    right: 36px;
+    top: 7px;
   }
 }
 
 .group-user-name {
-  max-width: 85%;
+  max-width: 80%;
   overflow: hidden;
   white-space: nowrap;
   margin-right: 10px;
-  font-size: 0.9em;
   font-weight: bold;
   color: #777;
 }

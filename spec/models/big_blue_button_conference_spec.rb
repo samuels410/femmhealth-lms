@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -24,77 +24,75 @@ describe BigBlueButtonConference do
 
   context "big_blue_button" do
     before do
-      WebConference.stubs(:plugins).returns([
+      allow(WebConference).to receive(:plugins).and_return([
         web_conference_plugin_mock("big_blue_button", {
-          :domain => "bbb.instructure.com", 
+          :domain => "bbb.instructure.com",
           :secret_dec => "secret",
         })
       ])
+      user_with_communication_channel
+      @conference = BigBlueButtonConference.create!(
+        :title => "my conference",
+        :user => @user,
+        :context => course_factory
+      )
     end
 
     it "should correctly retrieve a config hash" do
-      conference = BigBlueButtonConference.new
-      config = conference.config
-      config.should_not be_nil
-      config[:conference_type].should eql('BigBlueButton')
-      config[:class_name].should eql('BigBlueButtonConference')
+      config = @conference.config
+      expect(config).not_to be_nil
+      expect(config[:conference_type]).to eql('BigBlueButton')
+      expect(config[:class_name]).to eql('BigBlueButtonConference')
     end
 
     it "should correctly generate join urls" do
-      user_model
-      email = "email@email.com"
-      @user.stubs(:email).returns(email)
-      conference = BigBlueButtonConference.create!(:title => "my conference", :user => @user, :context => Account.default)
-      conference.config.should_not be_nil
+      expect(@conference.config).not_to be_nil
 
       # set some vars so it thinks it's been created and doesn't do an api call
-      conference.conference_key = 'test'
-      conference.settings[:admin_key] = 'admin'
-      conference.settings[:user_key] = 'user'
-      conference.save
+      @conference.conference_key = 'test'
+      @conference.settings[:admin_key] = 'admin'
+      @conference.settings[:user_key] = 'user'
+      @conference.save
 
-      params = {:fullName => user.name, :meetingID => conference.conference_key, :userID => user.id}
+      params = {:fullName => user_factory.name, :meetingID => @conference.conference_key, :userID => user_factory.id}
       admin_params = params.merge(:password => 'admin').to_query
       user_params = params.merge(:password => 'user').to_query
-      conference.admin_join_url(@user).should eql("http://bbb.instructure.com/bigbluebutton/api/join?#{admin_params}&checksum=" + Digest::SHA1.hexdigest("join#{admin_params}secret"))
-      conference.participant_join_url(@user).should eql("http://bbb.instructure.com/bigbluebutton/api/join?#{user_params}&checksum=" + Digest::SHA1.hexdigest("join#{user_params}secret"))
+      expect(@conference.admin_join_url(@user)).to eql("https://bbb.instructure.com/bigbluebutton/api/join?#{admin_params}&checksum=" + Digest::SHA1.hexdigest("join#{admin_params}secret"))
+      expect(@conference.participant_join_url(@user)).to eql("https://bbb.instructure.com/bigbluebutton/api/join?#{user_params}&checksum=" + Digest::SHA1.hexdigest("join#{user_params}secret"))
     end
 
     it "should confirm valid config" do
-      BigBlueButtonConference.new.should be_valid_config
-      BigBlueButtonConference.new(:conference_type => "BigBlueButton").should be_valid_config
+      expect(BigBlueButtonConference.new).to be_valid_config
+      expect(BigBlueButtonConference.new(:conference_type => "BigBlueButton")).to be_valid_config
     end
 
     it "should recreate the conference" do
-      user_model
-      email = "email@email.com"
-      @user.stubs(:email).returns(email)
-      conference = BigBlueButtonConference.create!(:title => "my conference", :user => @user, :context => Account.default)
-      conference.expects(:send_request).with(:create, anything).returns(true)
+      expect(@conference).to receive(:send_request).with(:create, anything).and_return(true)
 
-      conference.craft_url(@user).should match(/\Ahttp:\/\/bbb\.instructure\.com\/bigbluebutton\/api\/join/)
+      expect(@conference.craft_url(@user)).to match(/\Ahttps:\/\/bbb\.instructure\.com\/bigbluebutton\/api\/join/)
 
       # load a new instance to clear out @conference_active
-      conference = WebConference.find(conference.id)
-      conference.expects(:send_request).with(:create, anything).returns(true)
-      conference.craft_url(@user).should match(/\Ahttp:\/\/bbb\.instructure\.com\/bigbluebutton\/api\/join/)
+      @conference = WebConference.find(@conference.id)
+      expect(@conference).to receive(:send_request).with(:create, anything).and_return(true)
+      expect(@conference.craft_url(@user)).to match(/\Ahttps:\/\/bbb\.instructure\.com\/bigbluebutton\/api\/join/)
     end
 
     it "should not recreate the conference if it is active" do
-      user_model
-      email = "email@email.com"
-      @user.stubs(:email).returns(email)
-      conference = BigBlueButtonConference.create!(:title => "my conference", :user => @user, :context => Account.default)
-      conference.expects(:send_request).once.with(:create, anything).returns(true)
-      conference.initiate_conference
-      conference.active?.should be_true
-      conference.craft_url(@user).should match(/\Ahttp:\/\/bbb\.instructure\.com\/bigbluebutton\/api\/join/)
+      expect(@conference).to receive(:send_request).once.with(:create, anything).and_return(true)
+      @conference.initiate_conference
+      expect(@conference.active?).to be_truthy
+      expect(@conference.craft_url(@user)).to match(/\Ahttps:\/\/bbb\.instructure\.com\/bigbluebutton\/api\/join/)
+    end
+
+    it "return nil if a request times out" do
+      allow(CanvasHttp).to receive(:get).and_raise(Timeout::Error)
+      expect(@conference.initiate_conference).to be_nil
     end
   end
 
   describe 'plugin setting recording_enabled is enabled' do
     before do
-      WebConference.stubs(:plugins).returns([
+      allow(WebConference).to receive(:plugins).and_return([
         web_conference_plugin_mock("big_blue_button", {
           :domain => "bbb.instructure.com",
           :secret_dec => "secret",
@@ -104,75 +102,72 @@ describe BigBlueButtonConference do
     end
 
     it "should have visible record user_setting" do
-      BigBlueButtonConference.user_setting_fields[:record][:visible].call.should be_true
+      expect(BigBlueButtonConference.user_setting_fields[:record][:visible].call).to be_truthy
     end
 
     it "should send record flag if record user_setting is set" do
       bbb = BigBlueButtonConference.new
       bbb.user_settings = { :record => true }
-      bbb.user = user
-      bbb.context = Account.default
+      bbb.user = user_factory
+      bbb.context = course_factory
       bbb.save!
-      bbb.expects(:send_request).with do |verb, options|
-        verb.should eql :create
-        options[:record].should eql "true"
-      end
+      expect(bbb).to receive(:send_request).with(:create, hash_including(record: "true"))
       bbb.initiate_conference
     end
 
     it "should not send record flag if record user setting is unset" do
       bbb = BigBlueButtonConference.new
       bbb.user_settings = { :record => false }
-      bbb.user = user
-      bbb.context = Account.default
+      bbb.user = user_factory
+      bbb.context = course_factory
       bbb.save!
-      bbb.expects(:send_request).with do |verb, options|
-        verb.should eql :create
-        options[:record].should eql "false"
-      end
+      expect(bbb).to receive(:send_request).with(:create, hash_including(record: "false"))
       bbb.initiate_conference
     end
 
     it "should properly serialize a response with no recordings" do
       bbb = BigBlueButtonConference.new
-      bbb.stubs(:conference_key).returns('12345')
+      allow(bbb).to receive(:conference_key).and_return('12345')
       bbb.user_settings = { record: true }
-      bbb.user = user
-      bbb.context = Account.default
+      bbb.user = user_factory
+      bbb.context = course_factory
       bbb.save!
       response = {returncode: 'SUCCESS', recordings: "\n  ",
                   messageKey: 'noRecordings', message: 'There are not
                   recordings for the meetings'}
-      bbb.stubs(:send_request).returns(response)
-      bbb.recordings.should == []
+      allow(bbb).to receive(:send_request).and_return(response)
+      expect(bbb.recordings).to eq []
     end
 
-    it "should look for recordings only if record user setting is set" do
-      bbb = BigBlueButtonConference.new
-      bbb.user_settings = { :record => false }
-      bbb.user = user
-      bbb.context = Account.default
+    describe "looking for recordings based on user setting" do
+      before(:once) do
+        @bbb = BigBlueButtonConference.new(user: user_factory, context: course_factory)
 
-      # set some vars so it thinks it's been created and doesn't do an api call
-      bbb.conference_key = 'test'
-      bbb.settings[:admin_key] = 'admin'
-      bbb.settings[:user_key] = 'user'
-      bbb.save
+        # set some vars so it thinks it's been created and doesn't do an api call
+        @bbb.conference_key = 'test'
+        @bbb.settings[:admin_key] = 'admin'
+        @bbb.settings[:user_key] = 'user'
+        @bbb.save
+      end
 
-      bbb.expects(:send_request).never
-      bbb.recordings
+      it "doesn't look if setting is false" do
+        @bbb.save
+        expect(@bbb).to receive(:send_request).never
+        @bbb.recordings
+      end
 
-      bbb.user_settings = { :record => true }
-      bbb.save
-
-      bbb.expects(:send_request)
-      bbb.recordings
+      it "does look if setting is true" do
+        @bbb.user_settings = { :record => true }
+        @bbb.save
+        expect(@bbb).to receive(:send_request)
+        @bbb.recordings
+      end
     end
   end
 
   describe 'plugin setting recording disabled' do
     before do
-      WebConference.stubs(:plugins).returns([
+      allow(WebConference).to receive(:plugins).and_return([
         web_conference_plugin_mock("big_blue_button", {
           :domain => "bbb.instructure.com",
           :secret_dec => "secret",
@@ -182,22 +177,18 @@ describe BigBlueButtonConference do
     end
 
     it "should have invisible record user_setting" do
-      BigBlueButtonConference.user_setting_fields[:record][:visible].call.should be_false
+      expect(BigBlueButtonConference.user_setting_fields[:record][:visible].call).to be_falsey
     end
 
     it "should not send record flag even if record user_setting is set" do
       bbb = BigBlueButtonConference.new
       bbb.user_settings = { :record => true }
-      bbb.user = user
-      bbb.context = Account.default
+      bbb.user = user_factory
+      bbb.context = course_factory
       bbb.save!
-      bbb.expects(:send_request).with do |verb, options|
-        verb.should eql :create
-        options[:record].should eql "false"
-      end
+      expect(bbb).to receive(:send_request).with(:create, hash_including(record: "false"))
       bbb.initiate_conference
-      bbb.user_settings[:record].should be_false
+      expect(bbb.user_settings[:record]).to be_falsey
     end
   end
-
 end

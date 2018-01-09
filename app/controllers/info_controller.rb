@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,12 +17,12 @@
 #
 
 class InfoController < ApplicationController
-  skip_before_filter :verify_authenticity_token, :only => :record_error
-  skip_before_filter :load_account, :only => :health_check
-  skip_before_filter :load_user, :only => [:health_check, :help_links]
+  skip_before_action :load_account, :only => :health_check
+  skip_before_action :load_user, :only => [:health_check, :browserconfig]
 
   def styleguide
     js_bundle :styleguide
+    render :layout => "layouts/styleguide"
   end
 
   def message_redirect
@@ -35,60 +35,52 @@ class InfoController < ApplicationController
   end
 
   def help_links
-    render :json => @domain_root_account && @domain_root_account.help_links
-  end
+    current_user_roles = @current_user.try(:roles, @domain_root_account) || []
+    links = @domain_root_account && @domain_root_account.help_links
 
-  def record_error
-    error = params[:error] || {}
-    error[:user_agent] = request.headers['User-Agent']
-    begin
-      report_id = error.delete(:id)
-      @report = ErrorReport.find_by_id(report_id.to_i) if report_id.present? && report_id.to_i != 0
-      @report ||= ErrorReport.find_by_id(session.delete(:last_error_id)) if session[:last_error_id].present?
-      @report ||= ErrorReport.new
-      error.delete(:category) if @report.category.present?
-      @report.user = @current_user
-      @report.account ||= @domain_root_account
-      backtrace = params[:error].delete(:backtrace) rescue nil
-      backtrace ||= ""
-      backtrace += "\n\n-----------------------------------------\n\n" + @report.backtrace if @report.backtrace
-      @report.backtrace = backtrace
-      @report.http_env ||= ErrorReport.useful_http_env_stuff_from_request(request)
-      @report.request_context_id = RequestContextGenerator.request_id
-      @report.assign_data(error)
-      @report.save
-      @report.send_later(:send_to_external)
-    rescue => e
-      @exception = e
-      ErrorReport.log_exception(:default, e,
-        :message => "Error Report Creation failed",
-        :user_email => (error[:email] rescue ''),
-        :user_id => @current_user.try(:id)
-      )
+    links = links.select do |link|
+      available_to = link[:available_to] || []
+      available_to.detect do |role|
+        (role == 'user' || current_user_roles.include?(role)) ||
+        (current_user_roles == ['user'] && role == 'unenrolled')
+      end
     end
-    respond_to do |format|
-      flash[:notice] = t('notices.error_reported', "Thanks for your help!  We'll get right on this")
-      format.html { redirect_to root_url }
-      format.json { render :json => {:logged => true, :id => @report.try(:id) } }
-    end
-  end
 
-  def record_js_error
-    ErrorReport.log_error('javascript', params[:error])
-    # Render a 0x0 gif
-    render  :content_type =>'image/gif', :text => "GIF89a\001\000\001\000\200\377\000\377\377\377\000\000\000,\000\000\000\000\001\000\001\000\000\002\002D\001\000;"
+    render :json => links
   end
 
   def health_check
     # This action should perform checks on various subsystems, and raise an exception on failure.
     Account.connection.select_value("SELECT 1")
-    Rails.cache.read 'heartbeat'
-    Canvas.redis.get('heartbeat') if Canvas.redis_enabled?
+    if Delayed::Job == Delayed::Backend::ActiveRecord::Job
+      Delayed::Job.connection.select_value("SELECT 1") unless Account.connection == Delayed::Job.connection
+    end
     Tempfile.open("heartbeat", ENV['TMPDIR'] || Dir.tmpdir) { |f| f.write("heartbeat"); f.flush }
 
+    # javascript/css build process didn't die, right?
+    asset_urls = {
+      common_css: css_url_for("common"), # ensures brandable_css_bundles_with_deps exists
+      common_js: ActionController::Base.helpers.javascript_url("#{js_base_url}/common"), # ensures webpack worked
+      revved_url: Canvas::Cdn::RevManifest.gulp_manifest.values.first # makes sure `gulp rev` has ran
+    }
+
     respond_to do |format|
-      format.html { render :text => 'canvas ok' }
-      format.json { render :json => { :status => 'canvas ok', :revision => Canvas.revision } }
+      format.html { render plain: 'canvas ok' }
+      format.json { render json:
+                               { status: 'canvas ok',
+                                 asset_urls: asset_urls,
+                                 revision: Canvas.revision,
+                                 installation_uuid: Canvas.installation_uuid } }
     end
+  end
+
+  # for windows live tiles
+  def browserconfig
+    cancel_cache_buster
+    expires_in 10.minutes, public: true
+  end
+
+  def test_error
+    render status: 404, template: "shared/errors/404_message"
   end
 end

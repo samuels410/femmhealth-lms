@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require 'spec_helper'
 require File.expand_path(File.dirname(__FILE__) +
  '/../../../lib/data_fixup/change_graded_survey_submissions_to_not_need_grading')
@@ -17,18 +34,18 @@ describe DataFixup::ChangeGradedSurveySubmissionsToNotNeedGrading do
 
     submission = @quiz.generate_submission(@student)
     submission.submission = submission.assignment.find_or_create_submission(@student.id)
-    submission.grade_submission(grade: 15)
+    Quizzes::SubmissionGrader.new(submission).grade_submission(grade: 15)
     submission.workflow_state = 'pending_review'
     submission.score = 10
     submission.save!
 
     subject.run
 
-    submission.reload.should be_completed
-    submission.submission.should be_graded
+    expect(submission.reload).to be_completed
+    expect(submission.submission).to be_graded
 
     teacher_in_course(course: @course, active_all: true)
-    @teacher.assignments_needing_grading.should_not include @quiz.assignment
+    expect(@teacher.assignments_needing_grading).not_to include @quiz.assignment
 
   end
 

@@ -1,18 +1,36 @@
-require [
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+define [
   'jquery'
   'compiled/jquery/fixDialogButtons'
   'jquery.disableWhileLoading'
   'helpers/jquery.simulate'
-], ($, elementToggler)->
+], ($) ->
 
-  module 'fixDialogButtons',
-    
+  QUnit.module 'fixDialogButtons',
+
     setup: ->
       @clock = sinon.useFakeTimers()
-    
+
     teardown: ->
       @clock.restore()
-    
+      $("#fixtures").empty()
+
 
   test 'handles buttons', ->
 
@@ -30,7 +48,7 @@ require [
           </a>
         </div>
       </form>
-    """).appendTo('body').dialog().fixDialogButtons()
+    """).appendTo('#fixtures').dialog().fixDialogButtons()
 
     ok $dialog.is(':ui-dialog:visible'), 'pops up dialog'
     equal $dialog.dialog('option', 'buttons').length, 2, 'converts both buttons in .button-pane only'
@@ -64,34 +82,5 @@ require [
     $closer = $dialog.dialog('widget').find('.ui-dialog-buttonpane .ui-button:contains("This will cause the dialog to close")')
     $closer.click()
     equal $dialog.dialog('isOpen'), false, msg
-    
+
     $dialog.remove() #clean up
-
-  test "enter key submits form", ->
-    $dialog = $("<form style='display:none'><input id='box' type='text'></input><div class='button-container'><button type='submit'></button></div></form>").appendTo('body').dialog()
-    $dialog.fixDialogButtons()
-
-    submitCount = 0
-    $dialog.submit (e) ->
-      e.preventDefault()
-      ++submitCount
-
-    $('#box').simulate("keyup", { keyCode: $.ui.keyCode.ENTER })
-    equal submitCount, 1
-
-    $dialog.remove()
-
-  test "enter key does not duplicate submissions if fixDialogButtons invoked more than once", ->
-    $dialog = $("<form style='display:none'><input id='box' type='text'></input><div class='button-container'><button type='submit'></button></div></form>").appendTo('body').dialog()
-    $dialog.fixDialogButtons()
-    $dialog.fixDialogButtons()
-
-    submitCount = 0
-    $dialog.submit (e) ->
-      e.preventDefault()
-      ++submitCount
-
-    $('#box').simulate("keyup", { keyCode: $.ui.keyCode.ENTER })
-    equal submitCount, 1
-
-    $dialog.remove()

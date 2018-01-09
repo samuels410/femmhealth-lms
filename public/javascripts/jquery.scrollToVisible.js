@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,42 +12,48 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
 // Scrolls the supplied object until its visible. Call from
 // ("html,body") to scroll the window.
 
-define([
-  'jquery' /* $ */,
-  'vendor/jquery.scrollTo' /* /\.scrollTo/ */
-], function($) {
+import $ from 'jquery'
+import './vendor/jquery.scrollTo'
+import './jquery.instructure_jquery_patches'
 
 $.fn.scrollToVisible = function(obj) {
   var options = {};
   var $obj = $(obj);
-  
-  var outerOffset = $("body").offset();
-  this.each(function() {
-    try {
-      outerOffset = $(this).offset();
-      return false;
-    } catch(e) {}
-  });
+
   if ($obj.length === 0) { return; }
   var innerOffset   = $obj.offset(),
       width         = $obj.outerWidth(),
       height        = $obj.outerHeight(),
-      top           = innerOffset.top - outerOffset.top,
+      top           = innerOffset.top,
       bottom        = top + height,
-      left          = innerOffset.left - outerOffset.left,
+      left          = innerOffset.left,
       right         = left + width,
       currentTop    = (this.selector == "html,body" ? $.windowScrollTop() : this.scrollTop()),
       currentLeft   = this.scrollLeft(),
       currentHeight = this.outerHeight(),
       currentWidth  = this.outerWidth();
-  
+
+  if (this.selector != "html,body") {
+    var outerOffset = $("body").offset();
+    this.each(function() {
+      try {
+        outerOffset = $(this).offset();
+        return false;
+      } catch(e) {}
+    });
+    top    -= outerOffset.top;
+    bottom -= outerOffset.top;
+    left   -= outerOffset.left;
+    right  -= outerOffset.left;
+  }
+
   if (this[0].tagName == "HTML" || this[0].tagName == "BODY") {
     currentHeight = $(window).height();
     if($("#wizard_box:visible").length > 0) {
@@ -77,5 +83,3 @@ $.fn.scrollToVisible = function(obj) {
   
   return this;
 };
-
-});

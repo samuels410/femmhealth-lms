@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 module Canvas::ICU
   module NaiveCollator
     def self.rules
@@ -19,23 +36,13 @@ module Canvas::ICU
 
   begin
     Bundler.require 'icu'
-    if !ICU::Lib.respond_to?(:ucol_getRules)
-      suffix = ICU::Lib.figure_suffix(ICU::Lib.version.to_s)
+    require 'ffi'
+    suffix = ICU::Lib.figure_suffix(ICU::Lib.load_icu)
 
-      ICU::Lib.attach_function(:ucol_getRules, "ucol_getRules#{suffix}", [:pointer, :pointer], :pointer)
+    unless ICU::Lib.respond_to?(:ucol_getSortKey)
       ICU::Lib.attach_function(:ucol_getSortKey, "ucol_getSortKey#{suffix}", [:pointer, :pointer, :int, :pointer, :int], :int)
-      ICU::Lib.attach_function(:ucol_getAttribute, "ucol_getAttribute#{suffix}", [:pointer, :int, :pointer], :int)
-      ICU::Lib.attach_function(:ucol_setAttribute, "ucol_setAttribute#{suffix}", [:pointer, :int, :int, :pointer], :void)
 
       ICU::Collation::Collator.class_eval do
-        def rules
-          @rules ||= begin
-            length = FFI::MemoryPointer.new(:int)
-            ptr = ICU::Lib.ucol_getRules(@c, length)
-            ptr.read_array_of_uint16(length.read_int).pack("U*")
-          end
-        end
-
         def collation_key(string)
           ptr = ICU::UCharPointer.from_string(string)
           size = ICU::Lib.ucol_getSortKey(@c, ptr, string.jlength, nil, 0)
@@ -43,7 +50,15 @@ module Canvas::ICU
           ICU::Lib.ucol_getSortKey(@c, ptr, string.jlength, buffer, size)
           buffer.read_bytes(size - 1)
         end
+      end
+    end
 
+
+    unless ICU::Lib.respond_to?(:ucol_getAttribute)
+      ICU::Lib.attach_function(:ucol_getAttribute, "ucol_getAttribute#{suffix}", [:pointer, :int, :pointer], :int)
+      ICU::Lib.attach_function(:ucol_setAttribute, "ucol_setAttribute#{suffix}", [:pointer, :int, :int, :pointer], :void)
+
+      ICU::Collation::Collator.class_eval do
         def [](attribute)
           ATTRIBUTE_VALUES_INVERSE[ICU::Lib.check_error do |error|
             ICU::Lib.ucol_getAttribute(@c, ATTRIBUTES[attribute], error)
@@ -106,8 +121,12 @@ module Canvas::ICU
       @collations ||= {}
       @collations[I18n.locale] ||= begin
         collator = ICU::Collation::Collator.new(I18n.locale.to_s)
+
+        # Reference documentation (some option names differ in ruby-space)for these options is at
+        # http://userguide.icu-project.org/collation/customization#TOC-Default-Options
         collator.normalization_mode = true
         collator.numeric_collation = true
+        collator.strength = :tertiary
         collator
       end
     end
@@ -119,6 +138,7 @@ module Canvas::ICU
   end
 
   def self.locale_for_collation
+    I18n.set_locale_with_localizer
     collator.rules.empty? ? 'root' : I18n.locale
   end
 

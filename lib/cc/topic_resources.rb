@@ -1,5 +1,5 @@
-
-# Copyright (C) 2011 Instructure, Inc.
+#
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,16 +17,15 @@
 #
 module CC
   module TopicResources
-    
-    def add_topics
-      @course.discussion_topics.active.each do |topic|
-        if topic.is_announcement
-          next unless export_object?(topic, 'announcements')
-        else
-          next unless export_object?(topic) || export_object?(topic.assignment)
-        end
 
-        title = topic.title rescue I18n.t('course_exports.unknown_titles.topic', "Unknown topic")
+    def add_topics
+      scope = @course.discussion_topics.active
+      DiscussionTopic::ScopedToUser.new(@course, @user, scope).scope.each do |topic|
+        next unless export_object?(topic) || export_object?(topic.assignment)
+        lock_info = topic.locked_for?(@user, check_policies: true)
+        next if @user && lock_info && !lock_info[:can_view]
+
+        title = topic.title || I18n.t('course_exports.unknown_titles.topic', "Unknown topic")
 
         if topic.assignment && !topic.assignment.can_copy?(@user)
           add_error(I18n.t('course_exports.errors.topic_is_locked', "The topic \"%{title}\" could not be copied because it is locked.", :title => title))
@@ -41,7 +40,10 @@ module CC
     end
 
     def add_topic(topic)
-      migration_id = CCHelper.create_key(topic)
+      add_exported_asset(topic)
+      add_item_to_export(topic.attachment) if topic.attachment
+
+      migration_id = create_key(topic)
 
       # the CC Discussion Topic
       topic_file_name = "#{migration_id}.xml"
@@ -59,7 +61,7 @@ module CC
       topic_file.close
 
       # Save all the meta-data into a canvas-specific xml schema
-      meta_migration_id = CCHelper.create_key(topic, "meta")
+      meta_migration_id = create_key(topic, "meta")
       meta_file_name = "#{meta_migration_id}.xml"
       meta_path = File.join(@export_dir, meta_file_name)
       meta_file = File.new(meta_path, 'w')
@@ -96,7 +98,7 @@ module CC
       doc.text(html, :texttype=>'text/html')
       if topic.attachment
         doc.attachments do |atts|
-          folder = topic.attachment.folder.full_name.gsub("course files", CCHelper::WEB_CONTENT_TOKEN)
+          folder = topic.attachment.folder.full_name.sub("course files", CCHelper::WEB_CONTENT_TOKEN)
           path = "#{folder}/#{topic.attachment.unencoded_filename}"
           atts.attachment(:href=>path)
         end
@@ -104,13 +106,13 @@ module CC
     end
 
     def create_canvas_topic(doc, topic)
-      doc.topic_id CCHelper.create_key(topic)
+      doc.topic_id create_key(topic)
       doc.title topic.title
-      doc.posted_at ims_datetime(topic.posted_at) if topic.posted_at
       doc.delayed_post_at ims_datetime(topic.delayed_post_at) if topic.delayed_post_at
+      doc.lock_at ims_datetime(topic.lock_at) if topic.lock_at
       doc.position topic.position
-      doc.external_feed_identifierref CCHelper.create_key(topic.external_feed) if topic.external_feed
-      doc.attachment_identifierref CCHelper.create_key(topic.attachment) if topic.attachment
+      doc.external_feed_identifierref create_key(topic.external_feed) if topic.external_feed
+      doc.attachment_identifierref create_key(topic.attachment) if topic.attachment
       if topic.is_announcement
         doc.tag!('type', 'announcement')
       else
@@ -119,10 +121,18 @@ module CC
       doc.discussion_type topic.discussion_type
       doc.pinned 'true' if topic.pinned
       doc.require_initial_post 'true' if topic.require_initial_post
+      doc.has_group_category topic.has_group_category?
+      doc.group_category topic.group_category.name if topic.group_category
+      doc.workflow_state topic.workflow_state
+      doc.module_locked topic.locked_by_module_item?(@user, deep_check_if_needed: true).present?
+      doc.allow_rating topic.allow_rating
+      doc.only_graders_can_rate topic.only_graders_can_rate
+      doc.sort_by_rating topic.sort_by_rating
+      doc.todo_date topic.todo_date
       if topic.assignment && !topic.assignment.deleted?
-        assignment_migration_id = CCHelper.create_key(topic.assignment)
+        assignment_migration_id = create_key(topic.assignment)
         doc.assignment(:identifier=>assignment_migration_id) do |a|
-          AssignmentResources.create_assignment(a, topic.assignment)
+          AssignmentResources.create_canvas_assignment(a, topic.assignment, @manifest)
         end
       end
     end

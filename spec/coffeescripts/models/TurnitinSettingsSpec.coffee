@@ -1,26 +1,43 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define  [
   'compiled/models/TurnitinSettings'
 ], ( TurnitinSettings ) ->
 
-  module "TurnitinSettings"
+  QUnit.module "TurnitinSettings"
 
-  module "TurnitinSettings#constructor"
-
-  test "assigns sPaperCheck", ->
-    ts = new TurnitinSettings s_paper_check: true
-    deepEqual ts.sPaperCheck, true
+  QUnit.module "TurnitinSettings#constructor"
 
   test "assigns originalityReportVisibility", ->
     ts = new TurnitinSettings originality_report_visibility: 'after_grading'
-    deepEqual ts.originalityReportVisibility, 'after_grading'
+    strictEqual ts.originalityReportVisibility, 'after_grading'
+
+  test "assigns sPaperCheck", ->
+    ts = new TurnitinSettings s_paper_check: true
+    strictEqual ts.sPaperCheck, true
 
   test "assigns internetCheck", ->
     ts = new TurnitinSettings internet_check: true
-    deepEqual ts.internetCheck, true
+    strictEqual ts.internetCheck, true
 
   test "assigns excludeBiblio", ->
     ts = new TurnitinSettings exclude_biblio: false
-    deepEqual ts.excludeBiblio, false
+    strictEqual ts.excludeBiblio, false
 
   test "assigns excludeQuoted", ->
     ts = new TurnitinSettings exclude_quoted: false
@@ -29,6 +46,19 @@ define  [
   test "assigns journalCheck", ->
     ts = new TurnitinSettings journal_check: true
     strictEqual ts.journalCheck, true
+
+  test "works with '0' and '1' as well", ->
+    ts = new TurnitinSettings
+      s_paper_check: '0'
+      internet_check: '1'
+      exclude_biblio: '0'
+      exclude_quoted: '1'
+      journal_check: '0'
+    strictEqual ts.sPaperCheck, false
+    strictEqual ts.internetCheck, true
+    strictEqual ts.excludeBiblio, false
+    strictEqual ts.excludeQuoted, true
+    strictEqual ts.journalCheck, false
 
   test "assigns excludeSmallMatchesType", ->
     ts = new TurnitinSettings exclude_small_matches_type: 'words'
@@ -58,7 +88,7 @@ define  [
       exclude_small_matches_value: 100
     strictEqual ts.words(), ""
 
-  module "TurnitinSettings#toJSON"
+  QUnit.module "TurnitinSettings#toJSON"
 
   test "it converts back to snake_case", ->
     options =
@@ -70,10 +100,11 @@ define  [
       internet_check: true
       originality_report_visibility: 'after_grading'
       s_paper_check: true
+      submit_papers_to: false
     ts = new TurnitinSettings options
     deepEqual ts.toJSON(), options
 
-  module "TurnitinSettings#excludesSmallMatches"
+  QUnit.module "TurnitinSettings#excludesSmallMatches"
 
   test "returns true when excludeSmallMatchesType is not null", ->
     ts = new TurnitinSettings exclude_small_matches_type: 'words'
@@ -83,7 +114,7 @@ define  [
     ts = new TurnitinSettings exclude_small_matches_type: null
     strictEqual ts.excludesSmallMatches(), false
 
-  module "TurnitinSettings#present",
+  QUnit.module "TurnitinSettings#present",
     setup: ->
       @options =
         exclude_small_matches_value: 100

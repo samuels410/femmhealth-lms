@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!jobs'
   'jquery'
@@ -5,6 +22,9 @@ define [
   'jquery.ajaxJSON'
   'jqueryui/dialog'
 ], (I18n, $, Slick) ->
+  ###
+  xsslint safeString.identifier klass d out_of runtime_string
+  ###
 
   fillin_job_data = (job) ->
     $('#show-job .show-field').each (idx, field) =>
@@ -18,13 +38,12 @@ define [
     constructor: (@options, @type_name, @grid_name) ->
       @data = []
       @$element = $(@grid_name)
-      @setTimer()
+      setTimeout @refresh, 0
+      @setTimer() if @options.refresh_rate
       @query = ''
 
     setTimer: () =>
-      setTimeout @refresh, 0
-      if @options.refresh_rate
-        setTimeout (=> @refresh(@setTimer)), @options.refresh_rate
+      setTimeout (=> @refresh(@setTimer)), @options.refresh_rate
 
     saveSelection: =>
       if @type_name == 'running'

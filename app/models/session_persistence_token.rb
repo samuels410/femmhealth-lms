@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -39,7 +39,6 @@ require 'authlogic/crypto_providers/bcrypt'
 class SessionPersistenceToken < ActiveRecord::Base
   belongs_to :pseudonym
 
-  attr_accessible :pseudonym, :crypted_token, :token_salt, :uncrypted_token
   attr_accessor :uncrypted_token
   validates_presence_of :pseudonym_id, :crypted_token, :token_salt
 
@@ -63,10 +62,14 @@ class SessionPersistenceToken < ActiveRecord::Base
   def self.find_by_pseudonym_credentials(creds)
     token_id, persistence_token, uuid = creds.split("::")
     return unless token_id.present? && persistence_token.present? && uuid.present?
-    token = self.find_by_id(token_id)
+    token = self.where(id: token_id).first
     return unless token
     return unless token.valid_token?(persistence_token, uuid)
     return token
+  end
+
+  def self.delete_expired(since)
+    where('updated_at < ?', since.seconds.ago).delete_all
   end
 
   def valid_token?(persistence_token, uncrypted_token)

@@ -1,13 +1,30 @@
-require([
-  'i18n!accounts' /* I18n.t */,
-  'jquery' /* $ */,
-  'compiled/util/addPrivacyLinkToDialog',
-  'user_sortable_name',
-  'jquery.instructure_forms' /* formSubmit */,
-  'jqueryui/dialog',
-  'compiled/jquery/fixDialogButtons' /* fix dialog formatting */,
-  'compiled/jquery.rails_flash_notifications'
-], function(I18n, $, addPrivacyLinkToDialog) {
+/*
+ * Copyright (C) 2013 - present Instructure, Inc.
+ *
+ * This file is part of Canvas.
+ *
+ * Canvas is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License.
+ *
+ * Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+ * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+import I18n from 'i18n!accounts'
+import $ from 'jquery'
+import addPrivacyLinkToDialog from 'compiled/util/addPrivacyLinkToDialog'
+import _ from 'underscore'
+import 'user_sortable_name'
+import './jquery.instructure_forms' /* formSubmit */
+import 'jqueryui/dialog'
+import 'compiled/jquery/fixDialogButtons'
+import 'compiled/jquery.rails_flash_notifications'
 
   $(".add_user_link").click(function(event) {
     event.preventDefault();
@@ -22,7 +39,7 @@ require([
   });
   $("#add_user_form").formSubmit({
     formErrors: false,
-    required: ['user[name]'],
+    required: ['user[name]', 'pseudonym[unique_id]'],
     beforeSubmit: function(data) {
       $(this).find("button").attr('disabled', true)
         .filter(".submit_button").text(I18n.t('adding_user_message', "Adding User..."));
@@ -42,19 +59,35 @@ require([
       $("#add_user_dialog").dialog('close');
     },
     error: function(data) {
-      errorData = {};
+      var errorData = {};
+      var errorList;
 
       // Email errors
       if(data.pseudonym.unique_id){
         errorList = [];
 
-        $.each(data.pseudonym.unique_id, function(i){
-          if(this.message){
-            errorList.push(this.message);
-          }
+        var messages = {
+          too_long: I18n.t("Login is too long"),
+          invalid: I18n.t("Login is invalid: must be alphanumeric or an email address")
+        };
+        var errors = _.uniq(_.map(data.pseudonym.unique_id, function(i){ return i.message; }));
+        _.each(errors, function(i){
+          errorList.push(messages[i] ? messages[i] : i);
         });
 
         errorData['unique_id'] = errorList.join(', ');
+      }
+
+      // SIS ID taken error
+      if (data.pseudonym.sis_user_id) {
+        errorList = [];
+
+        var errors = _.uniq(_.map(data.pseudonym.sis_user_id, function(i){ return i.message; }));
+        _.each(errors, function(i){
+          errorList.push(i);
+        });
+
+        errorData['sis_user_id'] = errorList.join(', ');
       }
 
       $(this).formErrors(errorData);
@@ -66,5 +99,3 @@ require([
   $("#add_user_dialog .cancel_button").click(function() {
     $("#add_user_dialog").dialog('close');
   });
-});
-

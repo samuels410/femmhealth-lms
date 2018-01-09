@@ -1,10 +1,28 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
+  'Backbone'
   'compiled/collections/PaginatedCollection'
   'compiled/views/PaginatedCollectionView'
   'helpers/getFakePage'
   'helpers/fakeENV'
-], ($, PaginatedCollection, PaginatedCollectionView, fakePage, fakeENV) ->
+], ($, Backbone, PaginatedCollection, PaginatedCollectionView, fakePage, fakeENV) ->
 
   server = null
   clock = null
@@ -31,7 +49,7 @@ define [
   class TestCollection extends PaginatedCollection
     url: '/test'
 
-  module 'PaginatedCollectionView',
+  QUnit.module 'PaginatedCollectionView',
     setup: ->
       fakeENV.setup()
       fixtures.css height: 500, overflow: 'auto'
@@ -90,8 +108,8 @@ define [
     assertItemRendered '4'
 
   test 'doesn\'t fetch if already fetching', ->
-    sinon.spy collection, 'fetch'
-    sinon.spy view, 'hideLoadingIndicator'
+    @spy collection, 'fetch'
+    @spy view, 'hideLoadingIndicator'
     collection.fetch()
     view.checkScroll()
     ok collection.fetch.calledOnce, 'fetch called once'
@@ -107,6 +125,26 @@ define [
     view.$el.appendTo fixtures
     view.render()
     fixtures.css height: 1000 # it will autofetch the second page, since we're within the threshold
+
+    collection.fetch()
+    server.sendPage fakePage(), collection.url
+    assertItemRendered '1'
+    assertItemRendered '2'
+    clock.tick(0)
+    server.sendPage fakePage(2), collection.urls.next
+    assertItemRendered '3'
+    assertItemRendered '4'
+
+  test 'fetches every page until it reaches the last when fetchItAll is set', ->
+    view.remove()
+    view = new PaginatedCollectionView
+      collection: collection
+      itemView: ItemView
+      scrollContainer: fixtures
+      fetchItAll: true
+    view.$el.appendTo fixtures
+    view.render()
+    fixtures.css height: 1 # to show that it will continue to load in the background even if it's filled the current view height
 
     collection.fetch()
     server.sendPage fakePage(), collection.url
@@ -134,4 +172,3 @@ define [
     # ".pagination:#{view.cid}" events are all wipe out on last fetch, so the
     # assertion at the beginning of the test in the handler shouldn't fire
     fixtures.trigger fakeEvent
-

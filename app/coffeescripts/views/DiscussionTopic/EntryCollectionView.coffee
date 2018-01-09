@@ -1,11 +1,30 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!discussions'
+  'jquery'
   'compiled/arr/walk'
   'Backbone'
   'jst/discussions/EntryCollectionView'
   'jst/discussions/entryStats'
-  'compiled/views/DiscussionTopic/EntryView'
-], (I18n, walk, {View}, template, entryStats, EntryView) ->
+  'compiled/views/DiscussionTopic/EntryView',
+  'compiled/jquery/scrollIntoView'
+], (I18n, $, walk, {View}, template, entryStatsTemplate, EntryView) ->
 
   class EntryCollectionView extends View
 
@@ -27,6 +46,8 @@ define [
       'click .loadNext': 'loadNextFromEvent'
 
     template: template
+
+    $window: $ window
 
     els: '.discussion-entries': 'list'
 
@@ -68,19 +89,22 @@ define [
       @nestEntries()
 
     nestEntries: ->
-      $('.entry_content[data-should-position]').each ->
+      $('.entry-content[data-should-position]').each ->
         $el    = $(this)
-        offset = ($el.parents('li.entry').length - 1) * 30
+        level = $el.parents('li.entry').length
+        offset = (level - 1) * 30
         $el.css('padding-left', offset).removeAttr('data-should-position')
+        $el.find('.discussion-title').attr
+          'role': 'heading'
+          'aria-level': level + 1
 
     addNewView: (view) ->
       view.model.set 'new', false
-      if !@options.threaded and !@options.root
-        @list.prepend view.el
-      else
-        @list.append view.el
+      @list.append view.el
       @nestEntries()
       if not @options.root
+        @$window.scrollTo view.$el, 200
+
         view.$el.hide()
         setTimeout =>
           view.$el.fadeIn()
@@ -105,7 +129,7 @@ define [
           one: "Show one reply"
           other: "Show all %{count} replies"
           {count: stats.total + @collection.options.perPage}
-      @nextLink.html entryStats({stats, moreText, showMore: yes})
+      @nextLink.html entryStatsTemplate({stats, moreText, showMore: yes})
       @nextLink.addClass 'showMore loadNext'
       if @options.threaded
         @nextLink.insertAfter @list
@@ -139,4 +163,3 @@ define [
       @renderNextLink()
 
     filter: @::afterRender
-

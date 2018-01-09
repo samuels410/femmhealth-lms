@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -26,19 +26,31 @@ class ConversationMessageParticipant < ActiveRecord::Base
   belongs_to :conversation_participant
   delegate :author, :author_id, :generated, :body, :to => :conversation_message
 
-  attr_accessible
-
-  scope :active, where("(conversation_message_participants.workflow_state <> 'deleted' OR conversation_message_participants.workflow_state IS NULL)")
-  scope :deleted, where("conversation_message_participants.workflow_state = 'deleted'")
+  scope :active, -> { where("(conversation_message_participants.workflow_state <> 'deleted' OR conversation_message_participants.workflow_state IS NULL)") }
+  scope :deleted, -> { where(workflow_state: 'deleted') }
 
   scope :for_conversation_and_message, lambda { |conversation_id, message_id|
-    joins("INNER JOIN conversation_participants ON conversation_participants.id = conversation_participant_id").
+    joins(:conversation_participant).
         where(:conversation_id => conversation_id, :conversation_message_id => message_id)
   }
 
   workflow do
     state :active
     state :deleted
+  end
+
+  def self.query_deleted(user_id, options={})
+    query = self
+              .deleted
+              .eager_load(:conversation_message)
+              .where(:user_id => user_id)
+              .order(deleted_at: :desc)
+
+    query = query.where('conversation_messages.conversation_id = ?', options['conversation_id']) if options['conversation_id']
+    query = query.where('conversation_message_participants.deleted_at < ?', options['deleted_before']) if options['deleted_before']
+    query = query.where('conversation_message_participants.deleted_at > ?', options['deleted_after']) if options['deleted_after']
+
+    query
   end
 
 end

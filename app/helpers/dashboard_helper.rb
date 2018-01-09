@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,38 +17,32 @@
 #
 
 module DashboardHelper
-  def accessible_message_icon_text(icon)
-    case icon
-    when "warning"
-      I18n.t('#global_message_icons.warning', "warning")
-    when "error"
-      I18n.t('#global_message_icons.error', "error")
-    when "information"
-      I18n.t('#global_message_icons.information', "information")
-    when "question"
-      I18n.t('#global_message_icons.question', "question")
-    when "calendar"
-      I18n.t('#global_message_icons.calendar', "calendar")
-    when "announcement"
-      I18n.t('#global_message_icons.announcement', "announcement")
-    when "invitation"
-      I18n.t('#global_message_icons.invitation', "invitation")
+  def show_recent_activity?
+    if @current_user.preferences[:dashboard_view]
+      @current_user.preferences[:dashboard_view] == 'activity'
     else
-      raise "Unknown dashboard message icon type"
+      @current_user.preferences[:recent_activity_dashboard].present?
+    end
+  end
+
+  def show_dashboard_cards?
+    if @current_user.preferences[:dashboard_view]
+      @current_user.preferences[:dashboard_view] == 'cards'
+    else
+      @current_user.preferences[:recent_activity_dashboard].blank?
     end
   end
 
   def show_welcome_message?
-    @current_user.present? &&
-      @current_user.cached_current_enrollments(:include_enrollment_uuid => session[:enrollment_uuid]).select(&:active?).empty?
+    @current_user.present? && !@current_user.has_active_enrollment?
   end
 
   def welcome_message
-    if @current_user.cached_current_enrollments(:include_future => true).present?
+    if @current_user.has_future_enrollment?
       t('#users.welcome.unpublished_courses_message', <<-BODY)
         You've enrolled in one or more courses that have not started yet. Once
         those courses are available, you will see information about them here
-        and in the top navigation. In the meantime, feel free to sign up for
+        and in the navigation on the left side. In the meantime, feel free to sign up for
         more courses or set up your profile.
       BODY
     else
@@ -73,8 +67,25 @@ module DashboardHelper
 
     contexts.map do |name, url|
       url = nil if category == 'Conversation'
-      url.present? ? "<a href=\"#{url}\">#{h(name)}</a>" : h(name)
+      url.present? ? "<a href=\"#{url}\" aria-label=\"#{accessibility_category_label(category)} for #{h(name)}\">#{h(name)}</a>" : h(name)
     end.to_sentence.html_safe
+  end
+
+  def accessibility_category_label(category)
+    case category
+    when "Announcement"
+      return I18n.t('helpers.dashboard_helper.announcement_label', "Visit Course Announcements")
+    when "Conversation"
+      return I18n.t('helpers.dashboard_helper.conversation_label', "Visit Conversations")
+    when "Assignment"
+      return I18n.t('helpers.dashboard_helper.assignment_label', "Visit Course Assignments")
+    when "DiscussionTopic"
+      return I18n.t('helpers.dashboard_helper.discussion_label', "Visit Course Discussions")
+    when "AssessmentRequest"
+      return I18n.t('helpers.dashboard_helper.peer_review_label', "Visit Course Peer Reviews")
+    else
+      raise "Unknown activity category"
+    end
   end
 
   def category_details_label(category)
@@ -87,6 +98,8 @@ module DashboardHelper
       return I18n.t('helpers.dashboard_helper.assignment_details', "Assignment Details")
     when "DiscussionTopic"
       return I18n.t('helpers.dashboard_helper.discussion_details', "Discussion Details")
+    when "AssessmentRequest"
+      return I18n.t('helpers.dashboard_helper.peer_review_details', "Peer Review Details")
     else
       raise "Unknown activity category"
     end
@@ -110,9 +123,27 @@ module DashboardHelper
       return I18n.t('helpers.dashboard_helper.x_new_in_discussions',
                { :one => "*1* Discussion", :other => "*%{count}* Discussions" },
                { :count => items.size, :wrapper => '<b class="count">\1</b>' })
+    when "AssessmentRequest"
+      return I18n.t('helpers.dashboard_helper.x_new_in_peer_reviews',
+               { :one => "*1* Peer Review", :other => "*%{count}* Peer Reviews" },
+               { :count => items.size, :wrapper => '<b class="count">\1</b>' })
     else
       raise "Unknown activity category"
     end
+  end
+
+  def todo_ignore_dropdown_type?(activity_type)
+    [:grading, :moderation].include?(activity_type.to_sym)
+  end
+
+  def todo_ignore_api_url(activity_type, item, force_permanent = false)
+    permanent = (!todo_ignore_dropdown_type?(activity_type) || force_permanent) ? 1 : nil
+
+    api_v1_users_todo_ignore_url(item.asset_string, activity_type, { permanent: permanent })
+  end
+
+  def todo_link_classes(activity_type)
+    todo_ignore_dropdown_type?(activity_type) ? 'al-trigger disable_item_link' : 'disable_item_link disable-todo-item-link'
   end
 
 end

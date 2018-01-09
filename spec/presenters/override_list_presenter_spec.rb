@@ -1,37 +1,55 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 
 describe OverrideListPresenter do
   include TextHelper
   before do
-    AssignmentOverrideApplicator.stubs(:assignment_overridden_for).
-      with(assignment,user).returns overridden_assignment
-    AssignmentOverrideApplicator.stubs(:assignment_overridden_for).
-      with(assignment,nil).returns assignment
-    assignment.stubs(:has_active_overrides?).returns true
-    Timecop.freeze(Time.local(2013,3,13,0,0))
+    allow(AssignmentOverrideApplicator).to receive(:assignment_overridden_for).
+      with(assignment,user).and_return overridden_assignment
+    allow(AssignmentOverrideApplicator).to receive(:assignment_overridden_for).
+      with(assignment,nil).and_return assignment
+    allow(assignment).to receive(:has_active_overrides?).and_return true
   end
 
-  after { Timecop.return }
+  around do |example|
+    Timecop.freeze(Time.zone.local(2013,3,13,0,0), &example)
+  end
 
-
-  let(:assignment) { Assignment.new :title => "Testing" }
-  let(:user) { User.new :name => "Testing" }
+  let(:course) { course_factory(active_all: true) }
+  let(:assignment) { course.assignments.create!(title: "Testing") }
+  let(:user) { student_in_course(course: course, name: "Testing").user }
+  let(:second_user) { student_in_course(course: course, name: "Testing 2").user }
   let(:overridden_assignment) { assignment }
   let(:presenter) { OverrideListPresenter.new assignment,user }
-
 
   describe "#initialize" do
 
     it "keeps a reference to the user" do
       presenter = OverrideListPresenter.new nil,user
-      presenter.user.should == user
+      expect(presenter.user).to eq user
     end
 
     context "assignment present? and user present?" do
 
       it "stores a reference to the overridden assignment for that user" do
         presenter = OverrideListPresenter.new assignment,user
-        presenter.assignment.should == overridden_assignment
+        expect(presenter.assignment).to eq overridden_assignment
       end
     end
 
@@ -39,8 +57,8 @@ describe OverrideListPresenter do
 
       it "stores the assignment as nil if assignment not present?" do
         presenter = OverrideListPresenter.new nil,user
-        presenter.assignment.should == nil
-        presenter.user.should == user
+        expect(presenter.assignment).to eq nil
+        expect(presenter.user).to eq user
       end
     end
 
@@ -51,88 +69,132 @@ describe OverrideListPresenter do
     context "due_at" do
       it "returns - if due_at isn't present" do
         due_date_hash = {:due_at => nil }
-        presenter.formatted_date_string(:due_at, due_date_hash).should == '-'
+        expect(presenter.formatted_date_string(:due_at, due_date_hash)).to eq '-'
         due_date_hash[:due_at] = ""
-        presenter.formatted_date_string(:due_at, due_date_hash).should == '-'
+        expect(presenter.formatted_date_string(:due_at, due_date_hash)).to eq '-'
       end
 
       it "returns a shortened version with just the date if time is 11:59" do
-        fancy_midnight = CanvasTime.fancy_midnight Time.now
+        fancy_midnight = CanvasTime.fancy_midnight Time.zone.now
         due_date_hash = {:due_at => fancy_midnight }
-        presenter.formatted_date_string(:due_at, due_date_hash).should ==
+        expect(presenter.formatted_date_string(:due_at, due_date_hash)).to eq(
           date_string(fancy_midnight, :no_words)
+        )
       end
 
       it "returns returns datetime_string if not all day but date present" do
         due_date_hash = {:due_at => Time.now }
-        presenter.formatted_date_string(:due_at, due_date_hash).should ==
+        expect(presenter.formatted_date_string(:due_at, due_date_hash)).to eq(
           datetime_string(Time.now)
+        )
       end
     end
 
     context "lock_at and unlock_at" do
       it "returns returns datetime_string of not all day but date present" do
         due_date_hash = {:lock_at => Time.now, :unlock_at => Time.now - 1.day }
-        presenter.formatted_date_string(:lock_at, due_date_hash).should ==
+        expect(presenter.formatted_date_string(:lock_at, due_date_hash)).to eq(
           datetime_string(Time.now)
-        presenter.formatted_date_string(:unlock_at, due_date_hash).should ==
+        )
+        expect(presenter.formatted_date_string(:unlock_at, due_date_hash)).to eq(
           datetime_string(Time.now - 1.day)
+        )
       end
 
       it "returns - if due_at isn't present" do
         due_date_hash = {:lock_at => nil }
-        presenter.formatted_date_string(:lock_at , due_date_hash).should == '-'
+        expect(presenter.formatted_date_string(:lock_at , due_date_hash)).to eq '-'
         due_date_hash[:lock_at] = ""
-        presenter.formatted_date_string(:lock_at, due_date_hash).should == '-'
+        expect(presenter.formatted_date_string(:lock_at, due_date_hash)).to eq '-'
         due_date_hash = {:unlock_at => nil }
-        presenter.formatted_date_string(:unlock_at , due_date_hash).should == '-'
+        expect(presenter.formatted_date_string(:unlock_at , due_date_hash)).to eq '-'
         due_date_hash[:unlock_at] = ""
-        presenter.formatted_date_string(:unlock_at, due_date_hash).should == '-'
+        expect(presenter.formatted_date_string(:unlock_at, due_date_hash)).to eq '-'
       end
 
       it "never takes all_day into effect" do
         due_date_hash = {:lock_at => Time.now, :all_day => true }
-        presenter.formatted_date_string(:lock_at, due_date_hash).should ==
+        expect(presenter.formatted_date_string(:lock_at, due_date_hash)).to eq(
           datetime_string(Time.now)
+        )
         due_date_hash = {:unlock_at => Time.now, :all_day => true }
-        presenter.formatted_date_string(:unlock_at, due_date_hash).should ==
+        expect(presenter.formatted_date_string(:unlock_at, due_date_hash)).to eq(
           datetime_string(Time.now)
+        )
       end
     end
   end
 
   describe "#multiple_due_dates?" do
     it "returns the result of assignment.multiple_due_dates_apply_to?(user)" do
-      assignment.expects(:has_active_overrides?).returns true
-      presenter.multiple_due_dates?.should == true
-      assignment.expects(:has_active_overrides?).returns false
-      presenter.multiple_due_dates?.should == false
+      expect(assignment).to receive(:has_active_overrides?).and_return true
+      expect(presenter.multiple_due_dates?).to eq true
+      expect(assignment).to receive(:has_active_overrides?).and_return false
+      expect(presenter.multiple_due_dates?).to eq false
     end
 
     it "returns false if its assignment is nil" do
       presenter = OverrideListPresenter.new nil,user
-      presenter.multiple_due_dates?.should == false
+      expect(presenter.multiple_due_dates?).to eq false
     end
   end
 
   describe "#due_for" do
     it "returns the due date's title if it is present?" do
       due_date = {:title => "default"}
-      presenter.due_for(due_date).should == 'default'
+      expect(presenter.due_for(due_date)).to eq 'default'
     end
 
     it "returns 'Everyone else' if multiple due dates for assignment" do
-      assignment.expects(:has_active_overrides?).once.returns true
+      expect(assignment).to receive(:has_active_overrides?).once.and_return true
       due_date = {}
-      presenter.due_for(due_date).should ==
+      expect(presenter.due_for(due_date)).to eq(
         I18n.t('overrides.everyone_else','Everyone else')
+      )
     end
 
     it "returns 'Everyone' translated if not multiple due dates" do
-      assignment.expects(:has_active_overrides?).once.returns false
+      expect(assignment).to receive(:has_active_overrides?).once.and_return false
       due_date = {}
-      presenter.due_for(due_date).should ==
+      expect(presenter.due_for(due_date)).to eq(
         I18n.t('overrides.everyone', 'Everyone')
+      )
+    end
+
+    context "for ADHOC overrides" do
+      before :each do
+        override = assignment.assignment_overrides.build(due_at: 1.week.from_now)
+        override.assignment_override_students.build(user: user)
+        override.assignment_override_students.build(user: second_user)
+        override.save!
+
+        @due_date = presenter.assignment.dates_hash_visible_to(user).first
+      end
+
+      it "returns a dynamically generated title based on the number of current and invited users" do
+        expect(presenter.due_for(@due_date)).to eql('2 students')
+      end
+
+      it "does not count concluded students" do
+        course.enrollments.find_by(user: second_user).conclude
+        expect(presenter.due_for(@due_date)).to eql('1 student')
+      end
+
+      it "does not count inactive students" do
+        course.enrollments.find_by(user: second_user).deactivate
+        expect(presenter.due_for(@due_date)).to eql('1 student')
+      end
+
+      it "does not count deleted students" do
+        course.enrollments.find_by(user: second_user).destroy
+        expect(presenter.due_for(@due_date)).to eql('1 student')
+      end
+
+      it "does not double-count students that have multiple enrollments in the course" do
+        section = course.course_sections.create!
+        course.enroll_student(user, section: section, enrollment_state: 'active', allow_multiple_enrollments: true)
+        expect(presenter.due_for(@due_date)).to eql('2 students')
+      end
     end
   end
 
@@ -141,7 +203,7 @@ describe OverrideListPresenter do
       let(:sections) do
         # the count is the important part, the actual course sections are
         # not used
-        [ stub, stub, stub ]
+        [ double, double, double ]
       end
 
       def dates_visible_to_user
@@ -155,33 +217,40 @@ describe OverrideListPresenter do
 
     it "returns empty array if assignment is not present" do
       presenter = OverrideListPresenter.new nil,user
-      presenter.visible_due_dates.should == []
+      expect(presenter.visible_due_dates).to eq []
     end
 
     context "when all sections have overrides" do
 
       before do
-        assignment.stubs(:context).
-          returns stub(:active_course_sections => sections)
-        assignment.stubs(:all_dates_visible_to).with(user).
-          returns dates_visible_to_user
+        allow(assignment.context).to receive(:active_section_count).
+          and_return sections.count
+        allow(assignment).to receive(:all_dates_visible_to).with(user).
+          and_return dates_visible_to_user
         @visible_due_dates = presenter.visible_due_dates
       end
 
       it "doesn't include the default due date" do
-        visible_due_dates.length.should == 3
+        expect(visible_due_dates.length).to eq 3
         visible_due_dates.each do |override|
-          override[:base].should_not be_true
+          expect(override[:base]).not_to be_truthy
         end
       end
 
       it "sorts due dates by due_at, placing not present?/nil after dates" do
-        visible_due_dates.first[:due_at].should ==
+        expect(visible_due_dates.first[:due_at]).to eq(
           presenter.formatted_date_string(:due_at, dates_visible_to_user.second)
-        visible_due_dates.second[:due_at].should ==
+        )
+        expect(visible_due_dates.second[:due_at]).to eq(
           presenter.formatted_date_string(:due_at,dates_visible_to_user.third)
-        visible_due_dates.third[:due_at].should ==
+        )
+        expect(visible_due_dates.third[:due_at]).to eq(
           presenter.formatted_date_string(:due_at,dates_visible_to_user.first)
+        )
+      end
+
+      it "includes the actual Time for presentation transforms in templates" do
+        expect(visible_due_dates.second[:raw][:due_at]).to be_a(Time)
       end
 
     end
@@ -190,16 +259,16 @@ describe OverrideListPresenter do
       let(:dates_visible) { dates_visible_to_user[1..-1] }
 
       before do
-        assignment.stubs(:context).
-          returns stub(:active_course_sections => sections)
-        assignment.stubs(:all_dates_visible_to).with(user).
-          returns dates_visible
+        allow(assignment.context).to receive(:active_section_count).
+          and_return sections.count
+        allow(assignment).to receive(:all_dates_visible_to).with(user).
+          and_return dates_visible
         @visible_due_dates = presenter.visible_due_dates
       end
 
       it "includes the default due date" do
-        visible_due_dates.detect { |due_date| due_date[:base] == true }.
-          should_not be_nil
+        expect(visible_due_dates.detect { |due_date| due_date[:base] == true }).
+          not_to be_nil
       end
     end
 

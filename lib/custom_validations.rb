@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,30 +17,17 @@
 #
 
 module CustomValidations
-  class RelativeUriError < ArgumentError; end
 
-  # returns [normalized_url_string, URI] if valid, raises otherwise
-  def self.validate_url(value)
-    value = value.strip
-    raise ArgumentError if value.empty?
-    uri = URI.parse(value)
-    unless uri.scheme
-      value = "http://#{value}"
-      uri = URI.parse(value)
-    end
-    raise(RelativeUriError) if uri.host.blank?
-    raise ArgumentError unless %w(http https).include?(uri.scheme.downcase)
-    return value, uri
-  end
 
   module ClassMethods
 
-    def validates_as_url(*fields)
+    def validates_as_url(*fields, allowed_schemes: %w{http https})
       validates_each(fields, :allow_nil => true) do |record, attr, value|
         begin
-          value, uri = CustomValidations.validate_url(value)
+          value, uri = CanvasHttp.validate_url(value, allowed_schemes: allowed_schemes)
+
           record.send("#{attr}=", value)
-        rescue URI::InvalidURIError, ArgumentError
+        rescue URI::Error, ArgumentError
           record.errors.add attr, 'is not a valid URL'
         end
       end

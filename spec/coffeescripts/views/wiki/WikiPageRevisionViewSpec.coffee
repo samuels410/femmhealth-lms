@@ -1,10 +1,28 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
   'compiled/models/WikiPageRevision'
   'compiled/collections/WikiPageRevisionsCollection'
   'compiled/views/wiki/WikiPageRevisionView'
-], (WikiPageRevision, WikiPageRevisionsCollection, WikiPageRevisionView) ->
+], ($, WikiPageRevision, WikiPageRevisionsCollection, WikiPageRevisionView) ->
 
-  module 'WikiPageRevisionView'
+  QUnit.module 'WikiPageRevisionView'
 
   test 'binds to model change triggers', ->
     revision = new WikiPageRevision
@@ -15,7 +33,11 @@ define [
   test 'restore delegates to model.restore', ->
     revision = new WikiPageRevision
     view = new WikiPageRevisionView model: revision
-    @mock(revision).expects('restore').atLeast(1).returns($.Deferred())
+    @stub(view, 'windowLocation').returns({
+      href: ""
+      reload: -> true
+    })
+    @mock(revision).expects('restore').atLeast(1).returns($.Deferred().resolve())
     view.restore()
 
   test 'toJSON serializes expected values', ->

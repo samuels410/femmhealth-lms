@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,7 +17,8 @@
 #
 
 class CalendarEventsController < ApplicationController
-  before_filter :require_context
+  before_action :require_context
+  before_action :rich_content_service_config, only: [:new, :edit]
 
   add_crumb(proc { t(:'#crumbs.calendar_events', "Calendar Events")}, :only => [:show, :new, :edit]) { |c| c.send :calendar_url_for, c.instance_variable_get("@context") }
 
@@ -32,7 +33,7 @@ class CalendarEventsController < ApplicationController
     end
     if authorized_action(@event, @current_user, :read)
       # If param specifies to open event on calendar, redirect to view
-      if params[:calendar] == '1'
+      if params[:calendar] == '1' || @context.is_a?(CourseSection)
         return redirect_to calendar_url_for(@event.effective_context, :event => @event)
       end
       log_asset_access(@event, "calendar", "calendar")
@@ -45,18 +46,16 @@ class CalendarEventsController < ApplicationController
 
 
   def new
-    @event = @context.calendar_events.build
+    @event = @context.calendar_events.temp_record
     add_crumb(t('crumbs.new', "New Calendar Event"), named_context_url(@context, :new_context_calendar_event_url))
-    @event.start_at = params[:start_at]
-    @event.end_at = params[:end_at]
-    @event.title = params[:title]
-    @editing = true
+    @event.assign_attributes(params.permit(:title, :start_at, :end_at, :location_name, :location_address))
+    js_env(:RECURRING_CALENDAR_EVENTS_ENABLED => feature_context.feature_enabled?(:recurring_calendar_events))
     authorized_action(@event, @current_user, :create)
   end
 
   def create
     params[:calendar_event][:time_zone_edited] = Time.zone.name if params[:calendar_event]
-    @event = @context.calendar_events.build(params[:calendar_event])
+    @event = @context.calendar_events.build(calendar_event_params)
     if authorized_action(@event, @current_user, :create)
       respond_to do |format|
         @event.updating_user = @current_user
@@ -65,7 +64,7 @@ class CalendarEventsController < ApplicationController
           format.html { redirect_to calendar_url_for(@context) }
           format.json { render :json => @event.as_json(:permissions => {:user => @current_user, :session => session}), :status => :created}
         else
-          format.html { render :action => "new" }
+          format.html { render :new }
           format.json { render :json => @event.errors, :status => :bad_request }
         end
       end
@@ -75,13 +74,10 @@ class CalendarEventsController < ApplicationController
   def edit
     @event = @context.calendar_events.find(params[:id])
     if @event.grants_right?(@current_user, session, :update)
-      @event.start_at = params[:start_at] if params[:start_at]
-      @event.end_at = params[:end_at] if params[:end_at]
-      @event.title = params[:title] if params[:title]
+      @event.update_attributes!(params.permit(:title, :start_at, :end_at, :location_name, :location_address))
     end
-    @editing = true
     if authorized_action(@event, @current_user, :update_content)
-      render :action => 'new'
+      render :new
     end
   end
 
@@ -91,13 +87,13 @@ class CalendarEventsController < ApplicationController
       respond_to do |format|
         params[:calendar_event][:time_zone_edited] = Time.zone.name if params[:calendar_event]
         @event.updating_user = @current_user
-        if @event.update_attributes(params[:calendar_event])
+        if @event.update_attributes(calendar_event_params)
           log_asset_access(@event, "calendar", "calendar", 'participate')
           flash[:notice] = t 'notices.updated', "Event was successfully updated."
           format.html { redirect_to calendar_url_for(@context) }
           format.json { render :json => @event.as_json(:permissions => {:user => @current_user, :session => session}), :status => :ok }
         else
-          format.html { render :action => "edit" }
+          format.html { render :edit }
           format.json { render :json => @event.errors, :status => :bad_request }
         end
       end
@@ -116,4 +112,23 @@ class CalendarEventsController < ApplicationController
     end
   end
 
+  protected
+  def rich_content_service_config
+    rce_js_env(:sidebar)
+  end
+
+  def feature_context
+    if @context.is_a?(User)
+      @domain_root_account
+    elsif @context.is_a?(Group)
+      @context.context
+    else
+      @context
+    end
+  end
+
+  def calendar_event_params
+    params.require(:calendar_event).
+      permit(CalendarEvent.permitted_attributes + [:child_event_data => strong_anything])
+  end
 end

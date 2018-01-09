@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -12,73 +12,124 @@
 # A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
 # details.
 #
-# You should have received a copy of the GNU Affero General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper')
 
 describe CrocodocSessionsController do
-  before do
+  before :once do
     Setting.set 'crocodoc_counter', 0
     PluginSetting.create! :name => 'crocodoc',
                           :settings => { :api_key => "blahblahblahblahblah" }
-    Crocodoc::API.any_instance.stubs(:upload).returns 'uuid' => '1234567890'
-    Crocodoc::API.any_instance.stubs(:session).returns 'session' => 'SESSION'
-  end
-
-  before do
-    course_with_student(:active_all => true)
     @student_pseudonym = @pseudonym
-    course_with_teacher_logged_in(:active_all => true)
-
+    course_with_teacher(:active_all => true)
+    student_in_course(:active_all => true)
     attachment_model :content_type => 'application/pdf', :context => @student
-    submission_model :course => @course, :user => @student
-    @submission.update_attribute :attachment_ids, @attachment.id
+    @blob = {attachment_id: @attachment.global_id,
+             user_id: @student.global_id,
+             type: "crocodoc"}.to_json
+    @hmac = Canvas::Security.hmac_sha1(@blob)
   end
 
-  context "with submission" do
-    it "should create a session" do
-      @attachment.submit_to_crocodoc
-      post :create,
-           :submission_id => @submission.id,
-           :attachment_id => @attachment.id
-      assert_response :success
-      response.body.should include 'https://crocodoc.com/view/SESSION'
-    end
-
-    it "should ensure the attachment is tied to the submission" do
-      @submission.update_attribute :attachment_ids, nil
-      assert_page_not_found do
-        post :create,
-             :submission_id => @submission.id,
-             :attachment_id => @attachment.id
-      end
-    end
+  before :each do
+    allow_any_instance_of(Crocodoc::API).to receive(:upload).and_return 'uuid' => '1234567890'
+    allow_any_instance_of(Crocodoc::API).to receive(:session).and_return 'session' => 'SESSION'
+    user_session(@student)
   end
 
-  context "without submission" do
+  context "with crocodoc" do
     before do
       @attachment.submit_to_crocodoc
     end
 
-    it "should create a session for the owner of the attachment" do
-      user_session(@student)
-      post :create, :attachment_id => @attachment.id
-      response.body.should include 'https://crocodoc.com/view/SESSION'
+    it "works for the user in the blob" do
+      get :show, params: {blob: @blob, hmac: @hmac}
+      expect(response.body).to include 'https://crocodoc.com/view/SESSION'
     end
 
-    it "should not create a session for others" do
-      post :create, :attachment_id => @attachment.id
+    it "doesn't work for others" do
+      user_session(@teacher)
+      get :show, params: {blob: @blob, hmac: @hmac}
       assert_status(401)
+    end
+
+    it "fails gracefulishly when crocodoc times out" do
+      allow_any_instance_of(Crocodoc::API).to receive(:session).and_raise(Timeout::Error)
+      get :show, params: {blob: @blob, hmac: @hmac}
+      assert_status(503)
+    end
+
+    it "updates attachment.viewed_at if the owner (user that is the context of the attachment) views" do
+      last_viewed_at = @attachment.viewed_at
+
+      get :show, params: {blob: @blob, hmac: @hmac}
+
+      @attachment.reload
+      expect(@attachment.viewed_at).not_to eq(last_viewed_at)
+    end
+
+
+    it "updates attachment.viewed_at if the owner (person in the user attribute of the attachment) views" do
+      assignment = @course.assignments.create!(assignment_valid_attributes)
+      attachment = attachment_model content_type: 'application/pdf', context: assignment, user: @student
+      attachment.submit_to_crocodoc
+      blob = {attachment_id: attachment.global_id,
+             user_id: @student.global_id,
+             type: "crocodoc"}.to_json
+      hmac = Canvas::Security.hmac_sha1(blob)
+      last_viewed_at = attachment.viewed_at
+
+      get :show, params: {blob: blob, hmac: hmac}
+
+      attachment.reload
+      expect(attachment.viewed_at).not_to eq(last_viewed_at)
+    end
+
+    it "doesn't update attachment.viewed_at for non-owner views" do
+      last_viewed_at = @attachment.viewed_at
+
+      teacher_blob = {attachment_id: @attachment.global_id,
+                      user_id: @teacher.global_id,
+                      type: "crocodoc"}.to_json
+      teacher_hmac = Canvas::Security.hmac_sha1(teacher_blob)
+      user_session(@teacher)
+
+      get :show, params: {blob: teacher_blob, hmac: teacher_hmac}
+
+      @attachment.reload
+      expect(@attachment.viewed_at).to eq(last_viewed_at)
     end
   end
 
   it "should 404 if a crocodoc document is unavailable" do
-    assert_page_not_found do
-      post :create,
-           :submission_id => @submission.id,
-           :attachment_id => @attachment.id
+    get :show, params: {blob: @blob, hmac: @hmac}
+    assert_status(404)
+  end
+
+  context "Migrate to Canvadocs" do
+    before do
+      @attachment.submit_to_crocodoc
+      Account.default.enable_feature!(:new_annotations)
+      allow(Canvadocs).to receive(:enabled?).and_return true
+      allow(Canvadocs).to receive(:annotations_supported?).and_return true
+      allow(Canvadocs).to receive(:hijack_crocodoc_sessions?).and_return false
+
+      allow_any_instance_of(Canvadocs::API).to receive(:session).and_return 'id' => 'SESSION'
+      PluginSetting.create! :name => 'canvadocs',
+                            :settings => { "base_url" => "https://canvadocs.instructure.docker" }
+    end
+
+    it "should redirect to a canvadocs session instead of crocodoc when enabled" do
+      allow(Canvadocs).to receive(:hijack_crocodoc_sessions?).and_return true
+      get :show, params: {blob: @blob, hmac: @hmac}
+      expect(response.body).to include 'https://canvadocs.instructure.docker/sessions/SESSION/view'
+    end
+
+    it "should not redirect to a canvadocs session instead of crocodoc when disabled" do
+      get :show, params: {blob: @blob, hmac: @hmac}
+      expect(response.body).to_not include 'https://canvadocs.instructure.docker/sessions/SESSION/view'
     end
   end
 end

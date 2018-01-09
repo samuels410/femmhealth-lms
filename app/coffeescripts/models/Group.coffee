@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -34,6 +34,8 @@ define [
       @_users = new GroupUserCollection initialUsers,
         group: this
         category: @collection?.category
+        markInactiveStudents: @collection?.options?.markInactiveStudents
+
       @_users.on 'fetched:last', => @set('members_count', @_users.length)
       @users = -> @_users
       @_users
@@ -51,14 +53,25 @@ define [
       else
         "/api/v1/groups/#{@id}"
 
+    theLimit: ->
+      max_membership = @get('max_membership')
+      max_membership or @collection?.category?.get('group_limit')
+
     isFull: ->
-      limit = @collection?.category?.get 'group_limit'
+      limit = @get('max_membership')
+      (!limit and @groupCategoryLimitMet()) or (limit and @get('members_count') >= limit)
+
+    groupCategoryLimitMet: ->
+      limit = @collection?.category?.get('group_limit')
       limit and @get('members_count') >= limit
 
     isLocked: ->
       @collection?.category?.isLocked()
 
     toJSON: ->
-      json = super
-      json.isFull = @isFull()
-      json
+      if ENV.student_mode
+        {name: @get('name')}
+      else
+        json = super
+        json.isFull = @isFull()
+        json

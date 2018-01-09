@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'compiled/backbone-ext/DefaultUrlMixin'
   'Backbone'
@@ -16,6 +33,7 @@ define [
       published: true
       publishable: true
       unpublishable: true
+      module_item_name: null
 
     branch: (key) ->
       (@[key][@get('module_type')] or @[key].generic).call(this)
@@ -27,30 +45,32 @@ define [
     baseUrl: -> "/api/v1/courses/#{@get('course_id')}"
 
     urls:
-      generic:          -> "#{@baseUrl()}/modules/#{@get('module_id')}/items/#{@get('id')}"
-      #attachment:       -> "/api/v1/files/#{@get('id')}"
-      wiki_page:        -> "#{@baseUrl()}/pages/#{@get('id')}"
-      assignment:       -> "#{@baseUrl()}/assignments/#{@get('id')}"
-      discussion_topic: -> "#{@baseUrl()}/discussion_topics/#{@get('id')}"
+      generic:          -> "#{@baseUrl()}/modules/#{@get('module_id')}/items/#{@get('module_item_id')}"
       module:           -> "#{@baseUrl()}/modules/#{@get('id')}"
-      quiz: ->
-        action = if @get('published') then 'publish' else 'unpublish'
-        "/courses/#{@get('course_id')}/quizzes/#{action}"
 
     toJSONs:
-      generic: ->          module_item: @attributes
-      #attachment: ->       hidden: !@get('published')
-      wiki_page: ->        wiki_page: @attributes
-      assignment: ->       assignment: @attributes
-      discussion_topic: -> @attributes
-      quiz: ->             quizzes: [@get('id')]
-      module: ->           module: @attributes
+      generic: ->          module_item: { published: @get('published') }
+      module: ->           module: { published: @get('published') }
 
     disabledMessages:
-      generic:          -> I18n.t('disabled', 'Publishing is disabled for this item')
-      assignment:       -> I18n.t('disabled_assignment', "Can't unpublish if there are student submissions")
-      quiz:             -> I18n.t('disabled_quiz', "Can't unpublish if there are student submissions")
-      discussion_topic: -> I18n.t('disabled_discussion_topic', "Can't unpublish if there are student submissions")
+      generic:          -> if @get('module_item_name')
+                             I18n.t('Publishing %{item_name} is disabled', {item_name: @get('module_item_name')})
+                           else
+                             I18n.t('Publishing is disabled for this item')
+
+      assignment:       -> if @get('module_item_name')
+                             I18n.t("Can't unpublish %{item_name} if there are student submissions", {item_name: @get('module_item_name')})
+                           else
+                             I18n.t("Can't unpublish if there are student submissions")
+
+      quiz:             -> if @get('module_item_name')
+                             I18n.t("Can't unpublish %{item_name} if there are student submissions", {item_name: @get('module_item_name')})
+                           else
+                             I18n.t("Can't unpublish if there are student submissions")
+      discussion_topic: -> if @get('module_item_name')
+                             I18n.t("Can't unpublish %{item_name} if there are student submissions", {item_name: @get('module_item_name')})
+                           else
+                             I18n.t("Can't unpublish if there are student submissions")
 
     publish: ->
       @save 'published', yes

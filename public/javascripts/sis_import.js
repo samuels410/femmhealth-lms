@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,27 +12,26 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-  'i18n!sis_import',
-  'jquery' /* $ */,
-  'str/htmlEscape',
-  'jquery.ajaxJSON' /* ajaxJSON */,
-  'jquery.instructure_forms' /* formSubmit, formErrors */,
-  'jquery.instructure_misc_plugins' /* showIf, disableIf */,
-  'jqueryui/progressbar' /* /\.progressbar/ */
-], function(I18n, $, htmlEscape) {
+import I18n from 'i18n!sis_import'
+import $ from 'jquery'
+import htmlEscape from './str/htmlEscape'
+import './jquery.ajaxJSON'
+import './jquery.instructure_forms' /* formSubmit, formErrors */
+import './jquery.instructure_misc_plugins' /* showIf, disableIf */
+import 'jqueryui/progressbar'
 
 $(document).ready(function(event) {
   var state = 'nothing';
-  
+
   $("#batch_mode").change(function(event) {
-    $("#batch_mode_term_id").showIf($(this).attr('checked'));
+    $('#batch_mode_term_id_label').showIf($(this).attr('checked'));
+    $('#batch_mode_term_id').showIf($(this).attr('checked'));
   }).change();
-  
+
   var $override_sis_stickiness = $("#override_sis_stickiness");
   var $add_sis_stickiness = $("#add_sis_stickiness");
   var $clear_sis_stickiness = $("#clear_sis_stickiness");
@@ -53,7 +52,7 @@ $(document).ready(function(event) {
   function createMessageHtml(batch){
     var output = "";
     if(batch.processing_errors && batch.processing_errors.length > 0){
-      output += "<li>" + I18n.t('headers.import_errors', "Errors that prevent importing") + "\n<ul>";
+      output += "<li>" + htmlEscape(I18n.t('headers.import_errors', "Errors that prevent importing")) + "\n<ul>";
       for(var i in batch.processing_errors) {
         var message = batch.processing_errors[i];
         output += "<li>" + htmlEscape(message[0]) + " - " + htmlEscape(message[1]) + "</li>";
@@ -61,7 +60,7 @@ $(document).ready(function(event) {
       output += "</ul>\n</li>";
     }
     if(batch.processing_warnings && batch.processing_warnings.length > 0){
-      output += "<li>" + I18n.t('headers.import_warnings', "Warnings") + "\n<ul>";
+      output += "<li>" + htmlEscape(I18n.t('headers.import_warnings', "Warnings")) + "\n<ul>";
       for(var i in batch.processing_warnings) {
         var message = batch.processing_warnings[i];
         output += "<li>" + htmlEscape(message[0]) + " - " + htmlEscape(message[1]) + "</li>";
@@ -76,23 +75,23 @@ $(document).ready(function(event) {
     if(!(batch.data && batch.data.counts)){
       return '';
     }
-    output = "<ul><li>" + I18n.t('headers.imported_items', "Imported Items") + "<ul>";
-    output += "<li>" + I18n.t('import_counts.accounts', "Accounts: %{account_count}", {account_count: batch.data.counts.accounts}) + "</li>";
-    output += "<li>" + I18n.t('import_counts.terms', "Terms: %{term_count}", {term_count: batch.data.counts.terms}) + "</li>";
-    output += "<li>" + I18n.t('import_counts.courses', "Courses: %{course_count}", {course_count: batch.data.counts.courses}) + "</li>";
-    output += "<li>" + I18n.t('import_counts.sections', "Sections: %{section_count}", {section_count: batch.data.counts.sections}) + "</li>";
-    output += "<li>" + I18n.t('import_counts.users', "Users: %{user_count}", {user_count: batch.data.counts.users}) + "</li>";
-    output += "<li>" + I18n.t('import_counts.enrollments', "Enrollments: %{enrollment_count}", {enrollment_count: batch.data.counts.enrollments}) + "</li>";
-    output += "<li>" + I18n.t('import_counts.crosslists', "Crosslists: %{crosslist_count}", {crosslist_count: batch.data.counts.xlists}) + "</li>";
-    output += "<li>" + I18n.t('import_counts.groups', "Groups: %{group_count}", {group_count: batch.data.counts.groups}) + "</li>";
-    output += "<li>" + I18n.t('import_counts.group_enrollments', "Group Enrollments: %{group_enrollments_count}", {group_enrollments_count: batch.data.counts.group_memberships}) + "</li>";
+    var output = "<ul><li>" + htmlEscape(I18n.t('headers.imported_items', "Imported Items")) + "<ul>";
+    output += "<li>" + htmlEscape(I18n.t('import_counts.accounts', "Accounts: %{account_count}", {account_count: batch.data.counts.accounts})) + "</li>";
+    output += "<li>" + htmlEscape(I18n.t('import_counts.terms', "Terms: %{term_count}", {term_count: batch.data.counts.terms})) + "</li>";
+    output += "<li>" + htmlEscape(I18n.t('import_counts.courses', "Courses: %{course_count}", {course_count: batch.data.counts.courses})) + "</li>";
+    output += "<li>" + htmlEscape(I18n.t('import_counts.sections', "Sections: %{section_count}", {section_count: batch.data.counts.sections})) + "</li>";
+    output += "<li>" + htmlEscape(I18n.t('import_counts.users', "Users: %{user_count}", {user_count: batch.data.counts.users})) + "</li>";
+    output += "<li>" + htmlEscape(I18n.t('import_counts.enrollments', "Enrollments: %{enrollment_count}", {enrollment_count: batch.data.counts.enrollments})) + "</li>";
+    output += "<li>" + htmlEscape(I18n.t('import_counts.crosslists', "Crosslists: %{crosslist_count}", {crosslist_count: batch.data.counts.xlists})) + "</li>";
+    output += "<li>" + htmlEscape(I18n.t('import_counts.groups', "Groups: %{group_count}", {group_count: batch.data.counts.groups})) + "</li>";
+    output += "<li>" + htmlEscape(I18n.t('import_counts.group_enrollments', "Group Enrollments: %{group_enrollments_count}", {group_enrollments_count: batch.data.counts.group_memberships})) + "</li>";
     output += "</ul></li></ul>";
     
     return output
   }
 
   function startPoll() {
-    $("#sis_importer").html(I18n.t('status.processing', "Processing") + " <div style='font-size: 0.6em;'>" + I18n.t('notices.processing_takes_awhile', "this may take a bit...") + "</div>")
+    $("#sis_importer").html(htmlEscape(I18n.t('status.processing', "Processing")) + " <div style='font-size: 0.6em;'>" + htmlEscape(I18n.t('notices.processing_takes_awhile', "this may take a bit...")) + "</div>")
        .attr('disabled', true);
     $(".instruction").hide();
     $(".progress_bar_holder").slideDown();
@@ -128,28 +127,28 @@ $(document).ready(function(event) {
         if(!sis_batch || sis_batch.workflow_state == 'imported') {
           $("#sis_importer").hide();
           $(".copy_progress").progressbar('option', 'value', 100);
-          $(".progress_message").html(I18n.t('messages.import_complete_success', "The import is complete and all records were successfully imported.") + createCountsHtml(sis_batch));
+          $(".progress_message").html($.raw(htmlEscape(I18n.t('messages.import_complete_success', "The import is complete and all records were successfully imported.")) + createCountsHtml(sis_batch)));
         } else if(sis_batch.workflow_state == 'failed') {
-          code = "sis_batch_" + sis_batch.id;
+          var code = "sis_batch_" + sis_batch.id;
           $(".progress_bar_holder").hide();
           $("#sis_importer").hide();
           var message = I18n.t('errors.import_failed_code', "There was an error importing your SIS data. No records were imported.  Please notify your system administrator and give them the following code: \"%{code}\"", {code: code});
-          $(".sis_messages .sis_error_message").html(message);
+          $(".sis_messages .sis_error_message").text(message);
           $(".sis_messages").show();
         } else if(sis_batch.workflow_state == 'failed_with_messages') {
           $(".progress_bar_holder").hide();
           $("#sis_importer").hide();
-          var message = I18n.t('errors.import_failed_messages', "No SIS records were imported. The import failed with these messages:");
+          var message = htmlEscape(I18n.t('errors.import_failed_messages', "No SIS records were imported. The import failed with these messages:"));
           message += createMessageHtml(sis_batch);
-          $(".sis_messages .sis_error_message").html(message);
+          $(".sis_messages .sis_error_message").html($.raw(message));
           $(".sis_messages").show();
         } else if(sis_batch.workflow_state == 'imported_with_messages') {
           $(".progress_bar_holder").hide();
           $("#sis_importer").hide();
-          var message = I18n.t('messages.import_complete_warnings', "The SIS data was imported but with these messages:");
+          var message = htmlEscape(I18n.t('messages.import_complete_warnings', "The SIS data was imported but with these messages:"));
           message += createMessageHtml(sis_batch);
           message += createCountsHtml(sis_batch);
-          $(".sis_messages").show().html(message);
+          $(".sis_messages").show().html($.raw(message));
         } else {
           if(progress == lastProgress) {
             waitTime = Math.max(waitTime + 500, 30000);
@@ -201,5 +200,4 @@ $(document).ready(function(event) {
   }
   check_if_importing();
 
-});
 });

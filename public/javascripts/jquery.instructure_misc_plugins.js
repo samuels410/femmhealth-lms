@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,18 +12,32 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-define([
-  'i18n!instructure',
-  'jquery' /* $ */,
-  'jquery.ajaxJSON' /* ajaxJSON */,
-  'jqueryui/dialog',
-  'jquery.scrollToVisible' /* scrollToVisible */,
-  'vendor/jquery.ba-hashchange' /* hashchange */,
-  'vendor/jquery.scrollTo' /* /\.scrollTo/ */
-], function(I18n, $) {
+import I18n from 'i18n!instructure'
+import $ from 'jquery'
+import htmlEscape from './str/htmlEscape'
+import authenticity_token from 'compiled/behaviors/authenticity_token'
+import './jquery.ajaxJSON'
+import 'jqueryui/dialog'
+import './jquery.scrollToVisible'
+import './vendor/jquery.scrollTo'
+
+  $.fn.setOptions = function(prompt, options) {
+    var result = prompt ? "<option value=''>" + htmlEscape(prompt) + "</option>" : "";
+
+    if (options == null) {
+      options = [];
+    }
+
+    options.forEach( function(opt) {
+      var optHtml = htmlEscape(opt);
+      result += "<option value=\"" + optHtml + "\">" + optHtml + "</option>";
+    });
+
+    return this.html($.raw(result));
+  }
 
   // this function is to prevent you from doing all kinds of expesive operations on a
   // jquery object that doesn't actually have any elements in it
@@ -100,12 +114,7 @@ define([
           };
         }
         var data = options.prepareData ? options.prepareData.call($object, $dialog) : {};
-        if (options.token) {
-          data.authenticity_token = options.token;
-        }
-        if (!data.authenticity_token) {
-          data.authenticity_token = $("#ajax_authenticity_token").text();
-        }
+        data.authenticity_token = authenticity_token();
         $.ajaxJSON(options.url, "DELETE", data, function(data) {
           options.success.call($object, data);
         }, function(data, request, status, error) {
@@ -162,14 +171,13 @@ define([
   $.fn.fragmentChange = function(fn) {
     if(fn && fn !== true) {
       var query = (window.location.search || "").replace(/^\?/, "").split("&");
-      var idx;
       // The URL can hard-code a hash regardless of what's
       // actually shown in the hash by specifying a query
       // parameter, hash=some_hash
       var query_hash = null;
-      for(idx in query) {
-        var item = query[idx];
-        if(item && item.indexOf("hash=") === 0) {
+      for (var i = 0; i < query.length; i++) {
+        var item = query[i]
+        if (item && item.indexOf("hash=") === 0) {
           query_hash = "#" + item.substring(5);
         }
       }
@@ -178,8 +186,8 @@ define([
       var found = false;
       // Can only be used on the root document,
       // will not work on an iframe, for example.
-      for(idx in $._checkFragments.fragmentList) {
-        var obj = $._checkFragments.fragmentList[idx];
+      for (var i = 0; i < $._checkFragments.fragmentList.length; i++) {
+        var obj = $._checkFragments.fragmentList[i];
         if(obj.doc[0] == $doc[0]) {
           found = true;
         }
@@ -205,7 +213,7 @@ define([
   };
   $._checkFragments = function() {
     var list = $._checkFragments.fragmentList;
-    for(var idx in list) {
+    for (var idx = 0; idx < list.length; idx++) {
       var obj = list[idx];
       var $doc = obj.doc;
       if($doc[0].location.hash != obj.fragment) {
@@ -327,7 +335,7 @@ define([
   $.fn.fillWindowWithMe = function(options){
     var opts               = $.extend({minHeight: 400}, options),
         $this              = $(this),
-        $wrapper_container = $('#wrapper-container'),
+        $wrapper           = $('#wrapper'),
         $main              = $('#main'),
         $not_right_side    = $('#not_right_side'),
         $window            = $(window),
@@ -336,7 +344,7 @@ define([
     function fillWindowWithThisElement(){
       $toResize.height(0);
       var spaceLeftForThis = $window.height()
-                             - ($wrapper_container.offset().top + $wrapper_container.outerHeight())
+                             - ($wrapper.offset().top + $wrapper.outerHeight())
                              + ($main.height() - $not_right_side.height()),
           newHeight = Math.max(400, spaceLeftForThis);
 
@@ -382,8 +390,7 @@ define([
             if (val === (val = input.val())) {return;}
 
             // Enter new content into testSubject
-            var escaped = val.replace(/&/g, '&amp;').replace(/\s/g,'&nbsp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            testSubject.html(escaped);
+            testSubject.text(val);
 
             // Calculate new width + whether to change
             var testerWidth = testSubject.width(),
@@ -410,6 +417,4 @@ define([
 
   };
 
-  return $;
-});
-
+export default $;

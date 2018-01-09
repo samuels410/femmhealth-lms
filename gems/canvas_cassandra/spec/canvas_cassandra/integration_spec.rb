@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2014 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -26,12 +26,13 @@ end
 describe "execute and update" do
   let(:config_path) { File.expand_path("../../../../../config/cassandra.yml", __FILE__) }
   let(:cassandra_configured?) do
-    File.exists?(config_path) &&
+    File.exist?(config_path) &&
         YAML.load(ERB.new(File.read(config_path)).result) &&
-        YAML.load(ERB.new(File.read(config_path)).result)['test']
+        YAML.load(ERB.new(File.read(config_path)).result)['test'] &&
+        YAML.load(ERB.new(File.read(config_path)).result)['test']['page_views']
   end
   let(:db) do
-    # TODO: Setting.from_config really deserves to be its own Config component that we could use here
+    # TODO: ConfigFile.load really deserves to be its own Config component that we could use here
     test_config = YAML.load(ERB.new(File.read(config_path)).result)['test']['page_views']
     CanvasCassandra::Database.new("test_conn", test_config['servers'], {keyspace: test_config['keyspace'], cql_version: '3.0.0'}, TestLogger.new)
   end
@@ -50,14 +51,14 @@ describe "execute and update" do
     db.execute("drop table page_views") if cassandra_configured?
   end
 
-  it "should return the result from execute" do
-    db.execute("select count(*) from page_views").fetch['count'].should == 0
-    db.select_value("select count(*) from page_views").should == 0
-    db.execute("insert into page_views (request_id, user_id) values (?, ?)", "test", 0).should == nil
+  it "returns the result from execute" do
+    expect(db.execute("select count(*) from page_views").fetch['count']).to eq 0
+    expect(db.select_value("select count(*) from page_views")).to eq 0
+    expect(db.execute("insert into page_views (request_id, user_id) values (?, ?)", "test", 0)).to eq nil
   end
 
-  it "should return nothing from update" do
-    db.update("select count(*) from page_views").should == nil
-    db.update("insert into page_views (request_id, user_id) values (?, ?)", "test", 0).should == nil
+  it "returns nothing from update" do
+    expect(db.update("select count(*) from page_views")).to eq nil
+    expect(db.update("insert into page_views (request_id, user_id) values (?, ?)", "test", 0)).to eq nil
   end
 end

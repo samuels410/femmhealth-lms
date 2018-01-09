@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,9 +17,9 @@
 #
 
 class ContentParticipationCount < ActiveRecord::Base
-  attr_accessible :context, :user, :content_type, :unread_count
+  ACCESSIBLE_ATTRIBUTES = [:context, :user, :content_type, :unread_count].freeze
 
-  belongs_to :context, :polymorphic => true
+  belongs_to :context, polymorphic: [:course]
   belongs_to :user
 
   def self.create_or_update(opts={})
@@ -40,7 +40,7 @@ class ContentParticipationCount < ActiveRecord::Base
             :unread_count => unread_count_for(type, context, user),
           })
         end
-        participant.attributes = opts.slice(*ContentParticipationCount.accessible_attributes.to_a)
+        participant.attributes = opts.slice(*ACCESSIBLE_ATTRIBUTES)
 
         # if the participant was just created, the count will already be correct
         if opts[:offset].present? && !participant.new_record?
@@ -71,20 +71,21 @@ class ContentParticipationCount < ActiveRecord::Base
           submissions.user_id = ? AND
           assignments.context_type = ? AND
           assignments.context_id = ? AND
-          assignments.workflow_state <> 'deleted' AND
+          assignments.workflow_state NOT IN ('deleted', 'unpublished') AND
           (assignments.muted IS NULL OR NOT assignments.muted)
         SQL
-        subs_with_grades = Submission.graded.
+        subs_with_grades = Submission.active.graded.
             joins(:assignment).
             where(submission_conditions).
             where("submissions.score IS NOT NULL").
             pluck(:id)
-        subs_with_comments = Submission.
+        subs_with_comments = Submission.active.
             joins(:assignment, :submission_comments).
             where(submission_conditions).
             where(<<-SQL, user).pluck(:id)
-            (submission_comments.hidden IS NULL OR NOT submission_comments.hidden)
-            AND submission_comments.author_id <> ?
+              (submission_comments.hidden IS NULL OR NOT submission_comments.hidden)
+              AND submission_comments.provisional_grade_id IS NULL
+              AND submission_comments.author_id <> ?
             SQL
         potential_ids = (subs_with_grades + subs_with_comments).uniq
         already_read_count = ContentParticipation.where(
@@ -100,7 +101,7 @@ class ContentParticipationCount < ActiveRecord::Base
   end
 
   def unread_count(refresh = true)
-    refresh_unread_count if refresh && !frozen? && ttl.present? && self.updated_at.utc < ttl.ago.utc
+    refresh_unread_count if refresh && !frozen? && ttl.present? && self.updated_at.utc < ttl.seconds.ago.utc
     read_attribute(:unread_count)
   end
 

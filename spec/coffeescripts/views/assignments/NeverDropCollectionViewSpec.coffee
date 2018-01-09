@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'underscore'
@@ -16,8 +33,7 @@ define [
   class Assignments extends Backbone.Collection
     model: AssignmentStub
 
-
-  module "NeverDropCollectionView",
+  QUnit.module "NeverDropCollectionView",
     setup: ->
       @clock = sinon.useFakeTimers()
       util.useOldDebounce()
@@ -27,13 +43,13 @@ define [
         ag_id: 'new'
       @view = new NeverDropCollectionView
         collection: @never_drops
+        canChangeDropRules: true
 
       $('#fixtures').empty().append @view.render().el
 
     teardown: ->
       @clock.restore()
       util.useNormalDebounce()
-
 
   addNeverDrop= ->
     @never_drops.add
@@ -80,7 +96,6 @@ define [
     view = $('#fixtures').find('select')
     equal view.length, 0
 
-
   test "changing a <select> will remove all <option>s with that value from other selects", ->
     addNeverDrop.call @
     addNeverDrop.call @
@@ -96,7 +111,6 @@ define [
     ok $('#fixtures').find('option[value='+target_id+']').length, 1
     # target_id is now taken
     ok @never_drops.takenValues.find (nd) -> nd.id == target_id
-
 
   test "changing a <select> will add all <option>s with the previous value to other selects", ->
     addNeverDrop.call @
@@ -130,14 +144,6 @@ define [
     ok $('#fixtures').find('span').length, 1
     ok @never_drops.takenValues.find (nd) -> nd.id == target_id
 
-  test "clicking the remove button, removes a model from the NeverDrop Collection", ->
-    addNeverDrop.call @
-    @clock.tick(101)
-    initial_length = @never_drops.length
-    $('#fixtures').find('.remove_never_drop').trigger('click')
-    @clock.tick(101)
-    equal initial_length - 1, @never_drops.length
-
   test "when there are no availableValues, the add assignment link is not rendered", ->
     addNeverDrop.call @
     addNeverDrop.call @
@@ -155,3 +161,42 @@ define [
     @clock.tick(101)
     text = $('#fixtures').find('.add_never_drop').text()
     equal $.trim(text), 'Add another assignment'
+
+  test 'allows adding never_drop items when canChangeDropRules is true', ->
+    notOk $('#fixtures').find('.add_never_drop').hasClass('disabled')
+    $('#fixtures').find('.add_never_drop').trigger('click')
+    @clock.tick(101)
+    equal @never_drops.length, 1
+
+  test 'allows removing never_drop items when canChangeDropRules is true', ->
+    addNeverDrop.call @
+    @clock.tick(101)
+    $('#fixtures').find('.remove_never_drop').trigger('click')
+    @clock.tick(101)
+    equal @never_drops.length, 0
+
+  test 'disables adding never_drop items when canChangeDropRules is false', ->
+    @view.canChangeDropRules = false
+    @view.render() # force re-render
+    ok $('#fixtures').find('.add_never_drop').hasClass('disabled')
+    $('#fixtures').find('.add_never_drop').trigger('click')
+    @clock.tick(101)
+    equal @never_drops.length, 0
+
+  test 'disables removing never_drop items when canChangeDropRules is false', ->
+    addNeverDrop.call @
+    @view.canChangeDropRules = false
+    @clock.tick(101)
+    ok $('#fixtures').find('.remove_never_drop').hasClass('disabled')
+    $('#fixtures').find('.remove_never_drop').trigger('click')
+    @clock.tick(101)
+    equal @never_drops.length, 1
+
+  test 'disables changing assignment options when canChangeDropRules is false', ->
+    addNeverDrop.call @
+    @view.canChangeDropRules = false
+    @clock.tick(101)
+    ok $('#fixtures').find('select:first').attr('readonly')
+    $('#fixtures').find('select:first').val('2').trigger('change')
+    @clock.tick(101)
+    notOk @never_drops.takenValues.find (nd) -> nd.id == '2'

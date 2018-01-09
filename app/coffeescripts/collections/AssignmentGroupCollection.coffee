@@ -1,15 +1,36 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
   'Backbone'
+  'compiled/collections/PaginatedCollection'
   'compiled/models/AssignmentGroup'
   'underscore'
   'i18n!assignments'
   'compiled/collections/SubmissionCollection'
-], (Backbone, AssignmentGroup, _, I18n, SubmissionCollection) ->
+  'compiled/collections/ModuleCollection'
+], ($, Backbone, PaginatedCollection, AssignmentGroup, _, I18n, SubmissionCollection, ModuleCollection) ->
 
   PER_PAGE_LIMIT = 50
 
-  class AssignmentGroupCollection extends Backbone.Collection
+  class AssignmentGroupCollection extends PaginatedCollection
 
+    loadAll: true
     model: AssignmentGroup
 
     @optionProperty 'course'
@@ -22,9 +43,13 @@ define [
         include: ["assignments"]
 
     loadModuleNames: ->
-      $.get(ENV.URLS.context_modules_url).then (modules) =>
+      modules = new ModuleCollection([], {course_id: @course.id})
+      modules.loadAll = true
+      modules.skip_items = true
+      modules.fetch()
+      modules.on 'fetched:last', =>
         moduleNames = {}
-        for m in modules
+        for m in modules.toJSON()
           moduleNames[m.id] = m.name
 
         for assignment in @assignments()
@@ -40,13 +65,16 @@ define [
 
     comparator: 'position'
 
-    userIsStudent: ->
-      _.include(ENV.current_user_roles, "student")
+    canReadGrades: ->
+      ENV.PERMISSIONS.read_grades
 
     getGrades: ->
-      if @userIsStudent()
+      if @canReadGrades() && ENV.observed_student_ids.length <= 1
         collection = new SubmissionCollection
-        collection.url = => "#{@courseSubmissionsURL}?per_page=#{PER_PAGE_LIMIT}"
+        if ENV.observed_student_ids.length == 1
+          collection.url = => "#{@courseSubmissionsURL}?student_ids[]=#{ENV.observed_student_ids[0]}&per_page=#{PER_PAGE_LIMIT}"
+        else
+          collection.url = => "#{@courseSubmissionsURL}?per_page=#{PER_PAGE_LIMIT}"
         collection.loadAll = true
         collection.on 'fetched:last', =>
           @loadGradesFromSubmissions(collection.toArray())

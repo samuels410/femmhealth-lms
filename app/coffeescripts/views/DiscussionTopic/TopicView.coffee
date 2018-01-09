@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!discussions'
   'jquery'
@@ -10,10 +27,10 @@ define [
   'jst/discussions/_reply_form'
   'compiled/discussions/Reply'
   'compiled/widget/assignmentRubricDialog'
-  'compiled/util/wikiSidebarWithMultipleEditors'
-  'jquery.instructure_misc_helpers' #scrollSidebar
+  'jsx/shared/rce/RceCommandShim'
   'str/htmlEscape'
-], (I18n, $, Backbone, _, DiscussionTopic, EntriesView, EntryView, PublishButtonView, replyTemplate, Reply, assignmentRubricDialog, htmlEscape) ->
+], (I18n, $, Backbone, _, DiscussionTopic, EntriesView, EntryView, PublishButtonView,
+    replyTemplate, Reply, assignmentRubricDialog, RceCommandShim, htmlEscape) ->
 
   class TopicView extends Backbone.View
 
@@ -39,6 +56,7 @@ define [
       '#discussion-toolbar': '$discussionToolbar'
       '.topic-subscribe-button': '$subscribeButton'
       '.topic-unsubscribe-button': '$unsubscribeButton'
+      '.announcement_cog': '$announcementCog'
 
     initialize: ->
       super
@@ -66,7 +84,6 @@ define [
 
     afterRender: ->
       super
-      $.scrollSidebar() if $(document.body).is('.with-right-side')
       assignmentRubricDialog.initTriggers()
       @$el.toggleClass 'side_comment_discussion', !ENV.DISCUSSION.THREADED
       @subscriptionStatusChanged()
@@ -92,7 +109,7 @@ define [
     toggleEditorMode: (event) ->
       event.preventDefault()
       event.stopPropagation()
-      @$textarea.editorBox('toggle')
+      RceCommandShim.send(@$textarea, 'toggle')
       # hide the clicked link, and show the other toggle link.
       # todo: replace .andSelf with .addBack when JQuery is upgraded.
       $(event.currentTarget).siblings('.rte_switch_views_link').andSelf().toggle()
@@ -166,6 +183,7 @@ define [
         modelData = @model.toJSON()
         modelData.showBoxReplyLink = true
         modelData.root = true
+        modelData.isForMainDiscussion = true
         html = replyTemplate modelData
         @$('#discussion_topic').append html
       super
@@ -183,10 +201,12 @@ define [
     markAllAsRead: (event) ->
       event.preventDefault()
       @trigger 'markAllAsRead'
+      @$announcementCog.focus()
 
     markAllAsUnread: (event) ->
       event.preventDefault()
       @trigger 'markAllAsUnread'
+      @$announcementCog.focus()
 
     handleKeyDown: (e) =>
       nodeName = e.target.nodeName.toLowerCase()

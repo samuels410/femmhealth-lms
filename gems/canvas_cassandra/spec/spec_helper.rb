@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2014 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -23,11 +23,17 @@
 #
 # See http://rubydoc.info/gems/rspec-core/RSpec/Core/Configuration
 
+begin
+  require '../../spec/coverage_tool.rb'
+  CoverageTool.start("canvas")
+rescue LoadError => e
+  puts "Error: #{e}"
+end
+
 require "canvas_cassandra"
 require "yaml"
 
 RSpec.configure do |config|
-  config.treat_symbols_as_metadata_keys_with_true_values = true
   config.run_all_when_everything_filtered = true
   config.filter_run :focus
 
@@ -36,4 +42,8 @@ RSpec.configure do |config|
   # the seed, which is printed after each run.
   #     --seed 1234
   config.order = 'random'
+
+  config.expect_with :rspec do |c|
+    c.syntax = :expect
+  end
 end

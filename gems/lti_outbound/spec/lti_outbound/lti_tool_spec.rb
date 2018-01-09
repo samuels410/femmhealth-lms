@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2014 Instructure, Inc.
+# Copyright (C) 2014 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,10 +19,10 @@
 require 'spec_helper'
 
 describe LtiOutbound::LTITool do
-  it_behaves_like 'it has an attribute setter and getter for', :consumer_key
-  it_behaves_like 'it has an attribute setter and getter for', :privacy_level
-  it_behaves_like 'it has an attribute setter and getter for', :name
-  it_behaves_like 'it has an attribute setter and getter for', :shared_secret
+  it_behaves_like 'it has a proc attribute setter and getter for', :consumer_key
+  it_behaves_like 'it has a proc attribute setter and getter for', :privacy_level
+  it_behaves_like 'it has a proc attribute setter and getter for', :name
+  it_behaves_like 'it has a proc attribute setter and getter for', :shared_secret
 
   describe '#include_name?' do
     it 'returns true IFF the privacy level is public or name only' do
@@ -113,6 +113,24 @@ describe LtiOutbound::LTITool do
       subject.set_custom_fields(hash, 'given_resource_type')
       expect(hash).to eq({:a => :b, 'custom_____d__' => :e})
     end
+  end
+
+  describe '#format_lti_params' do
+    it 'ignores the key if the prefix matches' do
+      lti_params = {'custom_my_param' => 123}
+      expect(subject.format_lti_params('custom', lti_params)).to eq lti_params
+    end
+
+    it 'replaces whitespace with "_"' do
+      lti_params = {'custom_my param' => 123}
+      expect(subject.format_lti_params('custom', lti_params).keys).to eq ['custom_my_param']
+    end
+
+    it 'adds the prefix if not present' do
+      lti_params = {'my_param' => 123}
+      expect(subject.format_lti_params('custom', lti_params)).to eq({'custom_my_param' => 123})
+    end
+
   end
 
   describe '#selection_width' do

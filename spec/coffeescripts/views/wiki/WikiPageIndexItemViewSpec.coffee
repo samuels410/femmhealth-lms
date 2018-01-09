@@ -1,9 +1,26 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'compiled/models/WikiPage'
   'compiled/views/wiki/WikiPageIndexItemView'
 ], (WikiPage, WikiPageIndexItemView) ->
-  
-  module 'WikiPageIndexItemView'
+
+  QUnit.module 'WikiPageIndexItemView'
 
   test 'model.view maintained by item view', ->
     model = new WikiPage
@@ -34,13 +51,13 @@ define [
       published: true
     view = new WikiPageIndexItemView
       model: model
-    stub = sinon.stub(model, 'setFrontPage')
+    stub = @stub(model, 'setFrontPage')
 
     view.useAsFrontPage()
     ok stub.calledOnce
 
 
-  module 'WikiPageIndexItemView:JSON'
+  QUnit.module 'WikiPageIndexItemView:JSON'
 
   testRights = (subject, options) ->
     test "#{subject}", ->
@@ -61,6 +78,7 @@ define [
     CAN:
       MANAGE: true
       PUBLISH: true
+      DUPLICATE: true
 
   testRights 'CAN (manage group)',
     contextName: 'groups'
@@ -70,6 +88,7 @@ define [
     CAN:
       MANAGE: true
       PUBLISH: false
+      DUPLICATE: false
 
   testRights 'CAN (read)',
     contextName: 'courses'

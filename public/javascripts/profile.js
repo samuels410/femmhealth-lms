@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011-2013 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,26 +12,25 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-define([
-  'INST' /* INST */,
-  'i18n!profile',
-  'jquery' /* $ */,
-  'compiled/models/Pseudonym',
-  'compiled/util/AvatarWidget',
-  'jquery.ajaxJSON' /* ajaxJSON */,
-  'jquery.instructure_date_and_time' /* parseFromISO, time_field, datetime_field */,
-  'jquery.instructure_forms' /* formSubmit, formErrors, errorBox */,
-  'jqueryui/dialog',
-  'compiled/jquery/fixDialogButtons' /* fix dialog formatting */,
-  'jquery.instructure_misc_plugins' /* confirmDelete, fragmentChange, showIf */,
-  'jquery.loadingImg' /* loadingImage */,
-  'jquery.templateData' /* fillTemplateData */,
-  'jqueryui/sortable' /* /\.sortable/ */,
-  'compiled/jquery.rails_flash_notifications'
-], function(INST, I18n, $, Pseudonym, AvatarWidget) {
+
+import INST from './INST'
+import I18n from 'i18n!profile'
+import $ from 'jquery'
+import Pseudonym from 'compiled/models/Pseudonym'
+import AvatarWidget from 'compiled/util/AvatarWidget'
+import './jquery.ajaxJSON'
+import './jquery.instructure_date_and_time' /* datetimeString, time_field, datetime_field */
+import './jquery.instructure_forms' /* formSubmit, formErrors, errorBox */
+import 'jqueryui/dialog'
+import 'compiled/jquery/fixDialogButtons'
+import './jquery.instructure_misc_plugins' /* confirmDelete, fragmentChange, showIf */
+import './jquery.loadingImg'
+import './jquery.templateData'
+import 'jqueryui/sortable'
+import 'compiled/jquery.rails_flash_notifications'
 
   var $edit_settings_link = $(".edit_settings_link");
 
@@ -44,10 +43,10 @@ define([
     $(this).hide();
     $profile_table.addClass('editing')
       .find(".edit_data_row").show().end()
-      .find(":text:first").focus().select();
+      .find(":focusable:first").focus().select();
   return false;
   });
-  
+
   $profile_table.find(".cancel_button").click(function(event) {
     $edit_settings_link.show();
     $profile_table
@@ -56,7 +55,7 @@ define([
       .find("#change_password_checkbox").attr('checked', false);
     return false;
   });
-  
+
   $profile_table.find("#change_password_checkbox")
     .change(function(event) {
       if(!$(this).attr('checked')) {
@@ -68,7 +67,7 @@ define([
     })
     .attr('checked', false)
     .change();
-    
+
   $update_profile_form
     .attr('method', 'PUT')
     .formSubmit({
@@ -83,7 +82,6 @@ define([
         }
       },
       beforeSubmit: function(data) {
-        $update_profile_form.loadingImage();
       },
       success: function(data) {
         var user = data.user;
@@ -98,7 +96,6 @@ define([
           location.reload();
           return;
         }
-        $update_profile_form.loadingImage('remove');
         if ($default_email_id.length > 0) {
           var default_email = $default_email_id.find('option:selected').text();
           $('.default_email.display_data').text(default_email);
@@ -123,17 +120,20 @@ define([
       $update_profile_form.find(".more_options_row").show();
       return false;
     });
-    
+
   $("#default_email_id").change(function() {
     if($(this).val() == "new") {
       $(".add_email_link:first").click();
     }
   });
-  
+
   $("#unregistered_services li.service").click(function(event) {
     event.preventDefault();
     $("#" + $(this).attr('id') + "_dialog").dialog({
-      width: 350
+      width: 350,
+      open: function(){
+        $(this).dialog("widget").find('a').focus()
+      }
     });
   });
   $(".create_user_service_form").formSubmit({
@@ -174,6 +174,11 @@ define([
     }, function(data) {
     });
   });
+  $("#disable_inbox").change(function() {
+    $.ajaxJSON("/profile/toggle_disable_inbox", 'POST', {'user[disable_inbox]': $(this).prop('checked')}, function(data) {
+    }, function(data) {
+    });
+  });
   $(".delete_pseudonym_link").click(function(event) {
     event.preventDefault();
     $(this).parents(".pseudonym").confirmDelete({
@@ -187,7 +192,13 @@ define([
   });
   $(".delete_key_link").click(function(event) {
     event.preventDefault();
-    $(this).closest(".access_token").confirmDelete({
+    var $key_row = $(this).closest(".access_token");
+    var $focus_row = $key_row.prevAll(":not(.blank)").first();
+    if ($focus_row.length == 0) {
+      $focus_row = $key_row.nextAll(":not(.blank)").first();
+    }
+    var $to_focus = $focus_row.length > 0 ? $(".delete_key_link", $focus_row) : $(".add_access_token_link");
+    $key_row.confirmDelete({
       url: $(this).attr('rel'),
       message: I18n.t('confirms.delete_access_key', "Are you sure you want to delete this access key?"),
       success: function() {
@@ -195,6 +206,7 @@ define([
         if(!$(".access_token:visible").length) {
           $("#no_approved_integrations,#access_tokens_holder").toggle();
         }
+        $to_focus.focus();
       }
     });
   });
@@ -219,8 +231,8 @@ define([
       $("#no_approved_integrations").hide()
       $("#access_tokens_holder").show();
       var $token = $(".access_token.blank:first").clone(true).removeClass('blank');
-      data.created = $.parseFromISO(data.created_at).datetime_formatted || "--";
-      data.expires = $.parseFromISO(data.expires_at).datetime_formatted || I18n.t('token_never_expires', "never");
+      data.created = $.datetimeString(data.created_at) || "--";
+      data.expires = $.datetimeString(data.expires_at) || I18n.t('token_never_expires', "never");
       data.used = "--";
       $token.fillTemplateData({
         data: data,
@@ -237,16 +249,16 @@ define([
   $("#token_details_dialog .regenerate_token").click(function() {
     var result = confirm(I18n.t('confirms.regenerate_token', "Are you sure you want to regenerate this token?  Anything using this token will have to be updated."));
     if(!result) { return; }
-    
+
     var $dialog = $("#token_details_dialog");
     var $token = $dialog.data('token');
     var url = $dialog.data('token_url');
     var $button = $(this);
     $button.text(I18n.t('buttons.regenerating_token', "Regenerating token...")).attr('disabled', true);
     $.ajaxJSON(url, 'PUT', {'access_token[regenerate]': '1'}, function(data) {
-      data.created = $.parseFromISO(data.created_at).datetime_formatted || "--";
-      data.expires = $.parseFromISO(data.expires_at).datetime_formatted || I18n.t('token_never_expires', "never");
-      data.used = $.parseFromISO(data.last_used_at).datetime_formatted || "--";
+      data.created = $.datetimeString(data.created_at) || "--";
+      data.expires = $.datetimeString(data.expires_at) || I18n.t('token_never_expires', "never");
+      data.used = $.datetimeString(data.last_used_at) || "--";
       data.visible_token = data.visible_token || "protected";
       $dialog.fillTemplateData({data: data})
         .find(".full_token_warning").showIf(data.visible_token.length > 10);
@@ -261,7 +273,7 @@ define([
     var $dialog = $("#token_details_dialog");
     var url = $(this).attr('rel');
     $dialog.dialog({
-      width: 600
+      width: 700
     });
     var $token = $(this).parents(".access_token");
     $dialog.data('token', $token);
@@ -275,15 +287,16 @@ define([
       $dialog.find(".loading_message,.error_loading_message").hide().end()
         .find(".results").show().end()
         .find(".full_token_warning").showIf(token.visible_token.length > 10);
+      $dialog.find(".regenerate_token").focus();
     }
     var token = $token.data('token');
     if(token) {
       tokenLoaded(token);
     } else {
       $.ajaxJSON(url, 'GET', {}, function(data) {
-        data.created = $.parseFromISO(data.created_at).datetime_formatted || "--";
-        data.expires = $.parseFromISO(data.expires_at).datetime_formatted || I18n.t('token_never_expires', "never");
-        data.used = $.parseFromISO(data.last_used_at).datetime_formatted || "--";
+        data.created = $.datetimeString(data.created_at) || "--";
+        data.expires = $.datetimeString(data.expires_at) || I18n.t('token_never_expires', "never");
+        data.used = $.datetimeString(data.last_used_at) || "--";
         data.visible_token = data.visible_token || "protected";
         $token.data('token', data);
         tokenLoaded(data);
@@ -292,7 +305,7 @@ define([
           .find(".results,.loading_message").hide();
       });
     }
-    
+
   });
   $(".add_access_token_link").click(function(event) {
     event.preventDefault();
@@ -322,7 +335,7 @@ define([
     $.ajaxJSON($disable_mfa_link.attr('href'), 'DELETE', null, function() {
       $.flashMessage(I18n.t('notices.mfa_disabled', "Multi-factor authentication disabled"));
       $disable_mfa_link.remove();
+      $('#otp_backup_codes_link').remove();
     });
     event.preventDefault();
   });
-});

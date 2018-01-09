@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 - 2013 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -28,16 +28,30 @@ class EnrollmentDateBuilder
     @enrollment_dates = []
   end
 
-  def self.preload(enrollments)
+  def self.preload(enrollments, use_cache=true)
+    raise "call #to_a first before preloading enrollment scope" if enrollments.is_a?(ActiveRecord::Relation)
+    # if enrollments is still a relation, we'll be unnecessarily calling the query multiple times
+    # below with `enrollments.empty?` and `enrollments.first`
     return if enrollments.empty?
-    courses_loaded = CANVAS_RAILS2 ? enrollments.first.loaded_course? : enrollments.first.association(:course).loaded?
-    Enrollment.send(:preload_associations, enrollments, :course) unless courses_loaded
+    preload_state(enrollments)
 
-    to_preload = enrollments.reject { |e| fetch(e) }
+    courses_loaded = enrollments.first.association(:course).loaded?
+    ActiveRecord::Associations::Preloader.new.preload(enrollments, :course) unless courses_loaded
+
+    to_preload = use_cache ? enrollments.reject { |e| fetch(e) } : enrollments
     return if to_preload.empty?
-    Enrollment.send(:preload_associations, to_preload, :course_section)
-    Course.send(:preload_associations, to_preload.map(&:course).uniq, :enrollment_term)
-    to_preload.each { |e| build(e) }
+    ActiveRecord::Associations::Preloader.new.preload(to_preload, :course_section)
+    ActiveRecord::Associations::Preloader.new.preload(to_preload.map(&:course).uniq, :enrollment_term)
+    to_preload.each { |e| build(e, use_cache) }
+  end
+
+  def self.preload_state(enrollments)
+    raise "call #to_a first before preloading enrollment scope" if enrollments.is_a?(ActiveRecord::Relation)
+    return if enrollments.empty?
+
+    unless enrollments.first.association(:enrollment_state).loaded?
+      ActiveRecord::Associations::Preloader.new.preload(enrollments, :enrollment_state)
+    end
   end
 
   def self.cache_key(enrollment)
@@ -45,19 +59,21 @@ class EnrollmentDateBuilder
   end
 
   def self.fetch(enrollment)
-    result = Rails.cache.fetch(cache_key(enrollment))
+    result = RequestCache.cache('enrollment_dates', enrollment) do
+      Rails.cache.read(cache_key(enrollment))
+    end
     enrollment.instance_variable_set(:@enrollment_dates, result)
   end
 
-  def self.build(enrollment)
-    EnrollmentDateBuilder.new(enrollment).build
+  def self.build(enrollment, use_cache=true)
+    EnrollmentDateBuilder.new(enrollment).build(use_cache)
   end
 
   def cache_key
     @cache_key ||= self.class.cache_key(@enrollment)
   end
 
-  def build
+  def build(use_cache=true)
     if enrollment_is_restricted?
       add_enrollment_dates(@enrollment)
     elsif section_is_restricted?
@@ -72,7 +88,11 @@ class EnrollmentDateBuilder
       @enrollment_dates << default_dates
     end
 
-    Rails.cache.write(cache_key, @enrollment_dates)
+    RequestCache.cache('enrollment_dates', self) do
+      @enrollment_dates
+    end
+
+    Rails.cache.write(cache_key, @enrollment_dates) if use_cache
     @enrollment.instance_variable_set(:@enrollment_dates, @enrollment_dates)
   end
 

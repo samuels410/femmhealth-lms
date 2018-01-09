@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 - 2013 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,11 +18,10 @@
 
 class Eportfolio < ActiveRecord::Base
   include Workflow
-  attr_accessible :name, :public, :user
-  
-  has_many :eportfolio_categories, :order => :position, :dependent => :destroy
+  has_many :eportfolio_categories, -> { order(:position) }, dependent: :destroy
   has_many :eportfolio_entries, :dependent => :destroy
-  has_many :attachments, :as => :context
+  has_many :attachments, :as => :context, :inverse_of => :context
+
   belongs_to :user
   validates_presence_of :user_id
   validates_length_of :name, :maximum => maximum_string_length, :allow_blank => true
@@ -31,42 +30,44 @@ class Eportfolio < ActiveRecord::Base
     state :active
     state :deleted
   end
-  
-  alias_method :destroy!, :destroy
+
+  alias_method :destroy_permanently!, :destroy
+
   def destroy
     self.workflow_state = 'deleted'
     self.deleted_at = Time.now.utc
     self.save
   end
-  
-  scope :active, where("eportfolios.workflow_state<>'deleted'")
+
+  scope :active, -> { where("eportfolios.workflow_state<>'deleted'") }
 
   before_create :assign_uuid
   def assign_uuid
-    self.uuid ||= AutoHandle.generate_securish_uuid
+    self.uuid ||= CanvasSlug.generate_securish_uuid
   end
   protected :assign_uuid
 
   set_policy do
     given {|user| user && user.eportfolios_enabled? }
     can :create
-    
+
     given {|user| self.user == user && user.eportfolios_enabled? }
     can :read and can :manage and can :update and can :delete
-    
-    given {|user| self.public }
+
+    given {|_| self.public }
     can :read
-    
-    given {|user, session| session && session[:eportfolio_ids] && session[:eportfolio_ids].include?(self.id) }
+
+    given {|_, session| session && session[:eportfolio_ids] && session[:eportfolio_ids].include?(self.id) }
     can :read
   end
-  
-  def setup_defaults
-    cat = self.eportfolio_categories.create(:name => t(:first_category, "Home")) if self.eportfolio_categories.empty?
+
+  def ensure_defaults
+    cat = self.eportfolio_categories.first
+    cat ||= self.eportfolio_categories.create!(:name => t(:first_category, "Home"))
     if cat && cat.eportfolio_entries.empty?
       entry = cat.eportfolio_entries.build(:eportfolio => self, :name => t('first_entry.title', "Welcome"))
       entry.content = t('first_entry.content', "Nothing entered yet")
-      entry.save
+      entry.save!
     end
     cat
   end

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2014 Instructure, Inc.
+# Copyright (C) 2014 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,18 +21,18 @@ require File.expand_path(File.dirname(__FILE__) + '/../../spec_helper.rb')
 describe Lti::LtiAssignmentCreator do
   it "converts an assignment into an lti_assignment" do
     assignment = Assignment.new()
-    assignment.stubs(:id).returns(123)
+    allow(assignment).to receive(:id).and_return(123)
     assignment.title = 'name'
     assignment.points_possible = 10
     assignment.allowed_extensions = 'csv,txt'
 
     lti_assignment = Lti::LtiAssignmentCreator.new(assignment, 'source_id').convert
-    lti_assignment.should be_a LtiOutbound::LTIAssignment
-    lti_assignment.id.should == 123
-    lti_assignment.source_id.should == 'source_id'
-    lti_assignment.title.should == 'name'
-    lti_assignment.points_possible.should == 10
-    lti_assignment.allowed_extensions.should == ['csv', 'txt']
+    expect(lti_assignment).to be_a LtiOutbound::LTIAssignment
+    expect(lti_assignment.id).to eq 123
+    expect(lti_assignment.source_id).to eq 'source_id'
+    expect(lti_assignment.title).to eq 'name'
+    expect(lti_assignment.points_possible).to eq 10
+    expect(lti_assignment.allowed_extensions).to eq ['csv', 'txt']
   end
 
   it "sets the correct return type for lti assignment launches" do
@@ -40,7 +40,7 @@ describe Lti::LtiAssignmentCreator do
     assignment.submission_types = 'external_tool'
     lti_assignment = Lti::LtiAssignmentCreator.new(assignment).convert
 
-    lti_assignment.return_types.should == ['text', 'url']
+    expect(lti_assignment.return_types).to eq ['url', 'text']
   end
 
   it "correctly maps return types" do
@@ -48,6 +48,6 @@ describe Lti::LtiAssignmentCreator do
     assignment.submission_types = 'online_upload,online_url'
     lti_assignment = Lti::LtiAssignmentCreator.new(assignment).convert
 
-    lti_assignment.return_types.should == ['file', 'url']
+    expect(lti_assignment.return_types).to eq ['file', 'url']
   end
 end

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,23 +18,23 @@
 
 class AssessmentRequest < ActiveRecord::Base
   include Workflow
-  attr_accessible :rubric_assessment, :user, :asset, :assessor_asset, :comments, :rubric_association, :assessor
+  include SendToStream
+
   belongs_to :user
-  belongs_to :asset, :polymorphic => true
-  belongs_to :assessor_asset, :polymorphic => true
+  belongs_to :asset, polymorphic: [:submission]
+  belongs_to :assessor_asset, polymorphic: [:submission, :user], polymorphic_prefix: true
   belongs_to :assessor, :class_name => 'User'
-  belongs_to :submission, :foreign_key => 'asset_id'
   belongs_to :rubric_association
-  has_many :submission_comments
+  has_many :submission_comments, -> { published }
+  has_many :ignores, as: :asset
   belongs_to :rubric_assessment
   validates_presence_of :user_id, :asset_id, :asset_type, :workflow_state
-  validates_length_of :comments, :maximum => maximum_text_length, :allow_nil => true, :allow_blank => true
 
   before_save :infer_uuid
   has_a_broadcast_policy
 
   def infer_uuid
-    self.uuid ||= AutoHandle.generate_securish_uuid
+    self.uuid ||= CanvasSlug.generate_securish_uuid
   end
   protected :infer_uuid
 
@@ -42,12 +42,46 @@ class AssessmentRequest < ActiveRecord::Base
     p.dispatch :rubric_assessment_submission_reminder
     p.to { self.assessor }
     p.whenever { |record|
-      record.assigned? && @send_reminder
+      record.assigned? && @send_reminder && rubric_association
+    }
+
+    p.dispatch :peer_review_invitation
+    p.to { self.assessor }
+    p.whenever { |record|
+      record.assigned? && @send_reminder && !rubric_association
     }
   end
 
-  scope :incomplete, where(:workflow_state => 'assigned')
+  scope :incomplete, -> { where(:workflow_state => 'assigned') }
   scope :for_assessee, lambda { |user_id| where(:user_id => user_id) }
+  scope :for_assessor, lambda { |assessor_id| where(:assessor_id => assessor_id) }
+  scope :for_asset, lambda { |asset_id| where(:asset_id => asset_id)}
+  scope :for_assignment, lambda { |assignment_id| eager_load(:submission).where(:submissions => { :assignment_id => assignment_id})}
+  scope :for_course, lambda { |course_id| eager_load(:submission).where(:submissions => { :context_code => "course_#{course_id}"})}
+  scope :for_context_codes, lambda { |context_codes| eager_load(:submission).where(:submissions => { :context_code =>context_codes })}
+
+  scope :not_ignored_by, lambda { |user, purpose|
+    where("NOT EXISTS (?)",
+          Ignore.where("asset_id=assessment_requests.id").
+              where(asset_type: 'AssessmentRequest', user_id: user, purpose: purpose))
+  }
+
+  set_policy do
+    given {|user, session|
+      self.can_read_assessment_user_name?(user, session)
+    }
+    can :read_assessment_user
+  end
+
+  def can_read_assessment_user_name?(user, session)
+    !self.considered_anonymous? ||
+        self.user_id == user.id ||
+        self.submission.assignment.context.grants_right?(user, session, :view_all_grades)
+  end
+
+  def considered_anonymous?
+    self.submission.assignment.anonymous_peer_reviews?
+  end
 
   def send_reminder!
     @send_reminder = true
@@ -63,6 +97,14 @@ class AssessmentRequest < ActiveRecord::Base
 
   def assessor_name
     self.rubric_assessment.assessor_name rescue ((self.assessor.name rescue nil) || t("#unknown", "Unknown"))
+  end
+
+
+  on_create_send_to_streams do
+    self.assessor
+  end
+  on_update_send_to_streams do
+    self.assessor
   end
 
   workflow do
@@ -84,10 +126,6 @@ class AssessmentRequest < ActiveRecord::Base
 
   def asset_user_name
     self.asset.user.name rescue t("#unknown", "Unknown")
-  end
-
-  def asset_context_name
-    (self.asset.context.name rescue self.asset.assignment.context.name) rescue t("#unknown", "Unknown")
   end
 
   def self.serialization_excludes; [:uuid]; end

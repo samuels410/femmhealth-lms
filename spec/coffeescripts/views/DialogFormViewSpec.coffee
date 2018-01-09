@@ -1,17 +1,34 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
   'Backbone'
   'compiled/views/DialogFormView'
   'helpers/assertions'
   'helpers/util'
   'helpers/jquery.simulate'
-], (Backbone, DialogFormView, assert, util) ->
+], ($, Backbone, DialogFormView, assert, util) ->
 
   # global test vars
   server = null
   view = null
   model = null
   trigger = null
-  closeSpy = null
 
   # helpers
   openDialog = ->
@@ -22,9 +39,9 @@ define [
       'Content-Type': 'application/json'
     }, JSON.stringify(json)]
 
-  module 'DialogFormView',
+  QUnit.module 'DialogFormView',
     setup: ->
-      closeSpy = sinon.spy DialogFormView::, 'close'
+      @closeSpy = @spy DialogFormView::, 'close'
       server = sinon.fakeServer.create()
       model = new Backbone.Model id:1, is_awesome: true
       model.url = '/test'
@@ -44,7 +61,6 @@ define [
     teardown: ->
       trigger.remove()
       server.restore()
-      closeSpy.restore()
       view.remove()
 
   test 'opening and closing the dialog with the trigger', ->
@@ -105,6 +121,8 @@ define [
   test 'closing the dialog calls view#close', ->
     openDialog()
     util.closeDialog()
-    ok closeSpy.called
+    ok @closeSpy.called
 
-
+  test 'focuses close button when opened', ->
+    openDialog()
+    equal document.activeElement, $('.ui-dialog-titlebar-close')[0]

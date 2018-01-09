@@ -1,133 +1,157 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require File.expand_path('../../spec_helper', File.dirname(__FILE__))
+require_dependency "broadcast_policies/quiz_submission_policy"
 
 module BroadcastPolicies
   describe QuizSubmissionPolicy do
 
     let(:course) do
-      mock("Course").tap do |c|
-        c.stubs(:available?).returns(true)
-      end
+      double("Course", available?: true)
     end
     let(:assignment) do
-      mock("Assignment")
+      double("Assignment")
     end
     let(:quiz) do
-      mock("Quizzes::Quiz").tap do |q|
-        q.stubs(:context_id).returns(1)
-        q.stubs(:deleted?).returns(false)
-        q.stubs(:muted?).returns(false)
-        q.stubs(:context).returns(course)
-        q.stubs(:assignment).returns(assignment)
-        q.stubs(:survey?).returns(false)
-      end
+      double("Quizzes::Quiz",
+             context_id: 1,
+             deleted?: false,
+             muted?: false,
+             context: course,
+             assignment: assignment,
+             survey?: false
+      )
     end
     let(:submission) do
-      mock("Submission").tap do |s|
-        s.stubs(:graded_at).returns(Time.now)
-      end
+      double("Submission", graded_at: Time.now)
     end
     let(:enrollment) do
-      mock("Enrollment") do |e|
-        e.stubs(:course_id).returns(1)
-      end
+      double("Enrollment", course_id: 1)
     end
     let(:user) do
-      mock("User").tap do |u|
-        u.stubs(:student_enrollments).returns([enrollment])
-      end
+      double("User", student_enrollments: [enrollment])
     end
     let(:quiz_submission) do
-      mock("QuizSubmission").tap do |qs|
-        qs.stubs(:quiz).returns(quiz)
-        qs.stubs(:submission).returns(submission)
-        qs.stubs(:user).returns(user)
+      double("Quizzes::QuizSubmission",
+             quiz: quiz,
+             submission: submission,
+             user: user,
+             context: course
+      )
+    end
+    let(:policy) do
+      QuizSubmissionPolicy.new(quiz_submission).tap do |p|
+        allow(p).to receive(:user_has_visibility?).and_return(true)
       end
     end
-    let(:policy) { QuizSubmissionPolicy.new(quiz_submission) }
 
     describe '#should_dispatch_submission_graded?' do
       before do
-        quiz_submission.stubs(:changed_state_to).with(:complete).returns true
-        quiz_submission.stubs(:changed_in_state).
-          with(:pending_review, {:fields => [:fudge_points]}).returns false
+        allow(quiz_submission).to receive(:changed_state_to).with(:complete).and_return true
+        allow(quiz_submission).to receive(:changed_in_state).
+          with(:pending_review, {:fields => [:fudge_points]}).and_return false
       end
 
       it 'is true when the dependent inputs are true' do
-        policy.should_dispatch_submission_graded?.should be_true
+        expect(policy.should_dispatch_submission_graded?).to be_truthy
       end
 
       def wont_send_when
         yield
-        policy.should_dispatch_submission_graded?.should be_false
+        expect(policy.should_dispatch_submission_graded?).to be_falsey
       end
 
-      specify { wont_send_when { quiz.stubs(:assignment).returns nil } }
-      specify { wont_send_when { quiz.stubs(:muted?).returns true } }
-      specify { wont_send_when { course.stubs(:available?).returns false} }
-      specify { wont_send_when { quiz.stubs(:deleted?).returns true } }
-      specify { wont_send_when { enrollment.stubs(:course_id).returns 2 } }
+      specify { wont_send_when { allow(quiz).to receive(:assignment).and_return nil } }
+      specify { wont_send_when { allow(quiz).to receive(:muted?).and_return true } }
+      specify { wont_send_when { allow(course).to receive(:available?).and_return false} }
+      specify { wont_send_when { allow(quiz).to receive(:deleted?).and_return true } }
+      specify { wont_send_when { allow(enrollment).to receive(:course_id).and_return 2 } }
+      specify { wont_send_when { allow(quiz_submission).to receive(:user).and_return nil } }
 
       specify do
         wont_send_when do
-          quiz_submission.stubs(:changed_state_to).with(:complete).returns false
+          allow(quiz_submission).to receive(:changed_state_to).with(:complete).and_return false
         end
       end
 
     end
 
     describe '#should_dispatch_submission_needs_grading?' do
-      before { quiz_submission.stubs(:pending_review?).returns false }
+      before { allow(quiz_submission).to receive(:pending_review?).and_return true }
       def wont_send_when
         yield
-        policy.should_dispatch_submission_needs_grading?.should be_false
+        expect(policy.should_dispatch_submission_needs_grading?).to be_falsey
       end
-      it "is true when quiz is pending review" do
-        quiz_submission.stubs(:pending_review?).returns true
-        policy.should_dispatch_submission_needs_grading?.should == true
+
+      it "is true when quiz submission is pending review" do
+        expect(policy.should_dispatch_submission_needs_grading?).to eq true
       end
-      specify { wont_send_when { quiz.stubs(:assignment).returns nil } }
-      specify { wont_send_when { quiz.stubs(:survey?).returns true} }
-      specify { wont_send_when { quiz.stubs(:muted?).returns true } }
-      specify { wont_send_when { course.stubs(:available?).returns false} }
-      specify { wont_send_when { quiz.stubs(:deleted?).returns true } }
-      specify { wont_send_when { submission.stubs(:graded_at).returns nil }}
-      specify { wont_send_when { submission.stubs(:pending_review?).returns false }}
+
+      it "is true when quiz is muted" do
+        allow(quiz_submission).to receive(:pending_review?).and_return true
+        allow(quiz).to receive(:muted?).and_return true
+        expect(policy.should_dispatch_submission_needs_grading?).to eq true
+      end
+
+      specify { wont_send_when { allow(quiz_submission).to receive(:pending_review?).and_return false } }
+      specify { wont_send_when { allow(quiz).to receive(:assignment).and_return nil } }
+      specify { wont_send_when { allow(quiz).to receive(:survey?).and_return true} }
+      specify { wont_send_when { allow(course).to receive(:available?).and_return false} }
+      specify { wont_send_when { allow(quiz).to receive(:deleted?).and_return true } }
+
+      specify { wont_send_when { allow(policy).to receive(:user_has_visibility?).and_return(false) }}
     end
 
 
     describe '#should_dispatch_submission_grade_changed?' do
       def wont_send_when
         yield
-        policy.should_dispatch_submission_grade_changed?.should be_false
+        expect(policy.should_dispatch_submission_grade_changed?).to be_falsey
       end
 
       before do
-        quiz_submission.stubs(:changed_in_state).
-          with(:complete, :fields => [:score]).returns true
+        allow(quiz_submission).to receive(:changed_in_state).
+          with(:complete, :fields => [:score]).and_return true
       end
 
       it 'is true when the necessary inputs are true' do
-        policy.should_dispatch_submission_grade_changed?.should be_true
+        expect(policy.should_dispatch_submission_grade_changed?).to be_truthy
       end
 
-      specify { wont_send_when { quiz.stubs(:assignment).returns nil } }
-      specify { wont_send_when { quiz.stubs(:muted?).returns true } }
-      specify { wont_send_when { course.stubs(:available?).returns false} }
-      specify { wont_send_when { quiz.stubs(:deleted?).returns true } }
-      specify { wont_send_when { submission.stubs(:graded_at).returns nil }}
+      specify { wont_send_when { allow(quiz).to receive(:assignment).and_return nil } }
+      specify { wont_send_when { allow(quiz).to receive(:muted?).and_return true } }
+      specify { wont_send_when { allow(course).to receive(:available?).and_return false} }
+      specify { wont_send_when { allow(quiz).to receive(:deleted?).and_return true } }
+      specify { wont_send_when { allow(submission).to receive(:graded_at).and_return nil }}
+      specify { wont_send_when { allow(policy).to receive(:user_has_visibility?).and_return(false) }}
 
       specify do
         wont_send_when do
-          quiz_submission.stubs(:changed_in_state).
-            with(:complete, :fields => [:score]).returns false
+          allow(quiz_submission).to receive(:changed_in_state).
+            with(:complete, :fields => [:score]).and_return false
         end
       end
     end
 
     describe '#when there is no quiz submission' do
       let(:policy) { QuizSubmissionPolicy.new(nil) }
-      specify { policy.should_dispatch_submission_graded?.should be_false }
-      specify { policy.should_dispatch_submission_grade_changed?.should be_false }
+      specify { expect(policy.should_dispatch_submission_graded?).to be_falsey }
+      specify { expect(policy.should_dispatch_submission_grade_changed?).to be_falsey }
     end
 
   end

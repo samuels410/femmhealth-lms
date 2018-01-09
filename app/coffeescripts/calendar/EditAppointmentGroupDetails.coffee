@@ -1,7 +1,27 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'underscore'
+  'compiled/util/fcUtil'
   'i18n!EditAppointmentGroupDetails'
+  'str/htmlEscape'
+  'compiled/calendar/commonEventFactory'
   'compiled/calendar/TimeBlockList'
   'jst/calendar/editAppointmentGroup'
   'jst/calendar/genericSelect'
@@ -11,19 +31,31 @@ define [
   'jquery.ajaxJSON'
   'jquery.disableWhileLoading'
   'jquery.instructure_forms'
-], ($, _, I18n, TimeBlockList, editAppointmentGroupTemplate, genericSelectTemplate, sectionCheckboxesTemplate, ContextSelector, preventDefault) ->
+], ($, _, fcUtil, I18n, htmlEscape, commonEventFactory, TimeBlockList, editAppointmentGroupTemplate, genericSelectTemplate, sectionCheckboxesTemplate, ContextSelector, preventDefault) ->
 
   class EditAppointmentGroupDetails
-    constructor: (selector, @apptGroup, @contexts, @closeCB) ->
+    constructor: (selector, @apptGroup, @contexts, @closeCB, @event, @useBetterScheduler) ->
       @currentContextInfo = null
+      @appointment_group = _.extend(
+        {use_group_signup: @apptGroup.participant_type is 'Group'}
+          @apptGroup
+      )
 
       $(selector).html editAppointmentGroupTemplate({
+        better_scheduler: @useBetterScheduler
         title: @apptGroup.title
         contexts: @contexts
-        appointment_group: _.extend(
-          {use_group_signup: @apptGroup.participant_type is 'Group'}
-          @apptGroup
-        )
+        appointment_group: @appointment_group,
+        num_minutes: '<input type="number" pattern="[0-9]" name="duration" value="30" style="width: 40px"
+              aria-label="' + htmlEscape(I18n.t('Minutes per slot')) + '" />'
+        num_participants: '<input type="number" pattern="[0-9]" name="participants_per_appointment"
+                value="' + htmlEscape(@appointment_group.participants_per_appointment) + '" min="1"
+                style="width: 40px;"
+                aria-label="' + htmlEscape(I18n.t('Max users/groups per appointment')) + '" />'
+        num_appointments: '<input type="number" pattern="[0-9]" name="max_appointments_per_participant"
+              value="' + htmlEscape(@appointment_group.max_appointments_per_participant) +  '" min="1"
+              style="width: 40px"
+              aria-label="' + htmlEscape(I18n.t('Maximum number of appointments a participant can attend')) + '" />'
       })
 
       @contextsHash = {}
@@ -54,8 +86,9 @@ define [
 
       @form.find('.ag_contexts_selector').click preventDefault @toggleContextsMenu
 
-      timeBlocks = ([appt.start, appt.end, true] for appt in @apptGroup.appointmentEvents || [] )
-      @timeBlockList = new TimeBlockList(@form.find(".time-block-list-body"), @form.find(".splitter"), timeBlocks)
+      # make sure this is the spot
+      timeBlocks = ([fcUtil.wrap(appt.start_at), fcUtil.wrap(appt.end_at), true] for appt in @apptGroup.appointments || [] )
+      @timeBlockList = new TimeBlockList(@form.find(".time-block-list-body"), @form.find(".splitter"), timeBlocks, { date: @event && @event.date })
 
       @form.find('[name="slot_duration"]').change (e) =>
         if @form.find('[name="autosplit_option"]').is(":checked")
@@ -95,6 +128,13 @@ define [
 
       if @apptGroup.workflow_state == 'active'
         @form.find("#appointment-blocks-active-button").attr('disabled', true).prop('checked', true)
+
+      @form.submit @saveClick
+      if @useBetterScheduler
+        @form.find('.cancel_btn').click @cancel
+      else
+        @form.find('.save_without_publishing_link').click @saveWithoutPublishingClick
+
 
     creating: ->
       !@editing()
@@ -139,6 +179,10 @@ define [
       jsEvent.preventDefault()
       @save(false)
 
+    cancel: (e) =>
+      e.preventDefault()
+      @closeCB(false)
+
     saveClick: (jsEvent) =>
       jsEvent.preventDefault()
       @save(true)
@@ -166,8 +210,8 @@ define [
       return false unless @timeBlockList.validate()
       for range in @timeBlockList.blocks()
         params['appointment_group[new_appointments]'].push([
-          $.dateToISO8601UTC($.unfudgeDateForProfileTimezone(range[0])),
-          $.dateToISO8601UTC($.unfudgeDateForProfileTimezone(range[1]))
+          $.unfudgeDateForProfileTimezone(range[0]).toISOString(),
+          $.unfudgeDateForProfileTimezone(range[1]).toISOString()
         ])
 
       if data.per_slot_option is '1'
@@ -206,13 +250,19 @@ define [
         # TODO: Provide UI for specifying this
         params['appointment_group[min_appointments_per_participant]'] = 1
 
-      onSuccess = => @closeCB(true)
+      onSuccess = (data) =>
+        for eventData in (data.new_appointments || [])
+          event = commonEventFactory(eventData, @contexts)
+          $.publish('CommonEvent/eventSaved', event)
+        @closeCB(true)
       onError = =>
 
       method = if @editing() then 'PUT' else 'POST'
 
       deferred = $.ajaxJSON @form.attr('action'), method, params, onSuccess, onError
       @form.disableWhileLoading(deferred)
+
+    activate: () => {}
 
     contextsChanged: (contextCodes, sectionCodes) =>
       # dropdown text
@@ -223,7 +273,7 @@ define [
           contextCode = contextCodes[0]
           text = @contextsHash[contextCode].name
           if contextCodes.length > 1
-            text += I18n.t('and_n_contexts', ' and %{n} others', n: contextCodes.length - 1)
+            text += " " + I18n.t('and_n_contexts', 'and %{n} others', n: I18n.n(contextCodes.length - 1))
           @form.find('.ag_contexts_selector').text(text)
         if sectionCodes.length > 0
           sectionCode = sectionCodes[0]
@@ -234,7 +284,7 @@ define [
                      .value()
           text = section.name
           if sectionCodes.length > 1
-            text += I18n.t('and_n_sectionCodes', ' and %{n} others', n: sectionCodes.length - 1)
+            text += " " + I18n.t('and_n_sectionCodes', 'and %{n} others', n: I18n.n(sectionCodes.length - 1))
           @form.find('.ag_contexts_selector').text(text)
 
       # group selector

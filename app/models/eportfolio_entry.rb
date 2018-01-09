@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,38 +16,43 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+require 'atom'
+require 'sanitize'
+
 class EportfolioEntry < ActiveRecord::Base
-  attr_accessible :eportfolio, :eportfolio_category, :name, :artifact_type, :attachment, :allow_comments, :show_comments, :url
   attr_readonly :eportfolio_id, :eportfolio_category_id
-  belongs_to :eportfolio
+  belongs_to :eportfolio, touch: true
   belongs_to :eportfolio_category
+
   acts_as_list :scope => :eportfolio_category
   before_save :infer_unique_slug
   before_save :infer_comment_visibility
   after_save :update_portfolio
   validates_presence_of :eportfolio_id
   validates_presence_of :eportfolio_category_id
-  has_many :page_comments, :as => :page, :include => :user, :order => 'page_comments.created_at DESC'
-  
+  validates_length_of :name, :maximum => maximum_string_length, :allow_nil => false, :allow_blank => true
+  validates_length_of :slug, :maximum => maximum_string_length, :allow_nil => false, :allow_blank => true
+  has_many :page_comments, -> { preload(:user).order('page_comments.created_at DESC') }, as: :page
+
 
   serialize :content
 
   set_policy do
-    given {|user, session| user && self.allow_comments }
+    given {|user| user && self.allow_comments }
     can :comment
   end
-  
+
   def infer_comment_visibility
     self.show_comments = false if !self.allow_comments
     true
   end
   protected :infer_comment_visibility
-  
+
   def update_portfolio
     self.eportfolio.save!
   end
   protected :update_portfolio
-  
+
   def content_sections
     (self.content.is_a?(String) && Array(self.content) || self.content || []).map do |section|
       if section.is_a?(Hash)
@@ -57,7 +62,7 @@ class EportfolioEntry < ActiveRecord::Base
       end
     end
   end
-  
+
   def submission_ids
     res = []
     content_sections.each do |section|
@@ -65,26 +70,26 @@ class EportfolioEntry < ActiveRecord::Base
     end
     res
   end
-  
+
   def full_slug
     (self.eportfolio_category.slug rescue "") + "_" + self.slug
   end
-  
+
   def attachments
     res = []
     content_sections.each do |section|
       if section["attachment_id"].present? && section["section_type"] == "attachment"
-        res << (self.eportfolio.user.all_attachments.find_by_id(section["attachment_id"]) rescue nil)
+        res << (self.eportfolio.user.all_attachments.where(id: section["attachment_id"]).first rescue nil)
       end
     end
     res.compact
   end
-  
+
   def submissions
     res = []
     content_sections.each do |section|
       if section["submission_id"].present? && section["section_type"] == "submission"
-        res << (self.eportfolio.user.submissions.find_by_id(section["submission_id"]) rescue nil)
+        res << (self.eportfolio.user.submissions.where(id: section["submission_id"]).first rescue nil)
       end
     end
     res.compact
@@ -101,23 +106,23 @@ class EportfolioEntry < ActiveRecord::Base
         new_obj[:content] = Sanitize.clean(obj[:content] || '', config).strip
         new_obj = nil if new_obj[:content].empty?
       elsif obj[:section_type] == 'submission'
-        submission = eportfolio.user.submissions.find_by_id(obj[:submission_id]) if obj[:submission_id].present?
+        submission = eportfolio.user.submissions.where(id: obj[:submission_id]).exists? if obj[:submission_id].present?
         if submission
-          new_obj[:submission_id] = submission.id
+          new_obj[:submission_id] = obj[:submission_id].to_i
         else
           new_obj = nil
         end
       elsif obj[:section_type] == 'attachment'
-        attachment = eportfolio.user.attachments.active.find_by_id(obj[:attachment_id]) if obj[:attachment_id].present?
+        attachment = eportfolio.user.attachments.active.where(id: obj[:attachment_id]).exists? if obj[:attachment_id].present?
         if attachment
-          new_obj[:attachment_id] = attachment.id
+          new_obj[:attachment_id] = obj[:attachment_id].to_i
         else
           new_obj = nil
         end
       else
         new_obj = nil
       end
-      
+
       if new_obj
           self.content << new_obj
       end
@@ -125,11 +130,11 @@ class EportfolioEntry < ActiveRecord::Base
     self.content << t(:default_content, "No Content Added Yet") if self.content.empty?
   end
 
-  
+
   def category_slug
     self.eportfolio_category.slug rescue self.eportfolio_category_id
   end
-  
+
   def infer_unique_slug
     pages = self.eportfolio_category.eportfolio_entries rescue []
     self.name ||= t(:default_name, "Page Name")

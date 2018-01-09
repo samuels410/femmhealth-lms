@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'Backbone'
   'compiled/models/AssignmentGroup'
@@ -8,8 +25,9 @@ define [
   'compiled/views/assignments/ToggleShowByView'
   'jquery'
   'helpers/fakeENV'
+  'helpers/assertions'
   'helpers/jquery.simulate'
-], (Backbone, AssignmentGroup, Course, AssignmentGroupCollection, AssignmentGroupListView, IndexView, ToggleShowByView, $, fakeENV) ->
+], (Backbone, AssignmentGroup, Course, AssignmentGroupCollection, AssignmentGroupListView, IndexView, ToggleShowByView, $, fakeENV, assertions) ->
 
 
   fixtures = $('#fixtures')
@@ -49,16 +67,25 @@ define [
 
     app.render()
 
-  module 'assignmentIndex',
+  QUnit.module 'assignmentIndex',
     setup: ->
-      fakeENV.setup(PERMISSIONS: {manage: true})
-      @enable_spy = sinon.spy(IndexView.prototype, 'enableSearch')
+      fakeENV.setup({
+        PERMISSIONS: {manage: true},
+        URLS: {
+          assignment_sort_base_url : "test"
+        }
+      })
+      @enable_spy = @spy(IndexView.prototype, 'enableSearch')
 
     teardown: ->
       fakeENV.teardown()
       assignmentGroups = null
       fixtures.empty()
-      @enable_spy.restore()
+
+  test 'should be accessible', (assert) ->
+    view = assignmentIndex()
+    done = assert.async()
+    assertions.isAccessible view, done, {'a11yReport': true}
 
   test 'should filter by search term', ->
 
@@ -103,10 +130,29 @@ define [
     ok view.$("#assignment_1 .modules").text().match(/One\s+Two/)
     ok view.$("#assignment_2 .modules").text().match(/Three Module/)
 
+  test "should show 'Add Quiz/Test' button if quiz lti is enabled", ->
+    ENV.PERMISSIONS.manage_assignments = true
+    ENV.QUIZ_LTI_ENABLED = true
+    view = assignmentIndex()
+    $button = view.$('.new_quiz_lti')
+    equal $button.length, 1
+    ok /\?quiz_lti$/.test $button.attr('href')
 
-  module 'student index view',
+  test "should not show 'Add Quiz/Test' button if quiz lti is not enabled", ->
+    ENV.PERMISSIONS.manage_assignments = true
+    ENV.QUIZ_LTI_ENABLED = false
+    view = assignmentIndex()
+    equal $('.new_quiz_lti').length, 0
+
+
+  QUnit.module 'student index view',
     setup: ->
-      fakeENV.setup(PERMISSIONS: {manage: false})
+      fakeENV.setup(
+        PERMISSIONS: {manage: false},
+        URLS: {
+          assignment_sort_base_url : "test"
+        }
+      )
 
     teardown: ->
       fakeENV.teardown()
@@ -114,10 +160,10 @@ define [
       fixtures.empty()
 
   test 'should clear search on toggle', ->
-    clear_spy = sinon.spy(IndexView.prototype, 'clearSearch')
+    clear_spy = @spy(IndexView.prototype, 'clearSearch')
     view = assignmentIndex()
     view.$('#search_term').val('something')
-    view.showByView.toggleShowBy({preventDefault: -> })
+    view.showByView.initializeCache()
+    view.showByView.toggleShowBy('date')
     equal view.$('#search_term').val(), ""
     ok clear_spy.called
-    clear_spy.restore()

@@ -1,28 +1,40 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require 'spec_helper'
 
 describe Canvas::APISerializer do
 
-  attr_reader :serializer, :options
-
   let(:controller) { ActiveModel::FakeController.new }
-
-  before do
-    @options = {scope: {}, controller: controller}
-    @serializer = Canvas::APISerializer.new({}, options)
-  end
+  let(:options) { { scope: {}, controller: controller } }
+  let(:serializer) { Canvas::APISerializer.new({}, options) }
 
   it "aliases user to options[:scope]" do
-    serializer.user.should == options[:scope]
+    expect(serializer.user).to eq options[:scope]
   end
 
   it "aliases current_user to user" do
-    serializer.user.should == serializer.current_user
+    expect(serializer.user).to eq serializer.current_user
   end
 
   [:stringify_json_ids?, :accepts_jsonapi?, :session, :context].each do |method|
 
     it "delegates #{method} to controller" do
-      controller.send(method).should == serializer.send(method)
+      expect(controller.send(method)).to eq serializer.send(method)
     end
   end
 
@@ -30,7 +42,7 @@ describe Canvas::APISerializer do
     class FooSerializer < Canvas::APISerializer
     end
 
-    FooSerializer.new({}, options).foo.should == {}
+    expect(FooSerializer.new({}, options).foo).to eq({})
 
     Object.send(:remove_const, :FooSerializer)
   end
@@ -58,21 +70,21 @@ describe Canvas::APISerializer do
       con = ActiveModel::FakeController.new(accepts_jsonapi: false, stringify_json_ids: false)
       object = Foo.new(1, 'Alice')
       serializer = FooSerializer.new(object, {root: nil, controller: con})
-      serializer.expects(:stringify_ids?).returns false
-      serializer.as_json(root: nil).should == {
+      expect(serializer).to receive(:stringify_ids?).and_return false
+      expect(serializer.as_json(root: nil)).to eq({
         id: 1,
         name: 'Alice'
-      }
+      })
     end
 
     it "stringifies ids if jsonapi or stringids requested" do
       con = ActiveModel::FakeController.new(accepts_jsonapi: true, stringify_json_ids: true)
       object = Foo.new(1, 'Alice')
       serializer = FooSerializer.new(object, {root: nil, controller: con})
-      serializer.as_json(root: nil).should == {
+      expect(serializer.as_json(root: nil)).to eq({
         id: '1',
         name: 'Alice'
-      }
+      })
     end
 
     it "uses urls for embed: :ids, include: false" do
@@ -81,11 +93,11 @@ describe Canvas::APISerializer do
         has_one :bar, embed: :ids
       end
       object = Foo.new(1, 'Bob')
-      object.expects(:bar).returns stub()
+      expect(object).to receive(:bar).and_return double()
       url = "http://example.com/api/v1/bar/1"
       serializer = FooSerializer.new(object, {root: nil, controller: con})
-      serializer.expects(:bar_url).returns(url)
-      serializer.as_json(root: nil)['links']['bar'].should == url
+      expect(serializer).to receive(:bar_url).and_return(url)
+      expect(serializer.as_json(root: nil)['links']['bar']).to eq url
     end
 
     it "uses ids for embed: :ids, embed_in_root: true" do
@@ -97,12 +109,87 @@ describe Canvas::APISerializer do
         attributes :id
       end
       object = Foo.new(1, 'Bob')
-      object.expects(:bar).returns Foo.new(1, 'Alice')
+      expect(object).to receive(:bar).and_return Foo.new(1, 'Alice')
       url = "http://example.com/api/v1/bar/1"
       serializer = FooSerializer.new(object, {root: nil, controller: con})
-      serializer.as_json(root: nil)['links']['bar'].should == "1"
+      expect(serializer.as_json(root: nil)['links']['bar']).to eq "1"
       Object.send(:remove_const, :BarSerializer)
     end
-  end
 
+    context 'embedding objects in root' do
+      before do
+        Bar = Struct.new(:id, :name) do
+          def read_attribute_for_serialization(attr)
+            send(attr)
+          end
+        end
+
+        class BarSerializer < Canvas::APISerializer
+          attributes :id, :name
+        end
+      end
+
+      after do
+        Object.send(:remove_const, :Bar)
+        Object.send(:remove_const, :BarSerializer)
+      end
+
+      let :object do
+        Foo.new(1, 'Bob').tap do |object|
+          expect(object).to receive(:bar).and_return Bar.new(1, 'Alice')
+        end
+      end
+
+      let :controller do
+        ActiveModel::FakeController.new({
+          accepts_jsonapi: true,
+          stringify_json_ids: true
+        })
+      end
+
+      subject do
+        FooSerializer.new(object, {
+          controller: controller,
+          root: nil
+        })
+      end
+
+      it "uses objects for embed: :object, embed_in_root: true" do
+        class FooSerializer
+          has_one :bar, embed: :object, embed_in_root: true
+        end
+
+        subject.as_json(root: nil).stringify_keys.tap do |json|
+          expect(json['links']).not_to be_present
+          expect(json['bar']).to be_present
+          expect(json['bar']).to eq [{ id: 1, name: 'Alice' }]
+        end
+      end
+
+      it "uses objects for embed: :object, embed_in_root: true and uses a custom key" do
+        class FooSerializer
+          has_one :bar, embed: :object, embed_in_root: true, root: 'adooken'
+        end
+
+        subject.as_json(root: nil).stringify_keys.tap do |json|
+          expect(json['links']).not_to be_present
+          expect(json['bar']).not_to be_present
+          expect(json['adooken']).to be_present
+          expect(json['adooken']).to eq [{ id: 1, name: 'Alice' }]
+        end
+      end
+
+      it "respects the :wrap_in_array custom option" do
+        class FooSerializer
+          has_one :bar, embed: :object, embed_in_root: true, wrap_in_array: false
+        end
+
+        subject.as_json(root: nil).stringify_keys.tap do |json|
+          expect(json['links']).not_to be_present
+          expect(json['bar']).to be_present
+          expect(json['bar']).to eq({ id: 1, name: 'Alice' })
+        end
+      end
+    end
+  end
 end

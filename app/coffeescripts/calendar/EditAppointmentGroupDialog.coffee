@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'i18n!calendar'
@@ -29,16 +46,17 @@ define [
       buttons = if @apptGroup.workflow_state == 'active'
         [
           text: I18n.t 'save_changes', 'Save Changes'
-          class: 'btn-primary'
+          class: 'Button Button--primary'
           click: @appointmentGroupsForm.saveClick
         ]
       else
         [
           text: I18n.t 'save', 'Save'
+          class: 'Button'
           click: @appointmentGroupsForm.saveWithoutPublishingClick
         ,
           text: I18n.t 'save_and_publish', 'Save & Publish'
-          class: 'btn-primary'
+          class: 'Button Button--primary'
           click: @appointmentGroupsForm.saveClick
         ]
 

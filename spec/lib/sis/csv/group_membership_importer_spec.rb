@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -41,12 +41,13 @@ describe SIS::CSV::GroupMembershipImporter do
       ",U001,accepted",
       "G001,,accepted",
       "G001,U001,bogus")
-    GroupMembership.count.should == 0
-    importer.warnings.map(&:last).should ==
+    expect(GroupMembership.count).to eq 0
+    expect(importer.warnings.map(&:last)).to eq(
       ["No group_id given for a group user",
        "No user_id given for a group user",
        "Improper status \"bogus\" for a group user"]
-    importer.errors.should == []
+    )
+    expect(importer.errors).to eq []
   end
 
   it "should add users to groups" do
@@ -54,19 +55,19 @@ describe SIS::CSV::GroupMembershipImporter do
       "group_id,user_id,status",
       "G001,U001,accepted",
       "G001,U003,deleted")
-    ms = GroupMembership.order(:id).all
-    ms.map(&:user_id).should == [@user1.id, @user3.id]
-    ms.map(&:group_id).should == [@group.id, @group.id]
-    ms.map(&:workflow_state).should == %w(accepted deleted)
+    ms = GroupMembership.order(:id).to_a
+    expect(ms.map(&:user_id)).to eq [@user1.id, @user3.id]
+    expect(ms.map(&:group_id)).to eq [@group.id, @group.id]
+    expect(ms.map(&:workflow_state)).to eq %w(accepted deleted)
 
     process_csv_data_cleanly(
       "group_id,user_id,status",
       "G001,U001,deleted",
       "G001,U003,deleted")
-    ms = GroupMembership.order(:id).all
-    ms.map(&:user_id).should == [@user1.id, @user3.id]
-    ms.map(&:group_id).should == [@group.id, @group.id]
-    ms.map(&:workflow_state).should == %w(deleted deleted)
+    ms = GroupMembership.order(:id).to_a
+    expect(ms.map(&:user_id)).to eq [@user1.id, @user3.id]
+    expect(ms.map(&:group_id)).to eq [@group.id, @group.id]
+    expect(ms.map(&:workflow_state)).to eq %w(deleted deleted)
   end
 
 end

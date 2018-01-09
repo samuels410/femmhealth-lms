@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -22,7 +22,7 @@ require File.expand_path(File.dirname(__FILE__) + '/../views_helper')
 describe "/gradebooks/grade_summary_list" do
   it "should render" do
     render "gradebooks/grade_summary_list"
-    response.should_not be_nil
+    expect(response).not_to be_nil
   end
 end
 

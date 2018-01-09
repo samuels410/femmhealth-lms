@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,22 +16,63 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-def generate_message(notification_name, path_type, asset, options = {})
-  raise "options must be a hash!" unless options.is_a? Hash
-  @notification = Notification.find_by_name(notification_name.to_s) || Notification.create!(:name => notification_name.to_s)
-  user = options[:user]
-  asset_context = options[:asset_context]
-  data = options[:data] || {}
-  user ||= User.create!(:name => "some user")
-  
-  @cc = user.communication_channels.create!(:path_type => path_type.to_s, :path => 'generate_message@example.com')
-  @message = Message.new(:notification => @notification, :context => asset, :user => user, :communication_channel => @cc, :asset_context => asset_context, :data => data)
-  @message.delayed_messages = []
-  @message.parse!(path_type.to_s)
-  @message.body.should_not be_nil
-  if path_type == :email
-    @message.subject.should_not be_nil
-    @message.url.should_not be_nil
+module MessagesCommon
+  def generate_message(notification_name, path_type, *)
+    message = super
+    expect(message.body).not_to be_nil
+    if path_type == :email
+      expect(message.subject).not_to be_nil
+      expect(message.url).not_to be_nil
+    elsif path_type == :twitter
+      expect(message.main_link).to be_present
+    end
+    message
   end
-  @message
+end
+
+shared_examples_for "a message" do
+  include MessagesCommon
+
+  def message_data_with_default
+    if self.respond_to?(:message_data)
+      message_data
+    else
+      {}
+    end
+  end
+
+  context ".email" do
+    let(:path_type) { :email }
+    it "should render" do
+      generate_message(notification_name, path_type, asset, message_data_with_default)
+    end
+  end
+
+  context ".sms" do
+    let(:path_type) { :sms }
+    it "should render" do
+      generate_message(notification_name, path_type, asset, message_data_with_default)
+    end
+  end
+
+  context ".summary" do
+    let(:path_type) { :summary }
+    it "should render" do
+      generate_message(notification_name, path_type, asset, message_data_with_default)
+    end
+  end
+
+  context ".twitter" do
+    let(:path_type) { :twitter }
+    it "should render" do
+      generate_message(notification_name, path_type, asset, message_data_with_default)
+    end
+  end
+
+  context ".push" do
+    let(:path_type) { :push }
+    it "should render" do
+      generate_message(notification_name, path_type, asset, message_data_with_default)
+    end
+  end
 end

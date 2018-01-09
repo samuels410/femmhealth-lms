@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,23 +19,44 @@
 class AccountUser < ActiveRecord::Base
   belongs_to :account
   belongs_to :user
-  has_many :role_overrides, :as => :context
+  belongs_to :role
+  include Role::AssociationHelper
+
+  has_many :role_overrides, :as => :context, :inverse_of => :context
   has_a_broadcast_policy
-  before_save :infer_defaults
+  before_validation :infer_defaults
   after_save :touch_user
   after_destroy :touch_user
   after_save :update_account_associations_if_changed
   after_destroy :update_account_associations_later
-  attr_accessible :account, :user, :membership_type
 
-  validates_presence_of :account_id, :user_id, :membership_type
+  validate :valid_role?
+
+  validates_presence_of :account_id, :user_id, :role_id
 
   alias_method :context, :account
 
-  BASE_ROLE_NAME = 'AccountMembership'
+  scope :active, -> { where.not(workflow_state: 'deleted') }
+
+  include Workflow
+  workflow do
+    state :active
+
+    state :deleted do
+      event :reactivate, transitions_to: :active
+    end
+  end
+
+  alias_method :destroy_permanently!, :destroy
+  def destroy
+    return if self.new_record?
+    self.workflow_state = 'deleted'
+    self.save!
+  end
 
   def update_account_associations_if_changed
-    if (self.account_id_changed? || self.user_id_changed?)
+    being_deleted = self.workflow_state == 'deleted' && self.workflow_state_was != 'deleted'
+    if (self.account_id_changed? || self.user_id_changed?) || being_deleted
       if self.new_record?
         return if %w{creation_pending deleted}.include?(self.user.workflow_state)
         account_chain = self.account.account_chain
@@ -53,33 +74,50 @@ class AccountUser < ActiveRecord::Base
   end
 
   def infer_defaults
-    self.membership_type ||= 'AccountAdmin'
+    self.role ||= Role.get_built_in_role('AccountAdmin')
   end
-  
+
+  def valid_role?
+    return true if role.built_in?
+
+    unless role.account_role?
+      self.errors.add(:role_id, "is not a valid account role")
+    end
+
+    unless self.account.valid_role?(role)
+      self.errors.add(:role_id, "is not an available role for this account")
+    end
+  end
+
   set_broadcast_policy do |p|
     p.dispatch :new_account_user
     p.to {|record| record.account.users}
     p.whenever {|record| record.just_created }
-    
+
     p.dispatch :account_user_registration
     p.to {|record| record.user }
     p.whenever {|record| @account_user_registration }
-    
+
     p.dispatch :account_user_notification
     p.to {|record| record.user }
     p.whenever {|record| @account_user_notification }
   end
-  
-  def readable_type
-    AccountUser.readable_type(self.membership_type)
+
+  set_policy do
+    given { |user| self.account.grants_right?(user, :manage_account_memberships) && is_subset_of?(user) }
+    can :create and can :destroy
   end
-  
+
+  def readable_type
+    AccountUser.readable_type(self.role.name)
+  end
+
   def account_user_registration!
     @account_user_registration = true
     self.save!
     @account_user_registration = false
   end
-  
+
   def account_user_notification!
     @account_user_notification = true
     self.save!
@@ -88,7 +126,7 @@ class AccountUser < ActiveRecord::Base
 
   def enabled_for?(context, action)
     @permission_lookup ||= {}
-    @permission_lookup[[context, action]] ||= RoleOverride.enabled_for?(account, context, action, base_role_name, membership_type)
+    @permission_lookup[[context.class, context.global_id, action]] ||= RoleOverride.enabled_for?(context, action, self.role, self.account)
   end
 
   def has_permission_to?(context, action)
@@ -108,7 +146,7 @@ class AccountUser < ActiveRecord::Base
   end
 
   def is_subset_of?(user)
-    needed_permissions = RoleOverride.permissions.keys.inject({}) do |result, permission|
+    needed_permissions = RoleOverride.manageable_permissions(account).keys.inject({}) do |result, permission|
       result[permission] = enabled_for?(account, permission)
       result
     end
@@ -121,10 +159,6 @@ class AccountUser < ActiveRecord::Base
     end
   end
 
-  def base_role_name
-    BASE_ROLE_NAME
-  end
-  
   def self.readable_type(type)
     if type == 'AccountAdmin' || !type || type.empty?
       t('types.account_admin', "Account Admin")
@@ -132,21 +166,21 @@ class AccountUser < ActiveRecord::Base
       type
     end
   end
-  
+
   def self.any_for?(user)
     !account_ids_for_user(user).empty?
   end
-  
+
   def self.account_ids_for_user(user)
     @account_ids_for ||= {}
     @account_ids_for[user.id] ||= Rails.cache.fetch(['account_ids_for_user', user].cache_key) do
-      AccountUser.for_user(user).map(&:account_id)
+      AccountUser.active.for_user(user).map(&:account_id)
     end
   end
-  
+
   def self.for_user_and_account?(user, account_id)
     account_ids_for_user(user).include?(account_id)
   end
-  
+
   scope :for_user, lambda { |user| where(:user_id => user) }
 end

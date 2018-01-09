@@ -1,20 +1,39 @@
-define([
-  'i18n!question_bank',
-  'jquery' /* $ */,
-  'find_outcome',
-  'jst/quiz/move_question',
-  'jquery.ajaxJSON' /* ajaxJSON */,
-  'jquery.instructure_forms' /* formSubmit, getFormData, formErrors */,
-  'jqueryui/dialog',
-  'jquery.instructure_misc_helpers' /* replaceTags */,
-  'jquery.instructure_misc_plugins' /* confirmDelete, showIf, .dim */,
-  'jquery.keycodes' /* keycodes */,
-  'jquery.loadingImg' /* loadingImage */,
-  'jquery.templateData' /* fillTemplateData, getTemplateData */
-], function(I18n, $, find_outcome, moveQuestion) {
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
+ *
+ * This file is part of Canvas.
+ *
+ * Canvas is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License.
+ *
+ * Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+ * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
 
-  var questionBankPage = {
-    updateAlignments: function(alignments) {
+import I18n from 'i18n!question_bank'
+import $ from 'jquery'
+import find_outcome from './find_outcome'
+import moveQuestionTemplate from 'jst/quiz/move_question'
+import htmlEscape from './str/htmlEscape'
+import moveMultipleQuestionBanks from 'jsx/quizzes/question_bank/moveMultipleQuestionBanks'
+import loadBanks from 'jsx/quizzes/question_bank/loadBanks'
+import addBank from 'jsx/quizzes/question_bank/addBank'
+import './jquery.ajaxJSON'
+import './jquery.instructure_forms' /* formSubmit, getFormData, formErrors */
+import 'jqueryui/dialog'
+import './jquery.instructure_misc_helpers' /* replaceTags */
+import './jquery.instructure_misc_plugins' /* confirmDelete, showIf, .dim */
+import './jquery.keycodes'
+import './jquery.loadingImg'
+import './jquery.templateData'
+
+export function updateAlignments (alignments) {
       $(".add_outcome_text").text(I18n.t("updating_outcomes", "Updating Outcomes...")).attr('disabled', true);
       var params = {};
       for(var idx in alignments) {
@@ -24,7 +43,7 @@ define([
       if(alignments.length == 0) {
         params['assessment_question_bank[alignments]'] = '';
       }
-      var url = $(".edit_bank_link").attr('href');
+      var url = $(".edit_bank_link:last").attr('href');
       $.ajaxJSON(url, 'PUT', params, function(data) {
         var alignments = data.assessment_question_bank.learning_outcome_alignments.sort(function(a, b) {
           var a_name = ((a.content_tag && a.content_tag.learning_outcome && a.content_tag.learning_outcome.short_description) || 'none').toLowerCase();
@@ -53,9 +72,9 @@ define([
       }, function(data) {
         $(".add_outcome_text").text(I18n.t("update_outcomes_fail", "Updating Outcomes Failed")).attr('disabled', false);
       });
-    },
+    }
 
-    _attachPageEvents: function(e) {
+export function attachPageEvents(e) {
       $("#aligned_outcomes_list").delegate('.delete_outcome_link', 'click', function(event) {
         event.preventDefault();
         var result = confirm(I18n.t("remove_outcome_from_bank", "Are you sure you want to remove this outcome from the bank?")),
@@ -72,7 +91,7 @@ define([
               alignments.push([id, pct]);
             }
           });
-          questionBankPage.updateAlignments(alignments);
+          updateAlignments(alignments);
         }
       });
 
@@ -116,6 +135,7 @@ define([
               htmlValues: ['question_text']
             });
             $question.data('question', question);
+	    $question.find(".assessment_question_id").text(question.id);
             $("#questions").append($question);
             $question.show();
           }
@@ -139,7 +159,6 @@ define([
         $link.find(".message").text(I18n.t('bookmarking', "Bookmarking..."));
         $.ajaxJSON($(this).attr('href'), 'POST', {}, function(data) {
           $link.find('.message').text(I18n.t('already_bookmarked', 'Already Bookmarked'));
-          $link.find("img").attr('src', $link.find("img").attr('src').replace("bookmark_gray.png", "bookmark.png"));
           $link.attr('disabled', true);
         }, function() {
           $link.find(".message").text(I18n.t('bookmark_failed', "Bookmark Failed"));
@@ -184,95 +203,8 @@ define([
       $("#show_question_details").change(function() {
         $("#questions").toggleClass('brief', !$(this).attr('checked'));
       }).change();
-      var addBank = function(bank) {
-        var current_question_bank_id = $("#bank_urls .current_question_bank_id").text();
-        if(bank.id == current_question_bank_id) { return; }
-        var $dialog = $("#move_question_dialog");
-        var $bank = $dialog.find("li.bank.blank:first").clone(true).removeClass('blank');
 
-        $bank.find("input").attr('id', "question_bank_" + bank.id).val(bank.id);
-        $bank.find("label").attr('for', "question_bank_" + bank.id)
-          .find(".bank_name").text(bank.title || I18n.t('default_name', "No Name")).end()
-          .find(".context_name").text(bank.cached_context_short_name);
-        $bank.show().insertBefore($dialog.find("ul.banks .bank.blank:last"));
-      };
-      var loadBanks = function() {
-        var url = $("#bank_urls .managed_banks_url").attr('href');
-        var $dialog = $("#move_question_dialog");
-        $dialog.find("li.message").text(I18n.t('loading_banks', "Loading banks..."));
-        $.ajaxJSON(url, 'GET', {}, function(data) {
-          for(var idx = 0; idx < data.length; idx++) {
-            addBank(data[idx].assessment_question_bank);
-          }
-          $dialog.addClass('loaded');
-          $dialog.find("li.bank.blank").show();
-          $dialog.find("li.message").hide();
-        }, function(data) {
-          $dialog.find("li.message").text(I18n.t("error_loading_banks", "Error loading banks"));
-        });
-      };
-
-      var moveQuestions = {
-        elements: {
-          $dialog: $('#move_question_dialog'),
-          $loadMessage: $('<li />').append(I18n.t('load_questions', 'Loading Questions...')),
-          $questions: $('#move_question_dialog .questions')
-        },
-        messages: {
-          move_copy_questions: I18n.t('title.move_copy_questions', "Move/Copy Questions"),
-          move_questions: I18n.t('move_questions', 'Move Questions'),
-          multiple_questions: I18n.t('multiple_questions', 'Multiple Questions')
-        },
-        page: 1,
-        addEvents: function(){
-          $('.move_questions_link').bind('click.moveQuestions', $.proxy(this.onClick, this));
-          return this;
-        },
-        onClick: function(e){
-          e.preventDefault();
-          this.prepDialog();
-          this.showDialog()
-          this.loadData();
-        },
-        prepDialog: function(){
-          this.elements.$dialog.find('.question_text').hide();
-          this.elements.$questions.show();
-          this.elements.$questions.find('.list_question:not(.blank)').remove();
-          this.elements.$dialog.find('.question_name').text(this.messages.multiple_questions);
-          this.elements.$dialog.find('.copy_option').hide().find(':checkbox').attr('checked', false);
-          this.elements.$dialog.find('.submit_button').text(this.messages.move_questions);
-          this.elements.$dialog.find('.multiple_questions').val('1');
-          this.elements.$dialog.data('question', null);
-        },
-        showDialog: function(){
-          if (!this.elements.$dialog.hasClass('loaded')){
-            loadBanks(this.elements.$dialog);
-          } else {
-            this.elements.$dialog.find('li message').hide();
-          }
-
-          this.elements.$dialog.dialog({
-            title: this.messages.move_copy_questions,
-            width: 600
-          });
-        },
-        loadData: function(){
-          this.elements.$questions.append(this.elements.$loadMessage);
-          $.ajaxJSON(window.location.href + '/questions?page=' + this.page, 'GET', {}, $.proxy(this.onData, this));
-        },
-        onData: function(data){
-          var questions = moveQuestion(data);
-          this.elements.$loadMessage.remove();
-          this.elements.$questions.append(questions);
-          if (this.page < data.pages){
-            this.elements.$questions.append(this.elements.$loadMessage);
-            this.page += 1;
-            this.loadData();
-          } else {
-            this.page = 1;
-          }
-        }
-      }.addEvents();
+      moveMultipleQuestionBanks.addEvents()
 
       $("#questions").delegate(".move_question_link", 'click', function(event) {
         event.preventDefault();
@@ -296,6 +228,7 @@ define([
           width: 600,
           title: I18n.t('title.move_copy_questions', "Move/Copy Questions")
         });
+        $dialog.parent().find('.ui-dialog-titlebar-close').focus();
       });
       $("#move_question_dialog .submit_button").click(function() {
         var $dialog = $("#move_question_dialog");
@@ -376,10 +309,3 @@ define([
         $("#move_question_dialog .new_question_bank_name").showIf($(this).attr('checked') && $(this).val() == 'new');
       });
     }
-  };
-
-  questionBankPage.attachPageEvents = questionBankPage._attachPageEvents.bind(questionBankPage);
-
-  return questionBankPage;
-});
-

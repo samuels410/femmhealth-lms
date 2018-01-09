@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,26 +20,31 @@ require File.expand_path(File.dirname(__FILE__) + '/../../spec_helper')
 require File.expand_path(File.dirname(__FILE__) + '/../views_helper')
 
 describe "/context_modules/index" do
+  before :each do
+    assign(:body_classes, [])
+    assign(:menu_tools, Hash.new([]))
+    assign(:collapsed_modules, [])
+  end
+
   it "should render" do
-    course
+    course_factory
     view_context(@course, @user)
-    assigns[:modules] = @course.context_modules.active
-    assigns[:collapsed_modules] = []
+    assign(:modules, @course.context_modules.active)
     render 'context_modules/index'
-    response.should_not be_nil
+    expect(response).not_to be_nil
   end
 
   it "should show content_tags" do
-    course
+    course_factory
     context_module = @course.context_modules.create!
-    content_tag = context_module.add_item :type => 'context_module_sub_header'
+    module_item = context_module.add_item :type => 'context_module_sub_header'
+    module_item.publish! if module_item.unpublished?
     view_context(@course, @user)
-    assigns[:modules] = @course.context_modules.active
-    assigns[:collapsed_modules] = []
+    assign(:modules, @course.context_modules.active)
     render 'context_modules/index'
-    response.should_not be_nil
+    expect(response).not_to be_nil
     page = Nokogiri('<document>' + response.body + '</document>')
-    page.css("#context_module_item_#{content_tag.id}").length.should == 1
+    expect(page.css("#context_module_item_#{module_item.id}").length).to eq 1
   end
 
   it "should show unpublished content_tags" do
@@ -49,30 +54,52 @@ describe "/context_modules/index" do
     wiki_page.save!
 
     context_module = @course.context_modules.create!
-    content_tag = context_module.add_item(:type => 'wiki_page', :id => wiki_page.id)
-    content_tag.workflow_state.should == 'unpublished'
+    module_item = context_module.add_item(:type => 'wiki_page', :id => wiki_page.id)
+    expect(module_item.workflow_state).to eq 'unpublished'
 
     view_context(@course, @user)
-    assigns[:modules] = @course.context_modules.active
-    assigns[:collapsed_modules] = []
+    assign(:modules, @course.context_modules.active)
     render 'context_modules/index'
 
-    response.should_not be_nil
+    expect(response).not_to be_nil
     page = Nokogiri('<document>' + response.body + '</document>')
-    page.css("#context_module_item_#{content_tag.id}").length.should == 1
+    expect(page.css("#context_module_item_#{module_item.id}").length).to eq 1
   end
 
   it "should not show deleted content_tags" do
-    course
+    course_factory
     context_module = @course.context_modules.create!
-    content_tag = context_module.add_item :type => 'context_module_sub_header'
-    content_tag.destroy
+    module_item = context_module.add_item :type => 'context_module_sub_header'
+    module_item.destroy
     view_context(@course, @user)
-    assigns[:modules] = @course.context_modules.active
-    assigns[:collapsed_modules] = []
+    assign(:modules, @course.context_modules.active)
     render 'context_modules/index'
-    response.should_not be_nil
+    expect(response).not_to be_nil
     page = Nokogiri('<document>' + response.body + '</document>')
-    page.css("#context_module_item_#{content_tag.id}").length.should == 0
+    expect(page.css("#context_module_item_#{module_item.id}").length).to eq 0
+  end
+
+  it "does not show download course content if setting is disabled" do
+    course_factory
+    view_context(@course, @user)
+    assign(:modules, @course.context_modules.active)
+    render 'context_modules/index'
+    expect(response).not_to be_nil
+    page = Nokogiri('<document>' + response.body + '</document>')
+    expect(page.css(".offline_web_export").length).to eq 0
+  end
+
+  it "shows download course content if settings are enabled" do
+    course_factory
+    acct = @course.root_account
+    acct.settings[:enable_offline_web_export] = true
+    acct.save!
+    view_context(@course, @user)
+    assign(:modules, @course.context_modules.active)
+    assign(:allow_web_export_download, true)
+    render 'context_modules/index'
+    expect(response).not_to be_nil
+    page = Nokogiri('<document>' + response.body + '</document>')
+    expect(page.css(".offline_web_export").length).to eq 1
   end
 end

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -26,7 +26,7 @@ describe 'DataFixup::FixBulkMessageAttachments' do
       attachment = attachment_model(:context => @user, :folder => @user.conversation_attachments_folder)
       root_message = Conversation.build_message @user, "hi all", :attachment_ids => [attachment.id]
       
-      ConversationBatch.generate(root_message, 20.times.map{ user }, :sync)
+      ConversationBatch.generate(root_message, 20.times.map{ user_factory }, :sync)
 
       # ensure they aren't linked to the attachment
       AttachmentAssociation.where("context_id<>?", root_message).delete_all
@@ -34,9 +34,9 @@ describe 'DataFixup::FixBulkMessageAttachments' do
       DataFixup::FixBulkMessageAttachments.run
 
       # yay
-      AttachmentAssociation.count.should eql 21
+      expect(AttachmentAssociation.count).to eql 21
       ConversationMessage.all.each do |message|
-        message.attachments.should == root_message.attachments
+        expect(message.attachments).to eq root_message.attachments
       end
     end
   end

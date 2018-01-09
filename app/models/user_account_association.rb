@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -22,5 +22,4 @@ class UserAccountAssociation < ActiveRecord::Base
 
   validates_presence_of :user_id, :account_id
 
-  attr_accessible :account_id, :depth
 end

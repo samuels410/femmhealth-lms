@@ -1,7 +1,25 @@
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
 <% content_for :page_title, t('titles.copy_course', 'Copy Course') %>
 <% add_crumb t('#crumbs.copy_course', 'Copy Course') %>
 
-<h2><%= t'headings.copy_course', 'Copy %{course}', :course => @context.name %></h2>
+<h1><%= t'headings.copy_course', 'Copy %{course}', :course => @context.name %></h1>
 <p>
   <%= t('details', %{Please enter the details for the new course.}) %>
 </p>
@@ -17,12 +35,40 @@
     <div class="controls"><%= f.text_field :course_code, :value => @context.course_code %></div>
   </div>
   <div class="control-group">
-    <label class="control-label"><strong><%= t('start_at', 'Start Date') %></strong></label>
-    <div class="controls"><%= f.text_field :start_at, :class => 'datetime_field', :style => "width: 165px;", :value => datetime_string(@context.start_at, :verbose, nil, true) %></div>
+    <label class="control-label">
+      <strong><%= t('start_at', 'Start Date') %></strong>
+    </label>
+    <label class="screenreader-only" id="course_starts_at_label">
+      <%= t("Course starts at") %>
+      <%= datepicker_screenreader_prompt %>
+    </label>
+    <div class="controls">
+      <%= f.text_field :start_at,
+                       class: 'datetime_field',
+                       style: "width: 165px;",
+                       value: datetime_string(@context.start_at, :verbose),
+                       "aria-labelledby" => "course_starts_at_label",
+                       "data-tooltip" => "",
+                       title: accessible_date_format %>
+    </div>
   </div>
   <div class="control-group">
-    <label class="control-label"><strong><%= t('conclude_at', 'End Date') %></strong></label>
-    <div class="controls"><%= f.text_field :conclude_at, :class => 'datetime_field', :style => "width: 165px;", :value => datetime_string(@context.conclude_at, :verbose, nil, true) %></div>
+    <label class="control-label">
+      <strong><%= t('conclude_at', 'End Date') %></strong>
+    </label>
+    <label class="screenreader-only" id="course_ends_at_label">
+      <%= t("Course ends at") %>
+      <%= datepicker_screenreader_prompt %>
+    </label>
+    <div class="controls">
+      <%= f.text_field :conclude_at,
+                       class: 'datetime_field',
+                       style: "width: 165px;",
+                       value: datetime_string(@context.conclude_at, :verbose),
+                       "aria-labelledby" => "course_ends_at_label",
+                       "data-tooltip" => "",
+                       title: accessible_date_format %>
+    </div>
   </div>
   <% if can_do(@context.account, @current_user, :manage_courses) %>
     <div class="control-group">
@@ -30,7 +76,7 @@
 
       <div class="controls">
         <select name="course[enrollment_term_id]" id="course_enrollment_term_id">
-          <% @context.root_account.enrollment_terms.sort_by { |t| t.start_at || SortFirst }.each do |term| %>
+          <% @context.root_account.enrollment_terms.active.sort_by { |t| t.start_at || CanvasSort::First }.each do |term| %>
             <option value="<%= term.id %>" <%= 'selected' if term.id == @context.enrollment_term_id %>><%= term.name %></option>
           <% end %>
         </select>
@@ -39,10 +85,24 @@
   <% end %>
 
   <div class="control-group">
+    <div class="control-label">
+      <strong><%= t('content_label', 'Content') %></strong>
+    </div>
+
     <div class="controls">
-      <label class="checkbox" for="selectContentCheckbox">
-        <input name="selective_import" type="checkbox"><%= t('choose_content', 'Choose which items to copy') %>
-      </label>
+      <div class="radio">
+        <label>
+          <input type="radio" name="selective_import" checked value=false>
+          <%= t('select_all_content', 'All content') %>
+        </label>
+      </div>
+
+      <div class="radio">
+        <label>
+          <input type="radio" name="selective_import" value=true>
+          <%= t('select_specific_content', 'Select specific content') %>
+        </label>
+      </div>
     </div>
   </div>
 
@@ -51,7 +111,7 @@
   </div>
 
   <div class='form-actions'>
-    <a href="<%= context_url(@context, :context_url) %>" class="btn button-secondary"><%= t '#buttons.cancel', 'Cancel' %></a>
+    <a href="<%= course_settings_url(@context) %>" class="btn button-secondary"><%= t '#buttons.cancel', 'Cancel' %></a>
     <button type="submit" class="btn btn-primary"><%= t('buttons.create_course', %{Create Course}) %></button>
   </div>
 

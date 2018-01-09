@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,8 +20,6 @@ class AbstractCourse < ActiveRecord::Base
 
   include Workflow
 
-  attr_accessible :name, :account, :short_name, :enrollment_term, :root_account
-  
   belongs_to :root_account, :class_name => 'Account'
   belongs_to :account
   belongs_to :enrollment_term
@@ -33,15 +31,15 @@ class AbstractCourse < ActiveRecord::Base
     state :active
     state :deleted
   end
-  
-  alias_method :destroy!, :destroy
+
+  alias_method :destroy_permanently!, :destroy
   def destroy
     self.workflow_state = 'deleted'
     save!
   end
-  
-  scope :active, where("abstract_courses.workflow_state<>'deleted'")
-  
+
+  scope :active, -> { where("abstract_courses.workflow_state<>'deleted'") }
+
   include StickySisFields
   are_sis_sticky :name, :short_name, :enrollment_term_id
 

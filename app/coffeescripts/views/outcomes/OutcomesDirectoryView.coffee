@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -26,22 +26,31 @@ define [
   'compiled/collections/OutcomeGroupCollection'
   'compiled/views/outcomes/OutcomeGroupIconView'
   'compiled/views/outcomes/OutcomeIconView'
+  'str/htmlEscape'
   'jquery.disableWhileLoading'
   'jqueryui/droppable'
   'compiled/jquery.rails_flash_notifications'
-], (I18n, $, _, PaginatedView, OutcomeGroup, OutcomeCollection, OutcomeGroupCollection, OutcomeGroupIconView, OutcomeIconView) ->
+], (I18n, $, _, PaginatedView, OutcomeGroup, OutcomeCollection, OutcomeGroupCollection, OutcomeGroupIconView, OutcomeIconView, htmlEscape) ->
 
   # The outcome group "directory" browser.
   class OutcomesDirectoryView extends PaginatedView
-
     tagName: 'ul'
     className: 'outcome-level'
 
     # if opts includes 'outcomeGroup', an instance of OutcomeGroup,
     # then the groups and the outcomes for the outcomeGroup will be fetched.
     initialize: (opts) ->
+      @inFindDialog = opts.inFindDialog
       @readOnly = opts.readOnly
       @parent = opts.parent
+      outcomeGroupTitle = opts.outcomeGroup.attributes.title
+      ariaLabel = 'directory ' + outcomeGroupTitle + ': depth ' + opts.directoryDepth + ','
+      @$el.attr('aria-label', ariaLabel)
+      # the way the event listeners work between OutcomeIconView, OutcomesDirectoryView
+      # and SidebarView can cause items to become unselectable following a move. The
+      # below attribute is using brute-force to make the view reset to address this problem
+      # until we can find a better solution
+      @needsReset = false
 
       if @outcomeGroup = opts.outcomeGroup
         unless @groups
@@ -53,7 +62,7 @@ define [
 
         unless @outcomes
           @outcomes = new OutcomeCollection
-          @outcomes.url = @outcomeGroup.get('outcomes_url')
+          @outcomes.url = @outcomeGroup.get('outcomes_url')+'?outcome_style=full'
         @outcomes.on 'add remove reset', @reset, this
 
       # for PaginatedView
@@ -85,7 +94,7 @@ define [
       @loadDfd.promise()
 
     # Public: move a model from some dir to this
-    moveModelHere: (model) =>
+    moveModelHere: (model, originalDir) =>
       model.collection.remove model
       if model instanceof OutcomeGroup
         @groups.add model
@@ -93,7 +102,9 @@ define [
       else
         @outcomes.add model
         dfd = @changeLink model, @outcomeGroup.toJSON()
-      dfd.done -> model.trigger 'select'
+      dfd.done ->
+        model.trigger 'select'
+        originalDir.needsReset = true if originalDir
 
     # Internal: change the outcome link to the newGroup
     changeLink: (outcome, newGroup) ->
@@ -105,21 +116,15 @@ define [
         $.flashError I18n.t 'flash.error', "An error occurred. Please refresh the page and try again."
 
       # create new link
-      outcome.setUrlTo 'delete'
-      unlinkUrl = outcome.url
+      oldGroup = outcome.outcomeGroup
       outcome.outcomeGroup = newGroup
       outcome.setUrlTo 'add'
-      $.ajaxJSON(outcome.url, 'POST', outcome_id: outcome.get 'id')
+      $.ajaxJSON(outcome.url, 'POST', {outcome_id: outcome.get('id'), move_from: oldGroup.id})
         .done( (modelData) ->
           # reset urls etc.
           outcome.set outcome.parse(modelData)
-          # new link created, now remove old link
-          $.ajaxJSON(unlinkUrl, 'DELETE')
-            .done( ->
-              # old link removed
-              $.flashMessage I18n.t 'flash.updateSuccess', 'Update successful'
-              disablingDfd.resolve())
-            .fail onFail)
+          $.flashMessage I18n.t 'flash.updateSuccess', 'Update successful'
+          disablingDfd.resolve())
         .fail onFail
 
       disablingDfd
@@ -144,6 +149,11 @@ define [
       @$el.disableWhileLoading disablingDfd
       disablingDfd
 
+    makeFocusable: =>
+      return if @$el.find('[tabindex=0]').length > 0
+      if (@views().length > 0)
+        @views()[0].makeFocusable()
+
     focusFirstOutcome: =>
       $li = @$el.find('[tabindex=0]')
       if $li.length > 0
@@ -157,17 +167,19 @@ define [
     # Overriding
     paginationLoaderTemplate: ->
       "<li><a href='#' class='loading-more'>
-        #{I18n.t("loading_more_results", "Loading more results")}</a></li>"
+        #{htmlEscape I18n.t("loading_more_results", "Loading more results")}</a></li>"
 
     # Overriding to insert into the ul.
     showPaginationLoader: ->
-      @$el.append(@$paginationLoader ?= $(@paginationLoaderTemplate()))
+      @$paginationLoader ?= $(@paginationLoaderTemplate())
+      @$el.append(@$paginationLoader)
 
     # Fetch outcomes after all the groups have been fetched.
     fetchOutcomes: ->
       @collection = @outcomes
       @bindPaginationEvents()
       @outcomes.fetch(success: => @loadDfd.resolve(this))
+      @startPaginationListener()
       @showPaginationLoader()
 
     triggerSelect: (sv) =>
@@ -189,6 +201,7 @@ define [
       @_views
 
     reset: =>
+      @needsReset = false
       @_clearViews()
       @render()
 
@@ -214,12 +227,21 @@ define [
 
     render: =>
       @$el.empty()
+      return @reset() if @needsReset
       _.each @views(), (v) => @$el.append v.render().el
+      @handleWarning() if @inFindDialog
       @initDroppable() unless @readOnly
+      @startPaginationListener()
       # Make the first <li /> tabbable for accessibility purposes.
       @$('li:first').attr('tabindex', 0)
       @$el.data 'view', this
       this
+
+    handleWarning: =>
+      if !@parent && _.isEmpty(@groups.models) && _.isEmpty(@outcomes.models) && _.isEmpty(@views())
+        $.publish("renderNoOutcomeWarning")
+      else
+        $.publish("clearNoOutcomeWarning")
 
     # private
     _viewsFor: (models, viewClass) ->

@@ -3,25 +3,27 @@ require 'model_view'
 
 describe ModelView do
   let(:text) { "Example\n{ \"properties\": [] }" }
-  let(:model) { stub('Model', :text => text) }
+  let(:model) { double('Model', :text => text) }
 
   it "is created from model" do
     view = ModelView.new_from_model(model)
-    view.name.should == "Example"
-    view.properties.should == []
+    expect(view.name).to eq "Example"
+    expect(view.properties).to eq []
   end
 
   it "generates a schema" do
     view = ModelView.new("Example", {"name" => {"type" => "string"}})
-    view.json_schema.should == {
+    expect(view.json_schema).to eq({
       "Example" => {
         "id" => "Example",
         "properties" => {
           "name" => {
             "type" => "string"
           }
-        }
+        },
+        "description" => "",
+        "required" => []
       }
-    }
+    })
   end
 end

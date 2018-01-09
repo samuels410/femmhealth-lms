@@ -1,14 +1,29 @@
+#
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 module Canvas::Migration
   class PackageIdentifier
     include Canvas::Migration::XMLHelper
     attr_reader :type, :converter
 
-    def initialize(settings)
-      unless settings[:archive_file]
-        MigratorHelper::download_archive(settings)
-      end
-      @archive = settings[:archive_file]
-      @type = :unknown
+    COMMON_CARTRIDGE_REGEX = /IMS(?: Thin)? Common Cartridge/i
+
+    def initialize(archive)
+      @archive = archive
     end
 
     def get_converter
@@ -17,19 +32,23 @@ module Canvas::Migration
     end
 
     def identify_package
-      zip_file = Zip::File.open(@archive.path)
-      if zip_file.find_entry("AngelManifest.xml")
+      if @archive.path.ends_with?('xml')
+        return check_flat_xml_file
+      end
+
+      if @archive.find_entry("AngelManifest.xml")
         :angel_7_4
-      elsif zip_file.find_entry("angelData.xml")
+      elsif @archive.find_entry("angelData.xml")
         :angel_7_3
-      elsif zip_file.find_entry("moodle.xml")
+      elsif @archive.find_entry("moodle.xml")
         :moodle_1_9
-      elsif zip_file.find_entry("moodle_backup.xml")
+      elsif @archive.find_entry("moodle_backup.xml")
         :moodle_2
-      elsif zip_file.find_entry("imsmanifest.xml")
-        data = zip_file.read("imsmanifest.xml")
-        doc = ::Nokogiri::XML(data)
-        if get_node_val(doc, 'metadata schema') =~ /IMS Common Cartridge/i
+      elsif @archive.find_entry("imsmanifest.xml")
+        data = @archive.read("imsmanifest.xml")
+        doc = create_xml_doc(data)
+
+        if get_node_val(doc, 'metadata schema') =~ COMMON_CARTRIDGE_REGEX
           if !!doc.at_css(%{resources resource[href="#{CC::CCHelper::COURSE_SETTINGS_DIR}/#{CC::CCHelper::SYLLABUS}"] file[href="#{CC::CCHelper::COURSE_SETTINGS_DIR}/#{CC::CCHelper::COURSE_SETTINGS}"]})
             :canvas_cartridge
           elsif !!doc.at_css(%{resources resource[href="#{CC::CCHelper::COURSE_SETTINGS_DIR}/#{CC::CCHelper::CANVAS_EXPORT_FLAG}"]})
@@ -40,6 +59,8 @@ module Canvas::Migration
             :common_cartridge_1_1
           elsif get_node_val(doc, 'metadata schemaversion') == "1.2.0"
             :common_cartridge_1_2
+          elsif get_node_val(doc, 'metadata schemaversion') == "1.3.0"
+            :common_cartridge_1_3
           end
         elsif has_namespace(doc, "http://www.blackboard.com/content-packaging")
           :bb_learn
@@ -66,21 +87,35 @@ module Canvas::Migration
       else
         :unknown
       end
-    rescue Zip::ZipError
-      # Not a valid zip file
-      :invalid_archive
+    rescue
+      # Not a valid archive file
+      raise Canvas::Migration::Error, I18n.t(:package_error,
+          "Error identifying package type: %{error}", :error => $!.message), $!.backtrace
     end
-    
-    :private
-    
+
+    private
+
+    # Common Cartridge 1.3 supports having just a single xml file
+    # if it's not CC 1.3 then we don't know how to handle it
+    def check_flat_xml_file
+      doc = create_xml_doc(File.read(@archive.file))
+      if get_node_val(doc, 'metadata schema') =~ COMMON_CARTRIDGE_REGEX &&
+              get_node_val(doc, 'metadata schemaversion') == "1.3.0"
+        :common_cartridge_1_3
+      else
+        :unknown
+      end
+    end
+
     def has_namespace(node, namespace)
       node.namespaces.values.any?{|ns|ns =~ /#{namespace}/i}
     end
-    
+
     def find_converter
       if plugin = Canvas::Plugin.all_for_tag(:export_system).find{|p|p.settings[:provides] && p.settings[:provides][@type]}
         return plugin.settings[:provides][@type]
       end
+
       raise Canvas::Migration::Error, I18n.t(:unsupported_package, "Unsupported content package")
     end
   end

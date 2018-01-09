@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2014 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'underscore'
   'Backbone'
@@ -24,15 +41,47 @@ define [
             data[dataKey] = _.object([ "from", "to" ], @presentField(dataValues))
         when "concluded"
           json.event_type_present = I18n.t("event_type.concluded", "Concluded")
+        when "unconcluded"
+          json.event_type_present = I18n.t("event_type.unconcluded", "Unconcluded")
+        when "restored"
+          json.event_type_present = I18n.t("event_type.restored", "Restored")
+        when "deleted"
+          json.event_type_present = I18n.t("event_type.deleted", "Deleted")
+        when "published"
+          json.event_type_present = I18n.t("event_type.published", "Published")
+        when "copied_from"
+          json.event_type_present = I18n.t("event_type.copied_from", "Copied From")
+        when "copied_to"
+          json.event_type_present = I18n.t("event_type.copied_to", "Copied To")
+        when "reset_from"
+          json.event_type_present = I18n.t("event_type.reset_from", "Reset From")
+        when "reset_to"
+          json.event_type_present = I18n.t("event_type.reset_to", "Reset To")
+        when "corrupted"
+          json.event_type_present = I18n.t("event_type.corrupted", "Details Not Available")
+        when "claimed"
+          # This occurs when a teacher unpublishes a course, but they don't leave the course
+          # so we'll make this a bit more user friendly in the audit log UI
+          json.event_type_present = I18n.t('Unpublished')
         else
           json.event_type_present = json.event_type
+
+      switch json.event_source
+        when "manual"
+          json.event_source_present = I18n.t("event_source.manual", "Manual")
+        when "api"
+          json.event_source_present = I18n.t("event_source.api", "Api")
+        when "sis"
+          json.event_source_present = I18n.t("event_source.sis", "SIS")
+        else
+          json.event_source_present = json.event_source || I18n.t("blank_placeholder", "-")
 
       _.each json.event_data, iterator
       json.event_data = data unless _.isEmpty(data)
       return json
 
     presentField: (value) ->
-      blank = "-"
+      blank = I18n.t("blank_placeholder", "-")
       return blank if _.isNull(value)
       return value.toString() if _.isBoolean(value)
       if _.isArray(value)
@@ -40,7 +89,7 @@ define [
       if _.isString(value)
         return blank if !value.length
         if value.match /^\d{4}-\d{2}-\d{2}(T| )\d{2}:\d{2}:\d{2}(.\d+)?Z$/
-          return I18n.l("date.formats.medium", value) + " " + I18n.l("time.formats.tiny", value)
+          return I18n.l("#date.formats.medium", value) + " " + I18n.l("#time.formats.tiny", value)
       return value
 
     presentLabel: (label) ->
@@ -51,8 +100,6 @@ define [
             I18n.t("field_label.account_id", "Account Id")
         when "group_weighting_scheme"
             I18n.t("field_label.group_weighting_scheme", "Group Weighting Scheme")
-        when "old_account_id"
-            I18n.t("field_label.old_account_id", "Old Account Id")
         when "workflow_state"
             I18n.t("field_label.workflow_state", "Workflow State")
         when "uuid"
@@ -97,8 +144,6 @@ define [
             I18n.t("field_label.sis_source_id", "SIS Source Id")
         when "sis_batch_id"
             I18n.t("field_label.sis_batch_id", "SIS Batch Id")
-        when "show_all_discussion_entries"
-            I18n.t("field_label.show_all_discussion_entries", "Show All Discussion Entries")
         when "open_enrollment"
             I18n.t("field_label.open_enrollment", "Open Enrollment")
         when "storage_quota"

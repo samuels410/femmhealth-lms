@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 - 2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,9 +18,8 @@
 
 class Ignore < ActiveRecord::Base
   belongs_to :user
-  belongs_to :asset, :polymorphic => true
+  belongs_to :asset, polymorphic: [:assignment, :assessment_request, :quiz => 'Quizzes::Quiz']
 
-  attr_accessible :user, :asset, :purpose, :permanent
   validates_presence_of :user_id, :asset_id, :asset_type, :purpose
   validates_inclusion_of :permanent, :in => [false, true]
 

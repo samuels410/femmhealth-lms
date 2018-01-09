@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,35 +20,27 @@ require File.expand_path(File.dirname(__FILE__) + '/../spec_helper')
 require File.expand_path(File.dirname(__FILE__) + '/messages_helper')
 
 describe 'alert' do
-  it "should render email" do
+  before :once do
     course_with_student
-    @alert = @course.alerts.create!(:recipients => [:student], :criteria => [:criterion_type => 'Interaction', :threshold => 7])
-    generate_message(:alert, :email, @alert, :asset_context => @course.enrollments.first)
+    @alert = @course.alerts.create!(recipients: [:student],
+                                    criteria: [
+                                      criterion_type: 'Interaction',
+                                      threshold: 7
+                                    ])
+    @enrollment = @course.enrollments.first
   end
 
-  it "should render facebook" do
-    course_with_student
-    @alert = @course.alerts.create!(:recipients => [:student], :criteria => [:criterion_type => 'Interaction', :threshold => 7])
-    generate_message(:alert, :facebook, @alert, :asset_context => @course.enrollments.first)
+  let(:asset) { @alert }
+  let(:notification_name) { :alert }
+  let(:message_data) do
+    {
+      data: {
+        student_name: @enrollment.user.name,
+        user_id: @enrollment.user_id,
+        course_id: @enrollment.course_id
+      }
+    }
   end
 
-  it "should render sms" do
-    course_with_student
-    @alert = @course.alerts.create!(:recipients => [:student], :criteria => [:criterion_type => 'Interaction', :threshold => 7])
-    generate_message(:alert, :sms, @alert, :asset_context => @course.enrollments.first)
-  end
-
-  it "should render summary" do
-    course_with_student
-    @alert = @course.alerts.create!(:recipients => [:student], :criteria => [:criterion_type => 'Interaction', :threshold => 7])
-    generate_message(:alert, :summary, @alert, :asset_context => @course.enrollments.first)
-  end
-
-  it "should render twitter" do
-    course_with_student
-    @alert = @course.alerts.create!(:recipients => [:student], :criteria => [:criterion_type => 'Interaction', :threshold => 7])
-    generate_message(:alert, :twitter, @alert, :asset_context => @course.enrollments.first)
-    @message.main_link.should be_present
-    @message.body.should be_present
-  end
+  include_examples "a message"
 end

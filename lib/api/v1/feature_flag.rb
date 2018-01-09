@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,10 +21,10 @@ module Api::V1::FeatureFlag
 
   def feature_json(feature, current_user, session)
     # this isn't an AR object, so api_json doesn't work
-    hash = feature.as_json.slice('feature', 'applies_to', 'enable_at', 'root_opt_in', 'beta', 'development', 'release_notes_url')
+    hash = feature.as_json.slice('feature', 'applies_to', 'enable_at', 'root_opt_in', 'beta', 'development',
+      'release_notes_url', 'autoexpand')
     add_localized_attr(hash, feature, 'display_name')
     add_localized_attr(hash, feature, 'description')
-    hash['hidden'] = true if feature.hidden? && Account.site_admin.grants_right?(current_user, session, :read)
     hash
   end
 
@@ -39,11 +39,18 @@ module Api::V1::FeatureFlag
     hash = if feature_flag.default?
       feature_flag.as_json.slice('feature', 'state')
     else
-      keys = %w(feature context_id context_type state locking_account_id)
+      keys = %w(feature context_id context_type state)
       api_json(feature_flag, current_user, session, only: keys)
     end
+    hash['locking_account_id'] = nil unless feature_flag.default?
     hash['transitions'] = Feature.transitions(feature_flag.feature, current_user, context, feature_flag.state)
-    hash['locked'] = feature_flag.locked?(context, current_user)
+    hash['locked'] = feature_flag.locked?(context)
+    if Account.site_admin.grants_right?(current_user, :read)
+      # return 'hidden' if the feature is hidden or if this flag is the one that unhides it
+      # (so removing it would re-hide the feature)
+      hash['hidden'] = feature_flag.hidden? ||
+          !feature_flag.default? && feature_flag.context == context && feature_flag.unhides_feature?
+    end
     hash
   end
 

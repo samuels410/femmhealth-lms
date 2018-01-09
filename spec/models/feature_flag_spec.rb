@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,94 +19,100 @@
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 
 describe FeatureFlag do
-  let(:t_root_account) { account_model }
-  let(:t_sub_account) { account_model parent_account: t_root_account }
-  let(:t_course) { course account: t_sub_account, active_all: true }
+  let_once(:t_root_account) { account_model }
+  let_once(:t_sub_account) { account_model parent_account: t_root_account }
+  let_once(:t_course) { course_factory account: t_sub_account, active_all: true }
 
   before do
-    Feature.stubs(:definitions).returns({
+    allow(Feature).to receive(:definitions).and_return({
       'root_account_feature' => Feature.new(feature: 'root_account_feature', applies_to: 'RootAccount'),
       'account_feature' => Feature.new(feature: 'account_feature', applies_to: 'Account'),
       'course_feature' => Feature.new(feature: 'course_feature', applies_to: 'Course'),
-      'user_feature' => Feature.new(feature: 'user_feature', applies_to: 'User')
+      'user_feature' => Feature.new(feature: 'user_feature', applies_to: 'User'),
+      'hidden_feature' => Feature.new(feature: 'hidden_feature', state: 'hidden', applies_to: 'Course'),
+      'hidden_root_opt_in_feature' => Feature.new(feature: 'hidden_feature', state: 'hidden', applies_to: 'Course', root_opt_in: true)
     })
   end
 
   context "validation" do
     it "should validate the state" do
       flag = t_root_account.feature_flags.build(feature: 'root_account_feature', state: 'nonplussed')
-      flag.should_not be_valid
+      expect(flag).not_to be_valid
     end
 
     it "should validate the feature exists" do
       flag = t_root_account.feature_flags.build(feature: 'xyzzy')
-      flag.should_not be_valid
+      expect(flag).not_to be_valid
     end
 
     it "should allow 'allowed' state only in accounts" do
       flag = t_sub_account.feature_flags.build(feature: 'course_feature', state: 'allowed')
-      flag.should be_valid
+      expect(flag).to be_valid
 
       flag = t_course.feature_flags.build(feature: 'course_feature', state: 'allowed')
-      flag.should_not be_valid
+      expect(flag).not_to be_valid
     end
 
     it "should validate the feature applies to the context" do
       flag = t_root_account.feature_flags.build(feature: 'root_account_feature')
-      flag.should be_valid
+      expect(flag).to be_valid
 
       flag = t_sub_account.feature_flags.build(feature: 'root_account_feature')
-      flag.should_not be_valid
-    end
-
-    it "should validate the locking account is in the chain" do
-      flag = t_course.feature_flags.build(feature: 'course_feature', state: 'on', locking_account: t_sub_account)
-      flag.should be_valid
-
-      other_account = account_model
-      flag = t_course.feature_flags.build(feature: 'course_feature', state: 'on', locking_account: other_account)
-      flag.should_not be_valid
+      expect(flag).not_to be_valid
     end
   end
 
   describe "locked?" do
     it "should return false for allowed features" do
       flag = t_root_account.feature_flags.create! feature: 'account_feature', state: 'allowed'
-      flag.locked?(t_root_account).should be_false
-      flag.locked?(t_sub_account).should be_false
+      expect(flag.locked?(t_root_account)).to be_falsey
+      expect(flag.locked?(t_sub_account)).to be_falsey
     end
 
     describe "not allowed" do
       let!(:t_flag) { t_root_account.feature_flags.create! feature: 'account_feature', state: 'off' }
 
       it "should be false in the setting context" do
-        t_flag.locked?(t_root_account).should be_false
+        expect(t_flag.locked?(t_root_account)).to be_falsey
       end
 
       it "should be true in a lower context" do
-        t_flag.locked?(t_sub_account).should be_true
+        expect(t_flag.locked?(t_sub_account)).to be_truthy
       end
+    end
+  end
 
-      describe "locking_account" do
-        before do
-          t_flag.locking_account = Account.site_admin
-          t_flag.save!
-        end
+  describe "unhides_feature?" do
+    it "should be true on a site admin feature flag" do
+      Account.site_admin.allow_feature! :hidden_feature
+      expect(Account.site_admin.lookup_feature_flag(:hidden_feature)).to be_unhides_feature
+    end
 
-        it "should be false if the user has privileges" do
-          site_admin_user
-          t_flag.locked?(t_root_account, @user).should be_false
-        end
+    it "should be true on a root account feature flag with no site admin flag set" do
+      t_root_account.allow_feature! :hidden_feature
+      expect(t_root_account.lookup_feature_flag(:hidden_feature)).to be_unhides_feature
+    end
 
-        it "should be true if the user does not have privileges" do
-          account_admin_user account: t_root_account
-          t_flag.locked?(t_root_account, @user).should be_true
-        end
+    it "should be false on a root account feature flag with site admin flag set" do
+      Account.site_admin.allow_feature! :hidden_feature
+      t_root_account.enable_feature! :hidden_feature
+      expect(t_root_account.lookup_feature_flag(:hidden_feature)).not_to be_unhides_feature
+    end
 
-        it "should be true if the user is unspecified" do
-          t_flag.locked?(t_root_account).should be_true
-        end
-      end
+    it "should be true on a sub-account feature flag with no root or site admin flags set" do
+      t_sub_account.allow_feature! :hidden_feature
+      expect(t_sub_account.lookup_feature_flag(:hidden_feature)).to be_unhides_feature
+    end
+
+    it "should be false on a sub-account feature flag with a root flag set" do
+      t_root_account.allow_feature! :hidden_feature
+      t_sub_account.enable_feature! :hidden_feature
+      expect(t_sub_account.lookup_feature_flag(:hidden_feature)).not_to be_unhides_feature
+    end
+
+    it "should be true on a sub-account root-opt-in feature flag with no root or site admin flags set" do
+      t_course.enable_feature! :hidden_root_opt_in_feature
+      expect(t_course.feature_flag(:hidden_root_opt_in_feature)).to be_unhides_feature
     end
   end
 end

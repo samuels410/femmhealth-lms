@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,11 +19,13 @@
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper')
 require File.expand_path(File.dirname(__FILE__) + '/../cassandra_spec_helper')
 
+require 'csv'
+
 describe PageViewsController do
 
   # Factory-like thing for page views.
   def page_view(user, url, options={})
-    options.reverse_merge!(:request_id => rand(100000000).to_s,
+    options.reverse_merge!(:request_id => 'req' + rand(100000000).to_s,
                            :user_agent => 'Firefox/12.0')
     options.merge!(:url => url)
 
@@ -41,29 +43,34 @@ describe PageViewsController do
   end
 
   shared_examples_for "GET 'index' as csv" do
-    before do
-      user_session(account_admin_user)
+    before :once do
+      account_admin_user
+    end
+
+    before :each do
       student_in_course
+      user_session(@admin)
     end
 
     it "should succeed" do
       page_view(@user, '/somewhere/in/app', :created_at => 2.days.ago)
-      get 'index', :user_id => @user.id, :format => 'csv'
-      response.should be_success
+      get 'index', params: {:user_id => @user.id}, format: 'csv'
+      expect(response).to be_success
     end
+
     it "should order rows by created_at in DESC order" do
       pv2 = page_view(@user, '/somewhere/in/app', :created_at => 2.days.ago)    # 2nd day
       pv1 = page_view(@user, '/somewhere/in/app/1', :created_at => 1.day.ago)  # 1st day
       pv3 = page_view(@user, '/somewhere/in/app/2', :created_at => 3.days.ago)  # 3rd day
-      get 'index', :user_id => @user.id, :format => 'csv'
-      response.should be_success
+      get 'index', params: {:user_id => @user.id}, format: 'csv'
+      expect(response).to be_success
       dates = CSV.parse(response.body, :headers => true).map { |row| row['created_at'] }
-      dates.should == [pv1, pv2, pv3].map(&:created_at).map(&:to_s)
+      expect(dates).to eq [pv1, pv2, pv3].map(&:created_at).map(&:to_s)
     end
   end
 
   context "with db page views" do
-    before :each do
+    before :once do
       Setting.set('enable_page_views', true)
     end
     include_examples "GET 'index' as csv"
@@ -72,5 +79,42 @@ describe PageViewsController do
   context "with cassandra page views" do
     include_examples 'cassandra page views'
     include_examples "GET 'index' as csv"
+
+    context "POST 'update'" do
+      it "catches a cassandra error" do
+        allow(PageView).to receive(:find_for_update).and_raise(CassandraCQL::Error::InvalidRequestException)
+        pv = page_view(@student, '/somewhere/in/app/1', :created_at => 1.day.ago)
+
+        user_session(@student)
+        put 'update', params: {id: pv.token, interaction_seconds: '5', page_view_token: pv.token}, xhr: true
+        expect(response.status).to eq 200
+      end
+    end
+  end
+
+  context "pv4" do
+    before do
+      allow(PageView).to receive(:pv4?).and_return(true)
+      ConfigFile.stub('pv4', {})
+    end
+
+    describe "GET 'index'" do
+      it "properly plumbs through time restrictions" do
+        account_admin_user
+        user_session(@user)
+
+        expect_any_instance_of(PageView::Pv4Client).to receive(:fetch).
+          with(
+            @user.global_id,
+            start_time: Time.zone.parse("2016-03-14T12:25:55Z"),
+            end_time: Time.zone.parse("2016-03-15T00:00:00Z"),
+            last_page_view_id: nil,
+            limit: 25).
+          and_return([])
+        get 'index', params: {user_id: @user.id, start_time: "2016-03-14T12:25:55Z",
+            end_time: "2016-03-15T00:00:00Z", per_page: 25}, format: :json
+        expect(response).to be_success
+      end
+    end
   end
 end

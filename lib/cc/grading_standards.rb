@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,10 +17,21 @@
 #
 module CC
   module GradingStandards
+    def add_referenced_grading_standards
+      @course.assignments.active.where('grading_standard_id IS NOT NULL').each do |assignment|
+        next unless export_object?(assignment) ||
+            assignment.quiz && export_object?(assignment.quiz) ||
+            assignment.discussion_topic && export_object?(assignment.discussion_topic)
+        gs = assignment.grading_standard
+        add_item_to_export(gs) if gs && gs.context_type == 'Course' && gs.context_id == @course.id
+      end
+    end
+
     def create_grading_standards(document=nil)
-      standards_to_copy = (@course.grading_standards.to_a + [@course.grading_standard]).compact
+      add_referenced_grading_standards if for_course_copy
+      standards_to_copy = (@course.grading_standards.to_a + [@course.grading_standard]).compact.uniq(&:id).select{|s| export_object?(s)}
       return nil unless standards_to_copy.size > 0
-      
+
       if document
         standards_file = nil
         rel_path = nil
@@ -29,7 +40,7 @@ module CC
         rel_path = File.join(CCHelper::COURSE_SETTINGS_DIR, CCHelper::GRADING_STANDARDS)
         document = Builder::XmlMarkup.new(:target=>standards_file, :indent=>2)
       end
-      
+
       document.instruct!
       document.gradingStandards(
               "xmlns" => CCHelper::CANVAS_NAMESPACE,
@@ -37,14 +48,14 @@ module CC
               "xsi:schemaLocation"=> "#{CCHelper::CANVAS_NAMESPACE} #{CCHelper::XSD_URI}"
       ) do |standards_node|
         standards_to_copy.each do |standard|
-          migration_id = CCHelper.create_key(standard)
+          migration_id = create_key(standard)
           standards_node.gradingStandard(:identifier=>migration_id, :version=>standard.version) do |standard_node|
             standard_node.title standard.title unless standard.title.blank?
             standard_node.data standard.data.to_json
           end
         end
       end
-      
+
       standards_file.close if standards_file
       rel_path
     end

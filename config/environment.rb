@@ -1,47 +1,28 @@
-require File.expand_path("../canvas_rails3", __FILE__)
+#
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 
-if CANVAS_RAILS2
-  unless Gem.respond_to?(:source_index)
-    module Gem
-      def self.source_index
-        sources
-      end
-
-      def self.cache
-        sources
-      end
-
-      SourceIndex = Specification
-
-      class SourceList
-        # If you want vendor gems, this is where to start writing code.
-        def search( *args ); []; end
-        def each( &block ); end
-        include Enumerable
-      end
-    end
-  end
-
-  def environment_configuration(config)
+def environment_configuration(_config)
+  CanvasRails::Application.configure do
     yield(config)
   end
-
-  # Bootstrap the Rails environment, frameworks, and default configuration
-  require File.expand_path('../boot', __FILE__)
-
-  Rails::Initializer.run do |config|
-    eval(File.read(File.expand_path("../shared_boot.rb", __FILE__)), binding, "config/shared_boot.rb", 1)
-  end
-else
-  def environment_configuration(_config)
-    CanvasRails::Application.configure do
-      yield(config)
-    end
-  end
-
-  # Load the rails application
-  require File.expand_path('../application', __FILE__)
-
-  # Initialize the rails application
-  CanvasRails::Application.initialize!
 end
+
+# Load the rails application
+require File.expand_path('../application', __FILE__)
+
+# Initialize the rails application
+CanvasRails::Application.initialize!

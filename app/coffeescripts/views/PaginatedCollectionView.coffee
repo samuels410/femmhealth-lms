@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'underscore'
@@ -46,6 +63,11 @@ define [
     # viewport. Defaults to false (i.e. just do one fetch per scroll)
     @optionProperty 'autoFetch'
 
+    ##
+    # Whether the collection should keep fetching pages until the last
+    # page is reached.  Defaults to false
+    @optionProperty 'fetchItAll'
+
     template: template
 
     ##
@@ -56,19 +78,29 @@ define [
       @initScrollContainer()
 
     ##
+    # Set the scroll container after the view has been created.
+    # Useful if the view is created before the container is rendered.
+
+    resetScrollContainer: (container) =>
+      @detachScroll()
+      @scrollContainer = container
+      @initScrollContainer()
+      @attachScroll()
+
+    ##
     # Extends parent to detach scroll container event
     #
     # @api private
 
     attachCollection: ->
       super
-      @collection.on 'reset', @attachScroll
-      @collection.on 'fetched:last', @detachScroll
-      @collection.on 'beforeFetch', @showLoadingIndicator
-      if @autoFetch
-        @collection.on 'fetch', => setTimeout @checkScroll # next tick so events don't stomp on each other
+      @listenTo @collection, 'reset', @attachScroll
+      @listenTo @collection, 'fetched:last', @detachScroll
+      @listenTo @collection, 'beforeFetch', @showLoadingIndicator
+      if @autoFetch or @fetchItAll
+        @listenTo @collection, 'fetch', => setTimeout @checkScroll # next tick so events don't stomp on each other
       else
-        @collection.on 'fetch', @hideLoadingIndicator
+        @listenTo @collection, 'fetch', @hideLoadingIndicator
 
     ##
     # Sets instance properties regarding the scrollContainer
@@ -113,13 +145,13 @@ define [
 
     checkScroll: =>
       return if @collection.fetchingPage or @collection.fetchingNextPage or not @$el.length
-      elementBottom = @$scrollableElement.position().top +
+      elementBottom = (@$scrollableElement.position()?.top || 0) +
         @$scrollableElement.height() -
-        @heightContainer.position().top
+        @heightContainer.position()?.top
       distanceToBottom = elementBottom -
         @scrollContainer.scrollTop() -
         @scrollContainer.height()
-      if distanceToBottom < @options.buffer and @collection.canFetch('next')
+      if (@fetchItAll || distanceToBottom < @options.buffer) and @collection.canFetch('next')
         @collection.fetch page: 'next'
       else
         @hideLoadingIndicator()

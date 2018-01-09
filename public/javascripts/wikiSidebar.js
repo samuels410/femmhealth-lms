@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,28 +12,26 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-  'i18n!wiki.sidebar',
-  'jquery' /* $ */,
-  'str/htmlEscape',
-  'jquery.ajaxJSON' /* ajaxJSON */,
-  'jquery.inst_tree' /* instTree */,
-  'jquery.instructure_forms' /* formSubmit, handlesHTML5Files, ajaxFileUpload, fileData */,
-  'jqueryui/dialog',
-  'jquery.instructure_misc_helpers' /* replaceTags */,
-  'jquery.instructure_misc_plugins' /* /\.log\(/ */,
-  'compiled/jquery.rails_flash_notifications',
-  'jquery.templateData' /* fillTemplateData */,
-  'tinymce.editor_box',
-  'vendor/jquery.pageless' /* pageless */,
-  'jqueryui/accordion' /* /\.accordion\(/ */,
-  'jqueryui/tabs' /* /\.tabs/ */,
-  'vendor/scribd.view' /* scribd */
-], function(I18n, $, htmlEscape) {
+import I18n from 'i18n!wiki.sidebar'
+import $ from 'jquery'
+import htmlEscape from './str/htmlEscape'
+import UsageRights from 'compiled/util/UsageRights'
+import './jquery.ajaxJSON'
+import './jquery.inst_tree'
+import './jquery.instructure_forms' /* formSubmit, handlesHTML5Files, ajaxFileUpload, fileData */
+import 'jqueryui/dialog'
+import './jquery.instructure_misc_helpers' /* replaceTags */
+import './jquery.instructure_misc_plugins' /* /\.log\(/ */
+import 'compiled/jquery.rails_flash_notifications'
+import './jquery.templateData' /* fillTemplateData */
+// 'tinymce.editor_box', // required, but not loaded here so that all of tinymce doesn't end up in the common bundle
+import 'vendor/jquery.pageless'
+import 'jqueryui/accordion'
+import 'jqueryui/tabs'
 
   var $editor_tabs,
       $tree1,
@@ -44,17 +42,23 @@ define([
       $wiki_sidebar_select_folder_dialog,
       treeItemCount=0;
 
-  // unlikely, but there's a chance this domready call will happen after other
-  // scripts try to call methods on wikiSidebar, need to re-architect this a bit
-  $(function(){
-    $editor_tabs = $("#editor_tabs");
-    $tree1 = $editor_tabs.find('ul#tree1');
-    $image_list = $editor_tabs.find('#editor_tabs_4 .image_list');
-    $course_show_secondary = $("#course_show_secondary");
-    $sidebar_upload_image_form = $("form#sidebar_upload_image_form");
-    $sidebar_upload_file_form = $("form#sidebar_upload_file_form");
-    $wiki_sidebar_select_folder_dialog = $("#wiki_sidebar_select_folder_dialog");
-  });
+  // cache all the above jquery selections so we're not doing it over and over
+  // (and can confirm they worked with return value). at a minimum, the cache
+  // will be ensured during init, which should be the first call that needs
+  // them (if you're calling e.g. show/hide before init, shame on you).
+  var cacheElements = function() {
+    // don't redo the work if they've already been loaded
+    if ($editor_tabs === undefined || $editor_tabs.length == 0) {
+      $editor_tabs = $("#editor_tabs");
+      $tree1 = $editor_tabs.find('ul#tree1');
+      $image_list = $editor_tabs.find('#editor_tabs_4 .image_list');
+      $course_show_secondary = $("#course_show_secondary");
+      $sidebar_upload_image_form = $("form#sidebar_upload_image_form");
+      $sidebar_upload_file_form = $("form#sidebar_upload_file_form");
+      $wiki_sidebar_select_folder_dialog = $("#wiki_sidebar_select_folder_dialog");
+    }
+    return $editor_tabs.length > 0;
+  }
 
   var wikiSidebar = {
     // Generate a new tree item id. Type can be either 'file' or 'folder'
@@ -67,7 +71,7 @@ define([
     itemSelected: function(item) {
       switch(item.item_type) {
         case 'image':
-          wikiSidebar.editor.editorBox('insert_code', '<img alt="' + item.title + '" src="' + item.link_url + '"/>');
+          wikiSidebar.editor.editorBox('insert_code', '<img alt="' + htmlEscape(item.title) + '" src="' + htmlEscape(item.link_url) + '"/>');
           break;
         default: // we'll rely on enhance-user-content to create youtube thumbnails, etc.
           wikiSidebar.editor.editorBox('create_link', {title: (item.title || I18n.t("no_title", "No title")), url: item.link_url});
@@ -88,7 +92,7 @@ define([
     imageSelected: function($img) {
       var src = $img.data('url') || $img.attr('src'),
           alt = $img.attr('alt');
-      wikiSidebar.editor.editorBox('insert_code', '<img alt="'+alt+'" src="'+src+'"/>');
+      wikiSidebar.editor.editorBox('insert_code', '<img alt="'+htmlEscape(alt)+'" src="'+htmlEscape(src)+'"/>');
     },
     fileAdded: function(attachment, newUploadOrCallbackOrParent, fileCallback) {
       var children, newUpload, imageCallback, $file;
@@ -105,17 +109,17 @@ define([
       }
       if(children.length || fileCallback) {
         var file = attachment;
-        var displayName = "<span class='screenreader-only'>" + htmlEscape(file.display_name) + " " + I18n.t('aria_tree.file', 'file') + "</span>" + htmlEscape(file.display_name);
+        var displayName = "<span class='screenreader-only'>" + htmlEscape(file.display_name) + " " + htmlEscape(I18n.t('aria_tree.file', 'file')) + "</span>" + htmlEscape(file.display_name);
 
         $file = $tree1.find(".file_blank").clone(true);
         $file
           .attr('class', 'file')
-          .attr('title', file.display_name)
+          .attr('title', htmlEscape(file.display_name))
           .attr('data-tooltip', '')
           .attr('aria-level', children.data('level'))
           .attr('id', this.generateTreeItemID('file'))
           .addClass(file.mime_class)
-          .toggleClass('scribdable', file['scribdable?']);
+          .toggleClass('scribdable', !!(file.canvadoc_session_url));
         if(file.media_entry_id) {
           $file
             .addClass('kalturable')
@@ -172,7 +176,7 @@ define([
     loadFolder: function(node) {
       node.data('includes_files', true);
       var url = $.replaceTags($("#editor_tabs_3 #folder_url").attr('href'), 'id', node.data('id'));
-      $loading = $tree1.find(">.loading").clone();
+      var $loading = $tree1.find(">.loading").clone();
       $loading.show();
       node.append($loading);
       $.ajaxJSON(url, 'GET', {}, function(data) {
@@ -185,7 +189,7 @@ define([
           var folder = data.sub_folders[idx].folder;
           var $folder = $tree1.find(".folder_blank").clone(true);
           $folder.attr('class', 'folder').data('id', folder.id).addClass('folder_' + folder.id);
-          $folder.find('.name').html(" <span class='screenreader-only'>" + htmlEscape(folder.name) + " " + I18n.t('aria_tree.folder', 'folder') + "</span>" + htmlEscape(folder.name) );
+          $folder.find('.name').html(" <span class='screenreader-only'>" + htmlEscape(folder.name) + " " + htmlEscape(I18n.t('aria_tree.folder', 'folder')) + "</span>" + htmlEscape(folder.name) );
           $folder.attr('aria-level', children.data('level'))
                  .attr('id', wikiSidebar.generateTreeItemID('folder'));
           children.append($folder);
@@ -214,7 +218,7 @@ define([
         }
         var $option = $("<option />");
         $option.val(folder.id);
-        $option.html(name);
+        $option.html($.raw(name));
         $sidebar_upload_file_form.find('#attachment_folder_id').append($option.clone());
         $sidebar_upload_image_form.find('#image_folder_id').append($option.clone());
         $wiki_sidebar_select_folder_dialog.find('.folder_id').append($option.clone());
@@ -232,9 +236,9 @@ define([
           var root_folder_id;
           for(var idx in data.folders) {
             var folder = data.folders[idx].folder;
-            if(!folders[folder.id]) {
-              folders[folder.id] = folder;
-            }
+            // merge placeholder (if any) with actual content
+            folders[folder.id] = $.extend(folder, folders[folder.id]);
+
             if(!folder.parent_folder_id) {
               root_folder_id = folder.id;
               continue;
@@ -252,11 +256,20 @@ define([
       }
     },
     init: function() {
+      // cache the elements if they haven't been yet. if they can't be cached
+      // yet, warn about it
+      if (!cacheElements()) {
+        console.warn("called wikiSidebar.init() before $('#editor_tabs') was on the page");
+      }
+
       wikiSidebar.inited = true;
-      $editor_tabs.find("#pages_accordion a.add").click(function(event){
+
+      UsageRights.render('#usage-rights');
+
+      $editor_tabs.find('#pages_accordion a.icon-add').click(function (event) {
         event.preventDefault();
         $editor_tabs.find('#new_page_drop_down').slideToggle("fast", function() {
-          $(this).find(":text:visible:first").focus().select();
+          $(this).find(':text:visible:first').focus().select();
         });
       });
 
@@ -312,7 +325,7 @@ define([
             }
           });
 
-          $node = $tree1.find('.folder').first();
+          var $node = $tree1.find('.folder').first();
           $tree1.attr('aria-activedescendant', $node.attr('id'));
           $tree1.find('[aria-selected="true"]').attr('aria-selected', 'false');
           $node.attr('aria-selected', 'true');
@@ -351,10 +364,11 @@ define([
 
       $("#new_page_drop_down").submit(function(event){
         event.preventDefault();
-        var pageName = $.trim($("#new_page_name").val()).replace(/\s/g, '-').toLowerCase();
+        var rawPageName = $("#new_page_name").val();
+        var encodedPageName = encodeURIComponent(rawPageName);
         wikiSidebar.editor.editorBox('create_link', {
-          title: $("#new_page_name").val(),
-          url: $("#new_page_url_prefix").val()+ "/" + pageName
+          title: rawPageName,
+          url: $("#new_page_url_prefix").val()+ "/" + encodedPageName + "?titleize=0"
         });
         $('#new_page_drop_down').slideUp("fast");
         $("#new_page_name").val("");
@@ -625,6 +639,7 @@ define([
           $sidebar_upload_file_form.slideUp(function() {
             $sidebar_upload_file_form.find(".uploading").hide();
           });
+          UsageRights.setFileUsageRights(data.attachment);
           wikiSidebar.fileAdded(data.attachment, true, function(node) {
             wikiSidebar.fileSelected(node);
           });
@@ -641,6 +656,4 @@ define([
     }
   };
 
-  return wikiSidebar;
-});
-
+export default wikiSidebar;

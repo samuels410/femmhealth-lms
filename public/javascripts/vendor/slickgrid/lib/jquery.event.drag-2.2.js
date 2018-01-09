@@ -1,3 +1,5 @@
+import $ from 'jquery'
+
 /*! 
  * jquery.event.drag - v 2.2
  * Copyright (c) 2010 Three Dub Media - http://threedubmedia.com
@@ -399,4 +401,4 @@ $event.fixHooks.touchcancel = {
 // share the same special event configuration with related events...
 $special.draginit = $special.dragstart = $special.dragend = drag;
 
-})( jQuery );
+})( $ );

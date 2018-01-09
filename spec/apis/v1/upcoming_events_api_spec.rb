@@ -30,7 +30,7 @@ describe UsersController, type: :request do
   end
 
   context "with current_user" do
-    before do
+    before :once do
       course_with_teacher(:active_all => true, :user => user_with_pseudonym(:active_user => true))
       @me = @user
       # course_with_student(:active_all => true)
@@ -40,7 +40,7 @@ describe UsersController, type: :request do
       json = api_call(:get, "/api/v1/users/self/upcoming_events",
                       :controller => "users", :action => "upcoming_events",
                       :format => "json")
-      json.should == []
+      expect(json).to eq []
     end
 
     context "having a calendar event on the user" do
@@ -54,7 +54,7 @@ describe UsersController, type: :request do
         json = api_call(:get, "/api/v1/users/self/upcoming_events",
                         :controller => "users", :action => "upcoming_events",
                         :format => "json")
-        json.map{ |e| e['title'] }.should == ["Upcoming Event"]
+        expect(json.map{ |e| e['title'] }).to eq ["Upcoming Event"]
       end
     end
 
@@ -73,10 +73,30 @@ describe UsersController, type: :request do
         json = api_call(:get, "/api/v1/users/self/upcoming_events",
                         :controller => "users", :action => "upcoming_events",
                         :format => "json")
-        json.map{ |e| e['title'] }.should == [
+        expect(json.map{ |e| e['title'] }).to eq [
           "Upcoming Course Event",
           "Upcoming Assignment"
         ]
+      end
+
+      it "doesn't gets the events if the course is unpublished and the user is a teacher" do
+        @course.claim!
+        json = api_call(:get, "/api/v1/users/self/upcoming_events",
+          :controller => "users", :action => "upcoming_events",
+          :format => "json")
+        expect(json.map{ |e| e['title'] }).to eq [
+          "Upcoming Course Event",
+          "Upcoming Assignment"
+        ]
+      end
+
+      it "doesn't gets the events if the course is unpublished and the user is a student" do
+        student_in_course(:active_all => true, :course => @course)
+        @course.claim!
+        json = api_call(:get, "/api/v1/users/self/upcoming_events",
+          :controller => "users", :action => "upcoming_events",
+          :format => "json")
+        expect(json).to be_blank
       end
     end
   end

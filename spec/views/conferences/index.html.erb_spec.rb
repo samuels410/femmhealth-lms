@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -22,7 +22,7 @@ require File.expand_path(File.dirname(__FILE__) + '/../views_helper')
 describe "/conference/index" do
   before do
     # these specs need an enabled web conference plugin
-    @plugin = PluginSetting.find_or_create_by_name('wimba')
+    @plugin = PluginSetting.create!(name: 'wimba')
     @plugin.update_attribute(:settings, { :domain => 'www.example.com' })
   end
 
@@ -33,10 +33,10 @@ describe "/conference/index" do
     @conference.user = @user
     @conference.save!
     @conference.add_initiator(@user)
-    assigns[:conferences] = [@conference]
-    assigns[:users] = @course.users
+    assign(:conferences, [@conference])
+    assign(:users, @course.users)
     render "conferences/index"
-    response.should have_tag("#new-conference-list")
+    expect(response).to have_tag("#new-conference-list")
   end
 end
 

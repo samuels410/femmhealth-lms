@@ -1,9 +1,27 @@
+#
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 module LocaleSelection
   def infer_locale(options = {})
     context = options[:context]
     user = options[:user]
     root_account = options[:root_account]
     accept_language = options[:accept_language]
+    session_locale = options[:session_locale]
 
     # groups cheat and set the context to be the group after get_context runs
     # but before set_locale runs, but we want to do locale lookup based on the
@@ -12,22 +30,29 @@ module LocaleSelection
       context = context.context
     end
 
-    if context && context.is_a?(Course) && context.locale
-      context.locale
-    elsif user && user.locale
-      user.locale
-    elsif context && context.is_a?(Course) && context.account && (account_locale = context.account.default_locale(true))
-      account_locale
-    elsif context && context.is_a?(Account) && (account_locale = context.default_locale(true))
-      account_locale
-    elsif root_account && root_account.default_locale
-      root_account.default_locale
-    elsif accept_language && locale = infer_browser_locale(accept_language, I18n.available_locales)
-      user.update_attribute(:browser_locale, locale) if user && user.browser_locale != locale
-      locale
-    elsif user && user.browser_locale
-      user.browser_locale
-    end || I18n.default_locale.to_s
+    sources = [
+      -> { context.locale if context.try(:is_a?, Course) },
+      -> { user.locale if user && user.locale },
+      -> { session_locale if session_locale },
+      -> { context.account.try(:default_locale, true) if context.try(:is_a?, Course) },
+      -> { context.default_locale(true) if context.try(:is_a?, Account) },
+      -> { root_account.try(:default_locale) },
+      -> {
+        if accept_language && locale = infer_browser_locale(accept_language, I18n.available_locales)
+          user.update_attribute(:browser_locale, locale) if user && user.browser_locale != locale
+          locale
+        end
+         },
+      -> { user.try(:browser_locale) },
+      -> { I18n.default_locale.to_s }
+          ]
+
+    sources.each do |source|
+      locale = source.call
+      locale = nil unless I18n.locale_available?(locale)
+      return locale if locale
+    end
+    nil
   end
 
   QUALITY_VALUE = /;q=([01]\.(\d{0,3})?)/
@@ -78,15 +103,24 @@ module LocaleSelection
   # if the locale name is not yet translated, it won't be included (even if
   # there are other translations for that locale)
   def available_locales
-    I18n.available_locales.inject({}) do |hash, locale|
-      name = I18n.send(:t, "locales", :locale => locale)[locale]
-      hash[locale.to_s] = name if name
-      hash
+    result = {}
+    settings = Canvas::Plugin.find(:i18n).settings || {}
+    enabled_custom_locales = settings.select { |locale, enabled| enabled }.map(&:first).map(&:to_sym)
+    I18n.available_locales.each do |locale|
+      name = I18n.send(:t, :locales, :locale => locale)[locale]
+      custom = I18n.send(:t, :custom, locale: locale) == true
+      next if custom && !enabled_custom_locales.include?(locale)
+      result[locale.to_s] = name if name
     end
+    result
+  end
+
+  def self.custom_locales
+    @custom_locales ||= I18n.available_locales.select{ |locale| I18n.send(:t, :custom, :locale => locale) == true }.sort
   end
 
   def crowdsourced_locales
-    @crowdsourced_locales ||= I18n.available_locales.select{|locale| I18n.send(:t, "crowdsourced", :locale => locale) == true}
+    @crowdsourced_locales ||= I18n.available_locales.select{ |locale| I18n.send(:t, :crowdsourced, :locale => locale) == true }
   end
 end
 

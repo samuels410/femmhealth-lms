@@ -1,11 +1,28 @@
+#
+# Copyright (C) 2014 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 module LtiOutbound
-  class LTITool
+  class LTITool < LTIModel
     PRIVACY_LEVEL_PUBLIC = :public
     PRIVACY_LEVEL_NAME_ONLY = :name_only
     PRIVACY_LEVEL_EMAIL_ONLY = :email_only
     PRIVACY_LEVEL_ANONYMOUS  = :anonymous
 
-    attr_accessor :consumer_key, :privacy_level, :name, :settings, :shared_secret
+    proc_accessor :consumer_key, :privacy_level, :name, :settings, :shared_secret
 
     def include_name?
       [PRIVACY_LEVEL_PUBLIC, PRIVACY_LEVEL_NAME_ONLY].include? privacy_level
@@ -29,17 +46,19 @@ module LtiOutbound
       if resource_type && settings[resource_type.to_sym]
         fields << (settings[resource_type.to_sym][:custom_fields] || {})
       end
-      fields.each do |field_set|
-        field_set.each do |key, val|
-          key = key.to_s.gsub(/[^\w]/, '_').downcase
-          if key.match(/^custom_/)
-            hash[key] = val
-          else
-            hash["custom_#{key}"] = val
-          end
+      fields.each { |field_set| hash.merge!(format_lti_params('custom', field_set)) }
+      nil
+    end
+
+    def format_lti_params(prefix, params)
+      params.each_with_object({}) do |(k, v), hash|
+        key = k.to_s.gsub(/[^\w]/, '_').downcase
+        if key.match(/^#{prefix}_/)
+          hash[key] = v
+        else
+          hash["#{prefix}_#{key}"] = v
         end
       end
-      nil
     end
 
     def selection_width(resource_type)

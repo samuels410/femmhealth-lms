@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'i18n!calendar'
@@ -7,10 +24,12 @@ define [
   'compiled/calendar/EditAssignmentDetails'
   'compiled/calendar/EditApptCalendarEventDialog'
   'compiled/calendar/EditAppointmentGroupDetails'
+  'compiled/calendar/EditPlannerNoteDetails'
   'jst/calendar/editEvent'
   'jqueryui/dialog'
   'jqueryui/tabs'
-], ($, I18n, _, CommonEvent, EditCalendarEventDetails, EditAssignmentDetails, EditApptCalendarEventDialog, EditAppointmentGroupDetails, editEventTemplate) ->
+], ($, I18n, _, CommonEvent, EditCalendarEventDetails, EditAssignmentDetails,
+    EditApptCalendarEventDialog, EditAppointmentGroupDetails, EditPlannerNoteDetails, editEventTemplate) ->
 
   dialog = $('<div id="edit_event"><div /></div>').appendTo('body').dialog
     autoOpen: false
@@ -19,7 +38,7 @@ define [
     title: I18n.t('titles.edit_event', "Edit Event")
 
   class
-    constructor: (@event) ->
+    constructor: (@event, @betterScheduler) ->
       @currentContextInfo = null
       dialog.on('dialogclose', @dialogClose)
 
@@ -38,13 +57,33 @@ define [
 
       if @event.eventType == 'calendar_event'
         tabs.tabs('select', 0)
+        tabs.tabs('remove', 2)
         tabs.tabs('remove', 1)
+        if @canManageAppointments() then tabs.tabs('remove', 3)
         @calendarEventForm.activate()
       else if @event.eventType.match(/assignment/)
         tabs.tabs('select', 1)
+        tabs.tabs('remove', 2)
         tabs.tabs('remove', 0)
+        if @canManageAppointments() then tabs.tabs('remove', 3)
         @assignmentDetailsForm.activate()
+      else if @event.eventType.match(/appointment/) && @canManageAppointments()
+        tabs.tabs('select', 3)
+        tabs.tabs('remove', 2)
+        tabs.tabs('remove', 1)
+        tabs.tabs('remove', 0)
+        @appointmentGroupDetailsForm.activate()
+      else if @event.eventType == 'planner_note'
+        tabs.tabs('select', 2)
+        tabs.tabs('remove', 3)
+        tabs.tabs('remove', 1)
+        tabs.tabs('remove', 0)
+        @plannerNoteDetailsForm.activate()
       else
+        #don't show To Do tab if the planner isn't enabled
+        if !ENV.STUDENT_PLANNER_ENABLED
+          tabs.tabs('remove', 2)
+
         # don't even show the assignments tab if the user doesn't have
         # permission to create them
         can_create_assignments = _.any(@event.allPossibleContexts, (c) -> c.can_create_assignments)
@@ -68,11 +107,17 @@ define [
         @oldFocus.focus()
         @oldFocus = null
 
+    canManageAppointments: () =>
+      if ENV.CALENDAR.BETTER_SCHEDULER
+        if _.some(@event.allPossibleContexts, (c) -> c.can_create_appointment_groups)
+          return true
+      return false
+
     show: =>
       if @event.isAppointmentGroupEvent()
         new EditApptCalendarEventDialog(@event).show()
       else
-        html = editEventTemplate()
+        html = editEventTemplate({showAppointments: @canManageAppointments()})
         dialog.children().replaceWith(html)
 
         if @event.isNewEvent() || @event.eventType == 'calendar_event'
@@ -83,6 +128,24 @@ define [
         if @event.isNewEvent() || @event.eventType.match(/assignment/)
           @assignmentDetailsForm = new EditAssignmentDetails($('#edit_assignment_form_holder'), @event, @contextChange, @closeCB)
           dialog.find("#edit_assignment_form_holder").data('form-widget', @assignmentDetailsForm)
+
+        if @event.isNewEvent() || @event.eventType == 'planner_note'
+          formHolder = dialog.find('#edit_planner_note_form_holder')
+          @plannerNoteDetailsForm = new EditPlannerNoteDetails(formHolder, @event, @contextChange, @closeCB)
+          formHolder.data('form-widget', @plannerNoteDetailsForm)
+
+        if @event.isNewEvent() && @canManageAppointments()
+          group = {
+            context_codes: []
+            sub_context_codes: []
+          }
+          @appointmentGroupDetailsForm = new EditAppointmentGroupDetails($('#edit_appointment_group_form_holder'),
+                                                                         group,
+                                                                         _.filter(@event.allPossibleContexts, (c) -> c.can_create_appointment_groups),
+                                                                         @closeCB,
+                                                                         @event,
+                                                                         @betterScheduler)
+          dialog.find("#edit_appointment_group_form_holder").data('form-widget', @appointmentGroupDetailsForm)
 
         @setupTabs()
 

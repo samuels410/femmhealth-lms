@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,21 +18,23 @@
 
 # @API Courses
 class ContentImportsController < ApplicationController
-  before_filter :require_context
-  before_filter { |c| c.active_tab = "home" }
-  prepend_around_filter :load_pseudonym_from_policy, :only => :migrate_content_upload
-  
+  before_action :require_context
+  before_action { |c| c.active_tab = "home" }
+  prepend_around_action :load_pseudonym_from_policy, :only => :migrate_content_upload
+
   include Api::V1::Course
   include ContentImportsHelper
 
-  COPY_TYPES = %w{assignment_groups assignments context_modules learning_outcomes
-                quizzes assessment_question_banks folders attachments wiki_pages discussion_topics
-                calendar_events context_external_tools learning_outcome_groups rubrics}
+  COPY_TYPES = %w{assignment_groups assignments context_modules
+                  learning_outcomes quizzes assessment_question_banks folders
+                  attachments wiki_pages discussion_topics calendar_events
+                  context_external_tools learning_outcome_groups rubrics}.freeze
 
   # these are deprecated, but leaving them for a while so existing links get redirected
   def index
     redirect_to course_content_migrations_url(@context)
   end
+
   def intro
     redirect_to course_content_migrations_url(@context)
   end
@@ -67,7 +69,7 @@ class ContentImportsController < ApplicationController
       @context = api_find(Course, params[:course_id])
     end
     if authorized_action(@context, @current_user, :manage_content)
-      cm = ContentMigration.find_by_context_id_and_id(@context.id, params[:id])
+      cm = ContentMigration.where(context_id: @context, id: params[:id]).first
       raise ActiveRecord::RecordNotFound unless cm
 
       respond_to do |format|
@@ -75,8 +77,8 @@ class ContentImportsController < ApplicationController
       end
     end
   end
-  
-  
+
+
   # @API Copy course content
   #
   # DEPRECATED: Please use the {api:ContentMigrationsController#create Content Migrations API}
@@ -102,7 +104,7 @@ class ContentImportsController < ApplicationController
     if api_request?
       @context = api_find(Course, params[:course_id])
     end
-    
+
     if authorized_action(@context, @current_user, :manage_content)
       if api_request?
         @source_course = api_find(Course, params[:source_course])
@@ -125,18 +127,19 @@ class ContentImportsController < ApplicationController
       end
 
       # make sure the user can copy from the source course
-      return render_unauthorized_action unless @source_course.grants_rights?(@current_user, nil, :read, :read_as_admin).values.all?
+      return render_unauthorized_action unless @source_course.grants_all_rights?(@current_user, :read, :read_as_admin)
       cm = ContentMigration.create!(:context => @context,
                                     :user => @current_user,
                                     :source_course => @source_course,
                                     :copy_options => copy_params,
-                                    :migration_type => 'course_copy_importer')
+                                    :migration_type => 'course_copy_importer',
+                                    :initiated_source => api_request? ? :api : :manual)
       cm.queue_migration
       cm.workflow_state = 'created'
       render :json => copy_status_json(cm, @context, @current_user, session)
     end
   end
-  
+
   private
 
   def process_migration_params
@@ -150,7 +153,6 @@ class ContentImportsController < ApplicationController
           end
         end
       end
-      params.delete :items_to_copy
     end
   end
 
@@ -160,7 +162,7 @@ class ContentImportsController < ApplicationController
           "topics" => "discussion_topics",
           "modules" => "context_modules",
           "outcomes" => "learning_outcomes"
-  }
+  }.freeze
   # convert types selected in API to expected format
   def convert_to_table_name(selections)
     selections.map{|s| SELECTION_CONVERSIONS[s] || s}

@@ -1,41 +1,32 @@
-if CANVAS_RAILS2
-  require File.expand_path('../spec_helper', File.dirname( __FILE__ ))
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 
-  describe "parse_multipart" do
-    it "should not treat multipart params with content-type but no filename as files" do
-      message = <<-MESSAGE.strip.gsub("\n", "\r\n")
---lolwut
-Content-Disposition: form-data; name="not-a-file"
-Content-Type: text/plain; charset=US-ASCII
-Content-Transfer-Encoding: 8bit
+require_relative "../spec_helper"
 
-this isn't a file
---lolwut
-Content-Disposition: form-data; name="file"; filename="filename.frd"
-Content-Type: application/octet-stream
-Content-Transfer-Encoding: 8bit
+describe 'Rack::Utils' do
+  it "raises an exception if the params are too deep" do
+    len = Rack::Utils.param_depth_limit
 
-this one really is a file
---lolwut--
-      MESSAGE
-      env = { 'CONTENT_TYPE' => 'multipart/form-data; boundary=lolwut',
-              'CONTENT_LENGTH' => message.size,
-              'rack.input' => StringIO.new(message)
-      }
+    expect(-> {
+      Rack::Utils.parse_nested_query("foo#{"[a]" * len}=bar")
+    }).to raise_error(RangeError)
 
-      params = Rack::Utils::Multipart.parse_multipart(env)
-      params["not-a-file"].should eql "this isn't a file"
-      params["file"][:filename].should eql "filename.frd"
-      params["file"][:tempfile].read.should eql "this one really is a file"
-    end
-
-    it "should not explode with a non-ASCII file attachment" do
-      request_file = File.open( File.expand_path('../fixtures/multipart-request', File.dirname(__FILE__)) )
-      env = { 'CONTENT_TYPE' => 'multipart/form-data; boundary=----WebKitFormBoundary2raDSu0SsqTAphBU',
-              'CONTENT_LENGTH' => request_file.size,
-              'rack.input' => request_file
-      }
-      lambda { Rack::Utils::Multipart.parse_multipart(env) }.should_not raise_error
-    end
+    expect(-> {
+      Rack::Utils.parse_nested_query("foo#{"[a]" * (len - 1)}=bar")
+    }).to_not raise_error
   end
 end

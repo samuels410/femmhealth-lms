@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -22,13 +22,29 @@ module Api::V1::GroupCategory
   include Api::V1::Progress
 
   API_GROUP_CATEGORY_JSON_OPTS = {
-    :only => %w(id name role self_signup group_limit)
+    :only => %w(id name role self_signup group_limit auto_leader)
   }
 
   def group_category_json(group_category, user, session, options = {})
-    hash = api_json(group_category, user, session, API_GROUP_CATEGORY_JSON_OPTS)
-    hash.merge!(context_data(group_category))
-    if includes = options[:include]
+    api_json(group_category, user, session, API_GROUP_CATEGORY_JSON_OPTS).
+     merge!(context_data(group_category)).
+     merge!(included_data(group_category, user, session, options[:include])).
+     merge!(group_category_data(group_category, user))
+  end
+
+  private
+
+  def group_category_data(group_category, user)
+    {
+      'protected' => group_category.protected?,
+      'allows_multiple_memberships' => group_category.allows_multiple_memberships?,
+      'is_member' => group_category.is_member?(user)
+    }
+  end
+
+  def included_data(group_category, user, session, includes)
+    hash = {}
+    if includes
       if includes.include?('progress_url') && group_category.current_progress && group_category.current_progress.pending?
         hash['progress'] = progress_json(group_category.current_progress, user, session)
       end
@@ -36,11 +52,9 @@ module Api::V1::GroupCategory
         hash['groups_count'] = group_category.groups.active.size
       end
       if includes.include?('unassigned_users_count')
-        hash['unassigned_users_count'] = group_category.unassigned_users.count
+        hash['unassigned_users_count'] = group_category.unassigned_users.count(:all)
       end
     end
-    hash['protected'] = group_category.protected?
-    hash['allows_multiple_memberships'] = group_category.allows_multiple_memberships?
     hash
   end
 end

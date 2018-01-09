@@ -1,13 +1,35 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'i18n!calendar'
   'jquery'
+  'moment'
+  'timezone_core'
+  'compiled/util/fcUtil'
+  'compiled/calendar/CalendarEventFilter'
   'underscore'
   'Backbone'
   'compiled/collections/CalendarEventCollection'
   'compiled/calendar/ShowEventDetailsDialog'
   'jst/calendar/agendaView'
+  'compiled/calendar/fcMomentHandlebarsHelpers' # make sure fcMomentToString is available to agendaView.handlebars
   'vendor/jquery.ba-tinypubsub'
-], (I18n, $, _, Backbone, CalendarEventCollection, ShowEventDetailsDialog, template) ->
+], (I18n, $, moment, tz, fcUtil, calendarEventFilter, _, Backbone, CalendarEventCollection, ShowEventDetailsDialog, template) ->
 
   class AgendaView extends Backbone.View
 
@@ -20,40 +42,44 @@ define [
 
     events:
       'click .agenda-load-btn': 'loadMore'
-      'click .ig-row': 'manageEvent'
-      'keyclick .ig-row': 'manageEvent'
+      'click .agenda-event__item-container': 'manageEvent'
+      'keyclick .agenda-event__item-container': 'manageEvent'
 
     messages:
       loading_more_items: I18n.t('loading_more_items', "Loading more items.")
 
     @optionProperty 'calendar'
 
+    #Can't be tied to the AgendaView object, because it must maintain persistance.
+    currentIndex = -1
+    focusedAlready = false
+
     constructor: ->
       super
       @dataSource = @options.dataSource
+      @viewingGroup = null
 
       $.subscribe
         "CommonEvent/eventDeleted" : @refetch
         "CommonEvent/eventSaved" : @refetch
+        "CalendarHeader/createNewEvent" : @handleNewEvent
 
-    fetch: (contexts, start = new Date) ->
+    hide: ->
+      @$el.removeClass('active')
+
+    fetch: (contexts, start) ->
       @$el.empty()
       @$el.addClass('active')
 
       @contexts = contexts
+      @startDate = fcUtil.clone(start).stripTime()
 
-      start.setHours(0)
-      start.setMinutes(0)
-      start.setSeconds(0)
-
-      @startDate = start
-
-      @_fetch(start, @handleEvents)
+      @_fetch(@startDate, @handleEvents)
 
     _fetch: (start, callback) ->
-      end = new Date(3000, 1, 1)
+      end = fcUtil.clone(start).year(3000)
       @lastRequestID = $.guid++
-      @dataSource.getEvents start, end, @contexts, callback, {singlePage: true, requestID: @lastRequestID}
+      @dataSource.getEvents start, end, @contexts, callback, undefined, {singlePage: true, requestID: @lastRequestID}
 
     refetch: =>
       return unless @startDate
@@ -67,7 +93,7 @@ define [
 
     appendEvents: (events) =>
       @nextPageDate = events.nextPageDate
-      @collection.push.apply(@collection, events)
+      @collection.push.apply(@collection, calendarEventFilter(@viewingGroup, events, @calendar?.schedulerState))
       @collection = _.sortBy(@collection, 'originalStart')
       @render()
 
@@ -88,16 +114,36 @@ define [
       $firstEventDayDate = $firstEventDay.find('.agenda-date')
       $firstEventDayDate[0].focus() if $firstEventDayDate.length
 
+    refocusAfterRender: () ->
+      if ((!@collection.length  || currentIndex == -1) && focusedAlready)
+        $("#create_new_event_link").focus()
+        currentIndex = -1
+      else if(currentIndex >= 0)
+        children = @$('.agenda-event__list').children()
+        elementToFocus = $((children[currentIndex] || children[children.length - 1])).children().first()
+        elementToFocus.focus() if elementToFocus
+
     manageEvent: (e) ->
-      eventId = $(e.target).closest('.agenda-event').data('event-id')
+      e.preventDefault()
+      e.stopPropagation()
+      focusedAlready = true #So we don't focus the add button right when the page loads.
+      eventEl = $(e.target).closest('.agenda-event__item')
+      eventId = eventEl.data('event-id')
+      currentIndex = -1 #Default currentIndex to be -1 just in case we don't find any event.
+      @collection.forEach((val, index, list) => currentIndex = index if val.id == eventId)
       event = @dataSource.eventWithId(eventId)
       new ShowEventDetailsDialog(event, @dataSource).show e
+
+    handleNewEvent: (e) ->
+      #Until we highlight an event, stay focused on the button.
+      currentIndex = -1
 
     render: =>
       super
       @$spinner.hide()
       $.publish('Calendar/colorizeContexts')
 
+      @refocusAfterRender()
       lastEvent = _.last(@collection)
       return if !lastEvent
       @trigger('agendaDateRange', @startDate, lastEvent.originalStart)
@@ -132,8 +178,8 @@ define [
     #
     # Returns the formatted String
     formattedDayString: (event) =>
-      I18n.l('#date.formats.short_with_weekday', event.originalStart)
-    
+      tz.format(fcUtil.unwrap(event.originalStart), 'date.formats.short_with_weekday')
+
     # Internal: returns the 'start' of the event formatted for the template
     # Shown to screen reader users, so they hear real month and day names, and
     # not letters like "D E C" or "W E D", or words like "dec" (read "deck")
@@ -142,8 +188,7 @@ define [
     #
     # Returns the formatted String
     formattedLongDayString: (event) =>
-      I18n.l '#date.formats.long_with_weekday', event.originalStart
-      
+      tz.format(fcUtil.unwrap(event.originalStart), 'date.formats.long_with_weekday')
 
     # Internal: change a box of events into an output hash for toJSON
     #
@@ -151,13 +196,13 @@ define [
     #
     # Returns an Object with 'date' and 'events' keys.
     eventBoxToHash: (events) =>
-      now = $.fudgeDateForProfileTimezone(new Date)
+      now = fcUtil.now()
       event = _.first(events)
       start = event.originalStart
       isToday =
-        now.getDate() == start.getDate() &&
-        now.getMonth() == start.getMonth() &&
-        now.getFullYear() == start.getFullYear()
+        now.date() == start.date() &&
+        now.month() == start.month() &&
+        now.year() == start.year()
       date: @formattedDayString(event)
       accessibleDate: @formattedLongDayString(event)
       isToday: isToday
@@ -172,6 +217,8 @@ define [
       days: _.map(boxedEvents, @eventBoxToHash)
       meta:
         hasMore: !!@nextPageDate
+        displayAppointmentEvents: @viewingGroup
+        better_scheduler: ENV.CALENDAR.BETTER_SCHEDULER
 
     # Public: Creates the json for the template.
     #

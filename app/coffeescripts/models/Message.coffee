@@ -1,26 +1,69 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'i18n!messages'
+  'jquery'
   'underscore'
   'Backbone'
   'compiled/str/TextHelper'
-], (_, {Model, Collection}, TextHelper) ->
+], (I18n, $, _, {Model, Collection}, TextHelper) ->
 
   class Message extends Model
     initialize: ->
-      @messageCollection = new Collection()
+      @messageCollection = new Collection(this.get('messages') || [])
       @on('change:messages', @handleMessages)
 
+    save: (attrs, opts) ->
+      if @get('for_submission')
+        $.ajaxJSON "/api/v1/courses/#{@get('course_id')}/assignments/#{@get('assignment_id')}/submissions/#{@get('user_id')}/read.json", if @unread() then 'DELETE' else 'PUT'
+      else
+        Model.prototype.save.call(this)
+
     parse: (data) ->
-      if data.messages
+      if data.type == 'Submission'
+        data.for_submission = true
+        data.subject = "#{data.course.name} - #{data.title}"
+        data.subject_url = data.html_url
+        data.messages = data.submission_comments
+        data.messages.reverse()
         _.each data.messages, (message) ->
-          message.author = _.find(data.participants, (p) -> p.id is message.author_id)
-          message.participants = _.chain(message.participating_user_ids)
-            .map((id) ->
-              return null if id == message.author_id
-              _.find(data.participants, (p) -> p.id == id)
-            )
-            .reject((message) -> _.isNull(message))
-            .value()
-          message.participantNames = _.pluck(message.participants, 'name')
+          message.author.name = message.author.display_name
+          message.bodyHTML = TextHelper.formatMessage(message.comment)
+          message.for_submission = true
+        data.participants = _.uniq(_.map(data.submission_comments, (m) -> {name: m.author_name}), null, (u) -> u.name)
+        data.last_authored_message_at = data.submission_comments[0].created_at
+        data.last_message_at = data.submission_comments[0].created_at
+        data.message_count = I18n.n(data.submission_comments.length)
+        data.last_message = data.submission_comments[0].comment
+        data.read = data.read_state
+        data.workflow_state = if data.read_state then 'read' else 'unread'
+      else if data.messages
+        findParticipant = (id) -> _.find(data.participants, id: id)
+        _.each data.messages, (message) ->
+          message.author = findParticipant(message.author_id)
+
+          message.participants = []
+          message.participantNames = []
+          for id in message.participating_user_ids when id isnt message.author_id
+            if participant = findParticipant(id)
+              message.participants.push participant
+              message.participantNames.push participant.name
+
           if message.participants.length > 2
             message.summarizedParticipantNames = message.participantNames.slice(0, 2)
             message.hiddenParticipantCount = message.participants.length - 2

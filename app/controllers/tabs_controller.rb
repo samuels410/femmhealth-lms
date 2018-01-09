@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,36 +17,63 @@
 #
 
 # @API Tabs
-# @object Tab
-#       {
-#         "html_url": "/courses/1/external_tools/4",
-#         "id": "context_external_tool_4",
-#         "label": "WordPress",
-#         "hidden": true, //only included if true.
-#         "visibility": "public", //possible values are: public, members, admins, and none
-#         "position": 2, // 1 based
-#         "type": "external"
+# @model Tab
+#     {
+#       "id": "Tab",
+#       "description": "",
+#       "properties": {
+#         "html_url": {
+#           "example": "/courses/1/external_tools/4",
+#           "type": "string"
+#         },
+#         "id": {
+#           "example": "context_external_tool_4",
+#           "type": "string"
+#         },
+#         "label": {
+#           "example": "WordPress",
+#           "type": "string"
+#         },
+#         "type": {
+#           "example": "external",
+#           "type": "string"
+#         },
+#         "hidden": {
+#           "description": "only included if true",
+#           "example": true,
+#           "type": "boolean"
+#         },
+#         "visibility": {
+#           "description": "possible values are: public, members, admins, and none",
+#           "example": "public",
+#           "type": "string"
+#         },
+#         "position": {
+#           "description": "1 based",
+#           "example": 2,
+#           "type": "integer"
+#         }
 #       }
-
+#     }
+#
 class TabsController < ApplicationController
   include Api::V1::Tab
 
-  before_filter :require_context
+  before_action :require_context
 
   # @API List available tabs for a course or group
   #
-  # Returns a list of navigation tabs available in the current context.
+  # Returns a paginated list of navigation tabs available in the current context.
   #
   # @argument include[] [String, "external"]
-  #   Optionally include external tool tabs in the returned list of tabs
-  #   (Only has effect for courses, not groups)
+  #   "external":: Optionally include external tool tabs in the returned list of tabs (Only has effect for courses, not groups)
   #
   # @example_request
-  #     curl -H 'Authorization: Bearer <token>' \ 
+  #     curl -H 'Authorization: Bearer <token>' \
   #          https://<canvas>/api/v1/courses/<course_id>/tabs\?include\="external"
   #
   # @example_request
-  #     curl -H 'Authorization: Bearer <token>' \ 
+  #     curl -H 'Authorization: Bearer <token>' \
   #          https://<canvas>/api/v1/groups/<group_id>/tabs"
   #
   # @example_response
@@ -74,14 +101,13 @@ class TabsController < ApplicationController
   #         "label": "Grades",
   #         "position": 3,
   #         "hidden": true
-  #         "visibility": amdin
+  #         "visibility": "admins"
   #         "type": "internal"
   #       }
   #     ]
   def index
     if authorized_action(@context, @current_user, :read)
-      json = tabs_available_json(context_tabs, @current_user, session)
-      render :json => json.select { |tab| tab[:type] == 'external' ? Array(params[:include]).include?('external') : true }
+      render :json => tabs_available_json(@context, @current_user, session, Array(params[:include]))
     end
   end
 
@@ -93,7 +119,7 @@ class TabsController < ApplicationController
   #
   # @argument position [Integer] The new position of the tab, 1-based
   #
-  # @argument hidden \\ true, or false.
+  # @argument hidden [Boolean]
   #
   # @example_request
   #     curl https://<canvas>/api/v1/courses/<course_id>/tabs/tab_id \
@@ -104,19 +130,29 @@ class TabsController < ApplicationController
   #
   # @returns Tab
   def update
-    return unless  authorized_action(@context, @current_user, :manage_content) && @context.is_a?(Course)
+    return unless authorized_action(@context, @current_user, :manage_content) && @context.is_a?(Course)
     css_class = params['tab_id']
     new_pos = params['position'].to_i if params['position']
-    tabs = context_tabs
+    tabs = context_tabs(@context, @current_user)
     tab = (tabs.find { |t| t.with_indifferent_access[:css_class] == css_class }).with_indifferent_access
     tab_config = @context.tab_configuration
-    tab_config = tabs.map { |t| {'id' => t.with_indifferent_access['id']} } if tab_config.blank?
+    tab_config = tabs.map do |t|
+      {
+        'id' => t.with_indifferent_access['id'],
+        'hidden' => t.with_indifferent_access['hidden'],
+        'position' => t.with_indifferent_access['position']
+      }
+    end if tab_config.blank?
     if [@context.class::TAB_HOME, @context.class::TAB_SETTINGS].include?(tab[:id])
       render json: {error: t(:tab_unmanagable_error, "%{css_class} is not manageable", css_class: css_class)}, status: :bad_request
     elsif new_pos && (new_pos <= 1 || new_pos >= tab_config.count + 1)
       render json: {error: t(:tab_location_error, 'That tab location is invalid')}, status: :bad_request
     else
       pos = tab_config.index { |t| t['id'] == tab['id'] }
+      if pos.nil?
+        pos = (tab['position'] || tab_config.size) - 1
+        tab_config.insert(pos, tab.with_indifferent_access.slice(*%w{id hidden position}))
+      end
 
       if value_to_boolean(params['hidden'])
         tab[:hidden] = true
@@ -132,34 +168,7 @@ class TabsController < ApplicationController
 
       @context.tab_configuration = tab_config
       @context.save!
-      render json: tab_json(tab, @current_user, session)
+      render json: tab_json(tab, @context, @current_user, session)
     end
   end
-
-  def context_tabs
-    tabs = @context.tabs_available(@current_user, :include_external => true, :api => true).select do |tab|
-      if (tab[:id] == @context.class::TAB_COLLABORATIONS rescue false)
-        tab[:href] && tab[:label] && Collaboration.any_collaborations_configured?
-      elsif (tab[:id] == @context.class::TAB_CONFERENCES rescue false)
-        tab[:href] && tab[:label] && feature_enabled?(:web_conferences)
-      else
-        tab[:href] && tab[:label]
-      end
-    end
-    tab_positions(tabs)
-  end
-
-  def tab_positions(tabs)
-    tab_config = self.respond_to?(:tab_configuration) && self.tab_configuration.present? && self.tab_configuration
-    tabs.each_with_index.map do |tab, i|
-      if tab_config
-        position = @context.class::TAB_SETTINGS == tab['id'] ? tabs.size : tab_configuration.index { |t| t['id'] == tab['id'] } + 1
-      else
-        position = i + 1
-      end
-      tab[:position] = position
-    end
-    tabs
-  end
-
 end

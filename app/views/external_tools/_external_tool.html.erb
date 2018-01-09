@@ -1,8 +1,27 @@
-<% 
-  tool ||= external_tool 
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
+<%
+  external_tool ||= nil
+  tool ||= external_tool
   classes = []
   if tool
-    ContextExternalTool::EXTENSION_TYPES.each do |type|
+    Lti::ResourcePlacement::PLACEMENTS.each do |type|
       classes << "has_#{type}" if tool.try("has_#{type}")
     end
   end
@@ -12,8 +31,8 @@
   <div class="header clearfix">
     <div class="name"><%= tool.try(:name) %></div>
     <div class="links">
-      <a href="#" rel="<%= context_url(@context, :context_external_tool_url, tool ? tool.id : "{{ id }}") %>" class="update_tool_url edit_tool_link" title="<%= t :edit_tool, "Edit Tool" %>"><%= image_tag "edit.png" %></a>
-      <a href="#" class="delete_tool_link" title="<%= t :delete_tool, "Delete Tool" %>"><%= image_tag "delete.png" %></a>
+      <a href="#" rel="<%= context_url(@context, :context_external_tool_url, tool ? tool.id : "{{ id }}") %>" class="update_tool_url edit_tool_link" title="<%= t :edit_tool, "Edit Tool" %>"><%= image_tag "edit.png", :alt => t('Edit Tool') %></a>
+      <a href="#" class="delete_tool_link" title="<%= t :delete_tool, "Delete Tool" %>"><%= image_tag "delete.png", :alt => t('Delete Tool') %></a>
     </div>
     <div class="clear"></div>
     <div class="custom_fields_string" style="display: none;"><%= tool.try(:custom_fields_string) %></div>

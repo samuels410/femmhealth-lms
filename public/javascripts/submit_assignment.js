@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2012 Instructure, Inc.
+/*
+ * Copyright (C) 2012 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,34 +12,102 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-  'i18n!assignments' /* I18n.t */,
-  'jquery' /* $ */,
-  'compiled/views/GoogleDocsTreeView',
-  'jst/assignments/homework_submission_tool',
-  'compiled/jquery.rails_flash_notifications',
-  'jquery.ajaxJSON' /* ajaxJSON */,
-  'jquery.inst_tree' /* instTree */,
-  'jquery.instructure_forms' /* ajaxJSONPreparedFiles, getFormData */,
-  'jqueryui/dialog',
-  'jquery.instructure_misc_plugins' /* fragmentChange, showIf, /\.log\(/ */,
-  'jquery.templateData' /* getTemplateData */,
-  'media_comments' /* mediaComment */,
-  'compiled/tinymce',
-  'tinymce.editor_box' /* editorBox */,
-  'vendor/jquery.scrollTo' /* /\.scrollTo/ */,
-  'jqueryui/tabs' /* /\.tabs/ */
-], function(I18n, $, GoogleDocsTreeView, homework_submission_tool) {
+
+import I18n from 'i18n!assignments'
+import $ from 'jquery'
+import _ from 'underscore'
+import GoogleDocsTreeView from 'compiled/views/GoogleDocsTreeView'
+import homework_submission_tool from 'jst/assignments/homework_submission_tool'
+import HomeworkSubmissionLtiContainer from 'compiled/external_tools/HomeworkSubmissionLtiContainer'
+import RCEKeyboardShortcuts from 'compiled/views/editor/KeyboardShortcuts' /* TinyMCE Keyboard Shortcuts for a11y */
+import RichContentEditor from 'jsx/shared/rce/RichContentEditor'
+import {submitContentItem, recordEulaAgreement} from './submit_assignment_helper'
+import 'compiled/jquery.rails_flash_notifications'
+import './jquery.ajaxJSON'
+import './jquery.inst_tree'
+import './jquery.instructure_forms' /* ajaxJSONPreparedFiles, getFormData */
+import 'jqueryui/dialog'
+import './jquery.instructure_misc_plugins' /* fragmentChange, showIf, /\.log\(/ */
+import './jquery.templateData'
+import './media_comments'
+import './vendor/jquery.scrollTo'
+import 'jqueryui/tabs'
+
+  var SubmitAssignment = {
+    toolDropDownClickHandler: function(event) {
+      event.preventDefault();
+
+      var tool = $(this).data('tool');
+      var url = "/courses/" + ENV.COURSE_ID + "/external_tools/" + tool.id + "/resource_selection?homework=1&assignment_id=" + ENV.SUBMIT_ASSIGNMENT.ID;
+
+      var width = tool.get('homework_submission').selection_width || tool.get('selection_width');
+      var height = tool.get('homework_submission').selection_height || tool.get('selection_height');
+      var title = tool.get('display_text');
+      var $div = $("<div/>", {id: "homework_selection_dialog", style: "padding: 0; overflow-y: hidden;"}).appendTo($("body"));
+
+      $div.append($("<iframe/>", {
+        frameborder: 0,
+        src: url,
+        id: "homework_selection_iframe",
+        tabindex: '0'
+      }).css({width: width, height: height}))
+        .bind('selection', function(event, data) {
+          submitContentItem(event.contentItems[0]);
+          $div.off('dialogbeforeclose', SubmitAssignment.dialogCancelHandler)
+          $div.dialog('close');
+        })
+        .on('dialogbeforeclose', SubmitAssignment.dialogCancelHandler)
+        .dialog({
+          width: 'auto',
+          height: 'auto',
+          title: title,
+          close: function() {
+            $div.remove();
+          }
+        });
+
+      var tabHelperHeight = 35;
+      $div.append(
+      $('<div/>',
+        {id: 'tab-helper', style: 'height:0px;padding:5px', tabindex: '0'}
+      ).focus(function () {
+        $(this).height(tabHelperHeight + 'px')
+        var joke = document.createTextNode(I18n.t('Q: What goes black, white, black, white?  A: A panda rolling down a hill.'))
+        this.appendChild(joke)
+      }).blur(function () {
+        $(this).html('').height('0px');
+      }))
+
+      return $div;
+    },
+    beforeUnloadHandler: function(e) {
+      return (e.returnValue = I18n.t("Changes you made may not be saved."));
+    },
+    dialogCancelHandler: function(event, ui) {
+      var r = confirm(I18n.t("Are you sure you want to cancel? Changes you made may not be saved."));
+      if (r == false){
+        event.preventDefault();
+      }
+    }
+  };
 
   window.submissionAttachmentIndex = -1;
+
+  RichContentEditor.preloadRemoteModule();
 
   $(document).ready(function() {
     var submitting = false,
         submissionForm = $('.submit_assignment_form');
+
+    var homeworkSubmissionLtiContainer = new HomeworkSubmissionLtiContainer('#submit_from_external_tool_form');
+
+    // Add the Keyboard shortcuts info button
+    var keyboardShortcutsView = new RCEKeyboardShortcuts();
+    keyboardShortcutsView.render().$el.insertBefore($(".switch_text_entry_submission_views:first"));
 
     // grow and shrink the comments box on focus/blur if the user
     // hasn't entered any content.
@@ -52,14 +120,23 @@ define([
     });
 
     submissionForm.submit(function(event) {
+      var self = this;
       var $turnitin = $(this).find(".turnitin_pledge");
-      if($("#external_tool_submission_type").val() == "online_url_to_file") { 
+      var $vericite = $(this).find(".vericite_pledge");
+      if($("#external_tool_submission_type").val() == "online_url_to_file") {
         event.preventDefault();
         event.stopPropagation();
         uploadFileFromUrl();
-        return; 
+        return;
       }
       if($turnitin.length > 0 && !$turnitin.attr('checked')) {
+        alert(I18n.t('messages.agree_to_pledge', "You must agree to the submission pledge before you can submit this assignment."));
+        event.preventDefault();
+        event.stopPropagation();
+        return false;
+      }
+
+      if($vericite.length > 0 && !$vericite.attr('checked')) {
         alert(I18n.t('messages.agree_to_pledge', "You must agree to the submission pledge before you can submit this assignment."));
         event.preventDefault();
         event.stopPropagation();
@@ -79,15 +156,55 @@ define([
         var fileElements = $(this).find('input[type=file]:visible').filter(function() {
           return $(this).val() !== '';
         });
+
+        var emptyFiles = $(this).find('input[type=file]:visible').filter(function() {
+          return this.files[0] && this.files[0].size === 0;
+        });
+
         var uploadedAttachmentIds = $(this).find('#submission_attachment_ids').val();
+
+        var reenableSubmitButton = function () {
+          $(self).find('button[type=submit]')
+              .text(I18n.t('#button.submit_assignment', 'Submit Assignment'))
+              .prop('disabled', false);
+        };
+
         // warn user if they haven't uploaded any files
         if (fileElements.length === 0 && uploadedAttachmentIds === '') {
           $.flashError(I18n.t('#errors.no_attached_file', 'You must attach at least one file to this assignment'));
-          $(this).find('button[type=submit]')
-            .text(I18n.t('#button.submit_assignment', 'Submit Assignment'))
-            .prop('disabled', false);
+          reenableSubmitButton();
           return false;
         }
+
+        // throw error if the user tries to upload an empty file
+        // to prevent S3 from erroring
+        if (emptyFiles.length) {
+          $.flashError(I18n.t('Attached files must be greater than 0 bytes'));
+          reenableSubmitButton();
+          return false;
+        }
+
+        // If there are restrictions on file type, don't accept submission if the file extension is not allowed
+        if(ENV.SUBMIT_ASSIGNMENT.ALLOWED_EXTENSIONS.length > 0) {
+          var subButton = $(this).find('button[type=submit]');
+          var badExt = false;
+          $.each(uploadedAttachmentIds.split(","), function(index, id) {
+            if (id.length > 0) {
+              var ext = $("#uploaded_files .file_" + id + " .name").text().split('.').pop().toLowerCase();
+              if ($.inArray(ext, ENV.SUBMIT_ASSIGNMENT.ALLOWED_EXTENSIONS) < 0) {
+                badExt = true;
+                $.flashError(I18n.t('#errors.wrong_file_extension', 'The file you selected with extension "%{extension}", is not authorized for submission', {extension: ext}));
+              }
+            }
+          });
+          if(badExt) {
+            subButton
+              .text(I18n.t('#button.submit_assignment', 'Submit Assignment'))
+              .prop('disabled', false);
+            return false;
+          }
+        }
+
         $.ajaxJSONPreparedFiles.call(this, {
           handle_files: function(attachments, data) {
             var ids = (data['submission[attachment_ids]'] || "").split(",");
@@ -106,7 +223,7 @@ define([
           url: $(this).attr('action'),
           success: function(data) {
             submitting = true;
-            window.location = window.location.href.replace(window.location.hash, "");
+            window.location = window.location.href.replace(/\#$/g, "").replace(window.location.hash, "");
           },
           error: function(data) {
             submissionForm.find("button[type='submit']").text(I18n.t('messages.submit_failed', "Submit Failed, please try again"));
@@ -118,20 +235,26 @@ define([
       }
     });
 
-    window.onbeforeunload = function() {
+    $(window).on('beforeunload', function(e) {
       if($("#submit_assignment:visible").length > 0 && !submitting) {
-        return I18n.t('messages.not_submitted_yet', "You haven't finished submitting your assignment.  You still need to click \"Submit\" to finish turning it in.  Do you want to leave this page anyway?");
+        e.returnValue = I18n.t('messages.not_submitted_yet', "You haven't finished submitting your assignment.  You still need to click \"Submit\" to finish turning it in.  Do you want to leave this page anyway?");
+        return e.returnValue;
       }
-    };
+    });
 
     $(document).fragmentChange(function(event, hash) {
       if(hash && hash.indexOf("#submit") == 0) {
         $(".submit_assignment_link").triggerHandler('click', true);
         if(hash == "#submit_google_doc") {
-          $("#submit_assignment_tabs").tabs('select', "#submit_google_doc_form");
+          $("#submit_assignment_tabs").tabs('select', ".google_doc_form");
         }
       }
     });
+
+    $('input.turnitin_pledge').click((e) => {
+      recordEulaAgreement(document.querySelector('#eula_agreement_timestamp'),
+                          e.target.checked);
+    })
 
     $(".submit_assignment_link").click(function(event, skipConfirmation) {
       event.preventDefault();
@@ -149,13 +272,14 @@ define([
       $("#submit_assignment").show();
       $(".submit_assignment_link").hide();
       $("html,body").scrollTo($("#submit_assignment"));
-      $("#submit_online_text_entry_form textarea:first").editorBox();
-      checkForHomeworkSubmissionTools();
+      createSubmitAssignmentTabs();
+      homeworkSubmissionLtiContainer.loadExternalTools();
+      $("#submit_assignment_tabs li").first().focus();
     });
 
     $(".switch_text_entry_submission_views").click(function(event) {
       event.preventDefault();
-      $("#submit_online_text_entry_form textarea:first").editorBox('toggle');
+      RichContentEditor.callOnRCE($("#submit_online_text_entry_form textarea:first"), 'toggle')
       //  todo: replace .andSelf with .addBack when JQuery is upgraded.
       $(this).siblings(".switch_text_entry_submission_views").andSelf().toggle();
     });
@@ -165,7 +289,42 @@ define([
       $(".submit_assignment_link").show();
     });
 
-    $("#submit_assignment_tabs").tabs();
+    function createSubmitAssignmentTabs() {
+      $("#submit_assignment_tabs").tabs({
+        beforeActivate: function( event, ui ) {
+          // determine if this is an external tool
+          if ($(event.currentTarget).hasClass('external-tool')) {
+            var externalToolId = $(event.currentTarget).data('id');
+            homeworkSubmissionLtiContainer.embedLtiLaunch(externalToolId)
+          }
+        },
+        activate: function(event, ui) {
+          if (ui.newTab.find('a').hasClass('submit_online_text_entry_option')) {
+            var $el = $("#submit_online_text_entry_form textarea:first");
+            if (!RichContentEditor.callOnRCE($el, 'exists?')) {
+              RichContentEditor.loadNewEditor($el, {manageParent: true});
+            }
+          }
+
+          if (ui.newTab.attr("aria-controls") === "submit_google_doc_form") {
+            listGoogleDocs();
+          }
+        },
+        create: function(event, ui) {
+          if (ui.tab.find('a').hasClass('submit_online_text_entry_option')) {
+            var $el = $("#submit_online_text_entry_form textarea:first");
+            if (!RichContentEditor.callOnRCE($el, 'exists?')) {
+              RichContentEditor.loadNewEditor($el, {manageParent: true});
+            }
+          }
+
+          //list Google Docs if Google Docs tab is active
+          if (ui.tab.attr("aria-controls") === "submit_google_doc_form") {
+            listGoogleDocs();
+          }
+        }
+      });
+    }
 
     $("#uploaded_files > ul").instTree({
       autoclose: false,
@@ -211,19 +370,52 @@ define([
         tree.render();
         tree.on('activate-file', function(file_id){
           $("#submit_google_doc_form").find("input[name='google_doc[document_id]']").val(file_id);
+          var submitButton = $("#submit_google_doc_form").find("[disabled].btn-primary");
+          if(submitButton) {
+            submitButton.removeAttr("disabled")
+          }
         });
 
       }, 'json');
     }
 
-    $(".submit_online_url_option").click(function(event) {
-      if($(this).attr("href") == '#submit_google_doc_form'){
-        listGoogleDocs();
-      }
+    $("#auth-google").live('click', function(e){
+      e.preventDefault();
+      var href = $(this).attr("href");
+      reauth(href);
     });
 
-    //list Google Docs if Google Docs tab is active
-    if(window.location.hash == "#submit_google_doc_form"){
+    // Post message for anybody to listen to //
+    if (window.opener) {
+      try {
+        window.opener.postMessage({
+          "type": "event",
+          "payload": "done"
+        }, window.opener.location.toString());
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+
+    function reauth(auth_url) {
+      var modal = window.open(auth_url, "Authorize Google Docs", 'menubar=no,directories=no,location=no,height=500,width=500');
+      $(window).on("message", function (event){
+        event = event.originalEvent;
+        if(!event || !event.data || event.origin !== window.location.protocol + "//" + window.location.host) return;
+
+        if(event.data.type == "event" && event.data.payload == "done") {
+          if (modal)
+            modal.close();
+
+          reloadGoogleDrive();
+        }
+      });
+    }
+
+    function reloadGoogleDrive() {
+      $("#submit_google_doc_form.auth").hide();
+      $("#submit_google_doc_form.submit_assignment_form").removeClass('hide');
       listGoogleDocs();
     }
 
@@ -234,7 +426,16 @@ define([
       // disable the submit button if any extensions are bad
       $('#submit_online_upload_form button[type=submit]').attr('disabled', !!$(".bad_ext_msg:visible").length);
     }
+    function updateRemoveLinkAltText(fileInput) {
+      var altText = I18n.t("remove empty attachment");
+      if(fileInput.val()){
+        var filename = fileInput.val().replace(/^.*?([^\\\/]*)$/, '$1');
+        altText = I18n.t("remove %{filename}", {filename: filename})
+      }
+      fileInput.parent().find('img').attr("alt", altText)
+    }
     $(".submission_attachment input[type=file]").live('change', function() {
+      updateRemoveLinkAltText($(this));
       if (ENV.SUBMIT_ASSIGNMENT.ALLOWED_EXTENSIONS.length < 1 || $(this).val() == "")
         return;
 
@@ -245,6 +446,11 @@ define([
   });
 
   $("#submit_google_doc_form").submit(function() {
+    // make sure we have a document selected
+    if (!$("#submit_google_doc_form").find("input[name='google_doc[document_id]']").val()){
+      return false
+    }
+
     $("#uploading_google_doc_message").dialog({
       title: I18n.t('titles.uploading', "Uploading Submission"),
       modal: true,
@@ -270,36 +476,9 @@ define([
       });
     });
   });
-  
+
   var $tools = $("#submit_from_external_tool_form");
-  // The "More" tab will only appear for users once the API has
-  // returned at least one valid homework submission tool, so
-  // most users will never see it.
-  // TODO: Change this to add the "More" tab for everyone with
-  // a way to browse/suggest tools if the user has none set up
-  function checkForHomeworkSubmissionTools() {
-    if(!checkForHomeworkSubmissionTools.loading) {
-      checkForHomeworkSubmissionTools.loading = true;
-      var url = $("#external_tools_url").attr('href');
-      $.ajaxJSON(url, 'GET', {}, function(data) {
-        if(!data.length) {
-          $tools.find("ul.tools li").text(I18n.t('no_tools_found', 'No tools found'));
-        } else {
-          $(".submit_from_external_tool_option").parent().show();
-          $tools.find("ul.tools").empty();
-          for(var idx = 0; idx < data.length; idx++) {
-            var tool = data[idx];
-            tool.display_text = tool.homework_submission.label;
-            var html = homework_submission_tool(tool);
-            var $li = $(html).data('tool', tool);
-            $tools.find("ul.tools").append($li);
-          }
-        }
-      }, function() {
-        $tools.find("ul.tools li.none").text(I18n.t('loading_tools_failed', 'Loading tools failed'));
-      });
-    }
-  }
+
   function uploadFileFromUrl() {
     var promise = $.Deferred();
     function checkFileStatus(url, callback, error) {
@@ -334,68 +513,7 @@ define([
     });
     $tools.disableWhileLoading(promise, {buttons: {'.submit': I18n.t('getting_file', 'Retrieving File...')}})
   };
-  $("#submit_from_external_tool_form .tools li").live('click', function(event) {
-    event.preventDefault();
-    var tool = $(this).data('tool');
-    var url = "/courses/" + ENV.COURSE_ID + "/external_tools/" + tool.id + "/resource_selection?homework=1&assignment_id=" + ENV.SUBMIT_ASSIGNMENT.ID;
-    var width = tool.homework_submission.selection_width || tool.selection_width;
-    var height = tool.homework_submission.selection_height || tool.selection_height;
-    var title = tool.display_text;
-    var $div = $("<div/>", {id: "homework_selection_dialog"}).appendTo($("body"));
-    function invalidToolReturn(message) {
-      $.flashError(I18n.t("invalid_tool_return", "The launched tool returned an invalid resource for this assignment"));
-      console.log(message);
-      $div.dialog('close');
-    }
-    $div.append($("<iframe/>", {frameborder: 0, src: url, id: "homework_selection_iframe"}).css({width: width, height: height}))
-      .bind('selection', function(event, data) {
-        var valid_submission = true
-        if(data.return_type == 'url') {
-          if($("#submit_online_url_form").length) {
-            $("#external_tool_url").val(data.url);
-            $("#external_tool_submission_type").val('online_url');
-            $("#submit_from_external_tool_form").addClass('has_submission');
-            var $link = $("<a/>", {href: data.url}).text(data.text || data.title);
-            $("#external_tool_submission_details").empty().append($link).attr('class', 'url_submission');
-          } else {
-            invalidToolReturn("this assignment doesn't accept URL submissions");
-            return;
-          }
-        } else if(data.return_type == 'file') {
-          if($("#submit_online_upload_form").length) {
-            var ext = data.text.split(/\./).pop();
-            if(ENV.SUBMIT_ASSIGNMENT && ENV.SUBMIT_ASSIGNMENT.ALLOWED_EXTENSIONS && ENV.SUBMIT_ASSIGNMENT.ALLOWED_EXTENSIONS.length > 0) {
-              if(!data.text.match(/\./) || $.inArray(ext, ENV.SUBMIT_ASSIGNMENT.ALLOWED_EXTENSIONS) < 0) {
-                valid_submission = false;
-              }
-            }
-            $("#external_tool_url").val(data.url);
-            $("#external_tool_submission_type").val('online_url_to_file');
-            $("#external_tool_filename").val(data.text);
-            $("#external_tool_content_type").val(data.content_type);
-            $("#submit_from_external_tool_form").addClass('has_submission');
-            var $link = $("<a/>", {href: data.url}).text(data.text);
-            $("#external_tool_submission_details").empty().append($link).attr('class', 'file_submission');
-          } else {
-            invalidToolReturn("this assignment doesn't accept file submissions");
-            return;
-          }
-        } else {
-          invalidToolReturn("return_type must be 'link' or 'file'");
-          return;
-        }
 
-        $('#submit_from_external_tool_form .bad_ext_msg').showIf(!valid_submission);
-        $('#submit_from_external_tool_form button[type=submit]').attr('disabled', !valid_submission);
-        $div.dialog('close');
-      })
-      .dialog({
-        width: 'auto',
-        height: 'auto',
-        title: title,
-        close: function() {
-          $div.remove();
-        }
-      });
-  });
-});
+  $("#submit_from_external_tool_form .tools li").live('click', SubmitAssignment.toolDropDownClickHandler);
+
+export default SubmitAssignment;

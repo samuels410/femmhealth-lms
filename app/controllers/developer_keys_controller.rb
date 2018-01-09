@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,54 +17,77 @@
 #
 
 class DeveloperKeysController < ApplicationController
-  before_filter :require_manage_site_settings
-  before_filter :set_site_admin_context, :set_navigation, :only => [:index]
-  # TODO: Make this API work for non-site-admins that want to list/manage
-  # their own developer keys
+  before_action :set_key, only: [:update, :destroy ]
+  before_action :require_manage_developer_keys
 
   include Api::V1::DeveloperKey
-  
-  def require_manage_site_settings
-    require_site_admin_with_permission(:manage_developer_keys)
-  end
 
   def index
-    @keys = DeveloperKey.order("id DESC").includes(:account)
-    @keys = Api.paginate(@keys, self, developer_keys_url)
+    scope = @context.site_admin? ? DeveloperKey : @context.developer_keys
+    scope = scope.nondeleted.preload(:account).order("id DESC")
+    @keys = Api.paginate(scope, self, account_developer_keys_url(@context))
     respond_to do |format|
-      format.html
-      format.json { render :json => developer_keys_json(@keys, @current_user, session) }
+      format.html do
+        set_navigation
+        js_env(accountEndpoint: api_v1_account_developer_keys_path(@context))
+      end
+      format.json { render :json => developer_keys_json(@keys, @current_user, session, account_context) }
     end
   end
-  
+
   def create
-    @key = DeveloperKey.new(params[:developer_key])
+    @key = DeveloperKey.new(developer_key_params)
+    @key.account = @context if params[:account_id] && @context != Account.site_admin
     if @key.save
-      render :json => developer_key_json(@key, @current_user, session)
+      render :json => developer_key_json(@key, @current_user, session, account_context)
     else
       render :json => @key.errors, :status => :bad_request
     end
   end
-  
+
   def update
-    @key = DeveloperKey.find(params[:id])
-    @key.attributes = params[:developer_key]
+    @key.process_event!(params[:developer_key].delete(:event)) if params[:developer_key].key?(:event)
+    @key.attributes = developer_key_params unless params[:developer_key].empty?
     if @key.save
-      render :json => developer_key_json(@key, @current_user, session)
+      render :json => developer_key_json(@key, @current_user, session, account_context)
     else
       render :json => @key.errors, :status => :bad_request
     end
   end
-  
+
   def destroy
-    @key = DeveloperKey.find(params[:id])
     @key.destroy
-    render :json => developer_key_json(@key, @current_user, session)
+    render :json => developer_key_json(@key, @current_user, session, account_context)
   end
-  
+
   protected
   def set_navigation
     @active_tab = 'developer_keys'
     add_crumb t('#crumbs.developer_keys', "Developer Keys")
+  end
+
+  private
+  def set_key
+    @key = DeveloperKey.nondeleted.find(params[:id])
+  end
+
+  def account_context
+    if @key
+      return @key.account || Account.site_admin
+    elsif params[:account_id]
+      require_account_context
+      return @context if @context == @domain_root_account
+    end
+
+    # failover to what require_site_admin_with_permission uses
+    return Account.site_admin
+  end
+
+  def require_manage_developer_keys
+    require_context_with_permission(account_context, :manage_developer_keys)
+  end
+
+  def developer_key_params
+    params.require(:developer_key).permit(:api_key, :name, :icon_url, :redirect_uri, :redirect_uris, :email, :auto_expire_tokens, :notes, :access_token_count, :vendor_code)
   end
 end

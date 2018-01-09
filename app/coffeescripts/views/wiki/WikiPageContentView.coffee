@@ -1,7 +1,26 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
+  'underscore'
   'Backbone'
   'jst/wiki/WikiPageContent'
-], (Backbone, template) ->
+], ($, _, Backbone, template) ->
 
   class WikiPageContentView extends Backbone.View
     tagName: 'article'
@@ -46,6 +65,7 @@ define [
       json.course_home = @course_home
       json.course_title = @course_title
       json.CAN =
+        VIEW_ALL_PAGES: !!@display_show_all_pages
         VIEW_PAGES: !!@WIKI_RIGHTS.read
         PUBLISH: !!@WIKI_RIGHTS.manage && json.contextName == 'courses'
         UPDATE_CONTENT: !!@PAGE_RIGHTS.update || !!@PAGE_RIGHTS.update_content
@@ -59,6 +79,6 @@ define [
         json.lock_info.unlock_at = if Date.parse(json.lock_info.unlock_at) < Date.now()
           null
         else
-          $.parseFromISO(json.lock_info.unlock_at).datetime_formatted
+          $.datetimeString(json.lock_info.unlock_at)
 
       json

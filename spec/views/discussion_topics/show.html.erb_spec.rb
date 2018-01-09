@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -23,16 +23,16 @@ describe "/discussion_topics/show" do
   it "should render" do
     course_with_teacher
     view_context(@course, @user)
-    @topic = @course.discussion_topics.create!(:title => "some topic")
+    @topic = @course.discussion_topics.create!(:title => "some topic", :user => @user)
     @entry = @topic.discussion_entries.create!(:message => "some message")
     @topic.discussion_entries.create!(:message => "another message")
-    assigns[:topic] = @topic
-    assigns[:grouped_entries] = @topic.discussion_entries.group_by(&:parent_id)
-    assigns[:entries] = @topic.discussion_entries
-    assigns[:all_entries] = @topic.discussion_entries
-    assigns[:presenter] = DiscussionTopicPresenter.new(@topic, @user)
+    assign(:topic, @topic)
+    assign(:grouped_entries, @topic.discussion_entries.group_by(&:parent_id))
+    assign(:entries, @topic.discussion_entries)
+    assign(:all_entries, @topic.discussion_entries)
+    assign(:presenter, DiscussionTopicPresenter.new(@topic, @user))
     render "discussion_topics/show"
-    response.should have_tag("div#discussion_subentries")
+    expect(response).to have_tag("div#discussion_subentries")
   end
 
   it "should render in a group context" do
@@ -41,17 +41,20 @@ describe "/discussion_topics/show" do
     group_model
     view_context(@group, @user)
     @topic = @assignment.discussion_topic
+    @topic.message = nil # the assigns for @context don't seem to carry over to the controller helper method
+    @topic.user = @user
+    @topic.save!
     @entry = @topic.discussion_entries.create!(:message => "some message")
     @topic.discussion_entries.create!(:message => "another message")
-    assigns[:topic] = @topic
-    assigns[:grouped_entries] = @topic.discussion_entries.group_by(&:parent_id)
-    assigns[:entries] = @topic.discussion_entries
-    assigns[:all_entries] = @topic.discussion_entries
-    assigns[:assignment] = AssignmentOverrideApplicator.assignment_overridden_for(@assignment, @user)
-    assigns[:presenter] = DiscussionTopicPresenter.new(@topic, @user)
-    @topic.for_assignment?.should be_true
-    @topic.assignment.rubric_association.rubric.should_not be_nil
+    assign(:topic, @topic)
+    assign(:grouped_entries, @topic.discussion_entries.group_by(&:parent_id))
+    assign(:entries, @topic.discussion_entries)
+    assign(:all_entries, @topic.discussion_entries)
+    assign(:assignment, AssignmentOverrideApplicator.assignment_overridden_for(@assignment, @user))
+    assign(:presenter, DiscussionTopicPresenter.new(@topic, @user))
+    expect(@topic.for_assignment?).to be_truthy
+    expect(@topic.assignment.rubric_association.rubric).not_to be_nil
     render "discussion_topics/show"
-    response.should have_tag("div#discussion_subentries")
+    expect(response).to have_tag("div#discussion_subentries")
   end
 end

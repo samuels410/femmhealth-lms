@@ -1,4 +1,21 @@
-require [
+#
+# Copyright (C) 2014 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+define [
   "jquery",
   "i18n!context.roster_user",
   "jquery.ajaxJSON",
@@ -14,39 +31,29 @@ require [
       , ((data) ->
         ), (data) ->
 
-    $(".link_enrollment_link").click (event) ->
-      event.preventDefault()
-      $link = $(this)
-      name = $("#name_and_email .name").text()
-      id = $link.attr("data-id")
-      associated_id = $link.attr("data-associated-id")
-      link_enrollment.choose name, id, associated_id, (enrollment) ->
-        $link.attr "data-id", enrollment.id
-        $link.attr "data-associated-id", enrollment.associated_user_id
-        $link.parents(".enrollment").find(".associated_user_name").text enrollment.associated_user_name
-        $link.parents(".enrollment").find(".associated_user").showIf enrollment.associated_user_id
-
     $(".unconclude_enrollment_link").click (event) ->
       event.preventDefault()
       $enrollment = $(this).parents(".enrollment")
       $.ajaxJSON $(this).attr("href"), "POST", {}, (data) ->
-        $enrollment.find(".conclude_enrollment_link_holder").slideDown()
-        $enrollment.find(".unconclude_enrollment_link_holder").slideUp()
-        $enrollment.find(".completed_at_holder").slideUp()
+        $enrollment.find(".conclude_enrollment_link_holder").show()
+        $enrollment.find(".unconclude_enrollment_link_holder").hide()
+        $enrollment.find(".completed_at_holder").hide()
 
 
     $(".conclude_enrollment_link").click (event) ->
       event.preventDefault()
       $(this).parents(".enrollment").confirmDelete
-        message: I18n.t("confirm.conclude_student", "Are you sure you want to conclude this student's enrollment?")
+        message: I18n.t("confirm.conclude", "Are you sure you want to conclude this enrollment?")
         url: $(this).attr("href")
         success: (data) ->
-          $(this).undim()
-          $(this).find(".conclude_enrollment_link_holder").slideUp()
-          $(this).find(".unconclude_enrollment_link_holder").slideDown()
+          comp_at = $.datetimeString(data.enrollment.completed_at)
+          $enrollment = $(this)
+          $enrollment.undim()
+          $enrollment.find(".conclude_enrollment_link_holder").hide()
+          $enrollment.find(".unconclude_enrollment_link_holder").show()
+          $enrollment.find(".completed_at_holder .completed_at").text(comp_at)
+          $enrollment.find(".completed_at_holder").show()
 
-    # $(this).find(".completed_at").text("just now");
-    # $(this).find(".completed_at_holder").slideDown();
     $(".elevate_enrollment_link,.restrict_enrollment_link").click (event) ->
       limit = (if $(this).hasClass("restrict_enrollment_link") then "1" else "0")
       $user = $(this).parents(".tr")
@@ -56,15 +63,16 @@ require [
       , ((data) ->
           $user.loadingImage "remove"
           $(".elevate_enrollment_link_holder,.restrict_enrollment_link_holder").slideToggle()
-        ), (data) ->
-        $.flashError I18n.t("enrollment_change_failed", "Enrollment privilege change failed, please try again")
-        $user.loadingImage "remove"
+        ), ((data) ->
+          $.flashError I18n.t("enrollment_change_failed", "Enrollment privilege change failed, please try again")
+          $user.loadingImage "remove"
+        )
       event.preventDefault()
 
     $(".delete_enrollment_link").click (event) ->
       event.preventDefault()
       $(this).parents(".enrollment").confirmDelete
-        message: I18n.t("confirm.delete_enrollment", "Are you sure you want to delete this student's enrollment?")
+        message: I18n.t("confirm.delete_enrollment", "Are you sure you want to delete this enrollment?")
         url: $(this).attr("href")
         success: (data) ->
           $(this).closest(".enrollment").hide()

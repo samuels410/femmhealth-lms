@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,15 +17,20 @@
 #
 module CC
   module WikiResources
-    
+
     def add_wiki_pages
       wiki_folder = File.join(@export_dir, CCHelper::WIKI_FOLDER)
       FileUtils::mkdir_p wiki_folder
-      
-      @course.wiki.wiki_pages.not_deleted.each do |page|
+
+      scope = @course.wiki_pages.not_deleted
+      WikiPages::ScopedToUser.new(@course, @user, scope).scope.each do |page|
         next unless export_object?(page)
+        next if @user && page.locked_for?(@user)
+
         begin
-          migration_id = CCHelper.create_key(page)
+          add_exported_asset(page)
+
+          migration_id = create_key(page)
           file_name = "#{page.url}.html"
           relative_path = File.join(CCHelper::WIKI_FOLDER, file_name)
           path = File.join(wiki_folder, file_name)
@@ -33,8 +38,11 @@ module CC
           meta_fields[:editing_roles] = page.editing_roles
           meta_fields[:notify_of_update] = page.notify_of_update
           meta_fields[:workflow_state] = page.workflow_state
-          meta_fields[:workflow_state] = 'unpublished' if page.hide_from_students && page.workflow_state == 'active'
           meta_fields[:front_page] = page.is_front_page?
+          meta_fields[:module_locked] = page.locked_by_module_item?(@user, deep_check_if_needed: true).present?
+          meta_fields[:assignment_identifier] =
+            page.for_assignment? ? create_key(page.assignment) : nil
+          meta_fields[:todo_date] = page.todo_date
 
           File.open(path, 'w') do |file|
             file << @html_exporter.html_page(page.body, page.title, meta_fields)

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,10 +20,19 @@ require 'action_controller_test_process'
 
 module Canvas::Migration::Worker
 
-  def self.get_converter(settings)
-    Canvas::Migration::PackageIdentifier.new(settings).get_converter
+  class Base < Struct.new(:migration_id)
+    def on_permanent_failure(error)
+      if migration_id
+        cm = ContentMigration.where(id: migration_id).first
+        cm.fail_with_error!(error) if cm
+      end
+    end
   end
-  
+
+  def self.get_converter(settings)
+    Canvas::Migration::Archive.new(settings).get_converter
+  end
+
   def self.upload_overview_file(file, content_migration)
     uploaded_data = Rack::Test::UploadedFile.new(file.path, Attachment.mimetype(file.path))
     
@@ -64,7 +73,7 @@ module Canvas::Migration::Worker
       content_migration.exported_attachment = att
       content_migration.save
     rescue => e
-      Rails.logger.warn "Error while uploading exported data for content_migration #{content_migration.id} - #{e.to_s}"
+      Rails.logger.warn "Error while uploading exported data for content_migration #{content_migration.id} - #{e}"
       raise e
     end
 
@@ -73,9 +82,9 @@ module Canvas::Migration::Worker
   
   def self.clear_exported_data(folder)
     begin
-      config = Setting.from_config('external_migration')
+      config = ConfigFile.load('external_migration')
       if !config || !config[:keep_after_complete]
-        FileUtils::rm_rf(folder) if File.exists?(folder)
+        FileUtils::rm_rf(folder) if File.exist?(folder)
       end
     rescue
       Rails.logger.warn "Couldn't clear export data for content_migration #{content_migration.id}"

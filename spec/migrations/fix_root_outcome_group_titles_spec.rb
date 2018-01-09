@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -21,9 +21,9 @@ require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 describe DataFixup::FixRootOutcomeGroupTitles do
   it 'should replace old ROOT names of outcome groups' do
     # set up data
-    course(:active_all => true, :name => 'Test course')
-    @course.learning_outcome_groups.create!(:title => 'ROOT')
-    @course.account.learning_outcome_groups.create!(:title => 'ROOT')
+    course_factory(active_all: true, :name => 'Test course')
+    course_group = @course.learning_outcome_groups.create!(:title => 'ROOT')
+    account_group = @course.account.learning_outcome_groups.create!(:title => 'ROOT')
 
     # run the fix
     DataFixup::FixRootOutcomeGroupTitles.run
@@ -31,7 +31,7 @@ describe DataFixup::FixRootOutcomeGroupTitles do
     @course.account.reload
 
     # verify the results
-    @course.learning_outcome_groups.first.title.should == @course.name
-    @course.account.learning_outcome_groups.first.title.should == 'ROOT'
+    expect(course_group.reload.title).to eq @course.name
+    expect(account_group.reload.title).to eq 'ROOT'
   end
 end

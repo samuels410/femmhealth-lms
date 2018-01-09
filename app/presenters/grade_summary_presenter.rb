@@ -1,20 +1,44 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+
 class GradeSummaryPresenter
 
-  attr_reader :groups_assignments
+  attr_reader :groups_assignments, :assignment_order
 
-  def initialize(context, current_user, id_param)
+  def initialize(context, current_user, id_param, assignment_order: :due_at)
     @context = context
     @current_user = current_user
     @id_param = id_param
     @groups_assignments = []
+    @periods_assignments = []
+    @assignment_order = assignment_order
   end
 
   def user_has_elevated_permissions?
-    (@context.grants_right?(@current_user, nil, :manage_grades) || @context.grants_right?(@current_user, nil, :view_all_grades))
+    @context.grants_any_right?(@current_user, :manage_grades, :view_all_grades)
   end
 
   def user_needs_redirection?
     user_has_elevated_permissions? && !@id_param
+  end
+
+  def user_an_observer_of_student?
+    observed_students.key? student
   end
 
   def student_is_user?
@@ -34,7 +58,17 @@ class GradeSummaryPresenter
   end
 
   def turnitin_enabled?
-    @context.turnitin_enabled? && assignments.any?(&:turnitin_enabled)
+    unless defined?(@turnitin_enabled)
+      @turnitin_enabled = @context.turnitin_enabled? && assignments.any?(&:turnitin_enabled)
+    end
+    @turnitin_enabled
+  end
+
+  def vericite_enabled?
+    unless defined?(@vericite_enabled)
+      @vericite_enabled = @context.vericite_enabled? && assignments.any?(&:vericite_enabled)
+    end
+    @vericite_enabled
   end
 
   def observed_students
@@ -47,27 +81,34 @@ class GradeSummaryPresenter
   end
 
   def linkable_observed_students
-    observed_students.keys.select{ |student| observed_students[student].all? { |e| e.grants_right?(@current_user, nil, :read_grades) } }
+    observed_students.keys.select{ |student| observed_students[student].all? { |e| e.grants_right?(@current_user, :read_grades) } }
   end
 
-  def selectable_courses
-    courses_with_grades.select do |course|
-      student_enrollment = course.all_student_enrollments.find_by_user_id(student)
-      student_enrollment.grants_right?(@current_user, nil, :read_grades)
-    end
+  def student_enrollment_for(course, user)
+    enrollment = course.all_student_enrollments.where(user_id: user)
+    enrollment = enrollment.where.not(workflow_state: "inactive") unless user_has_elevated_permissions?
+    enrollment.first
   end
 
   def student_enrollment
     @student_enrollment ||= begin
       if @id_param # always use id if given
         validate_id
-        user_id = Shard.relative_id_for(@id_param, Shard.current, @context.shard)
-        @context.all_student_enrollments.find_by_user_id(user_id)
+        user_id = Shard.relative_id_for(@id_param, @context.shard, @context.shard)
+        @context.shard.activate { student_enrollment_for(@context, user_id) }
       elsif observed_students.present? # otherwise try to find an observed student
         observed_student
       else # or just fall back to @current_user
-        @context.all_student_enrollments.find_by_user_id(@current_user)
+        @context.shard.activate { student_enrollment_for(@context, @current_user) }
       end
+    end
+  end
+
+  def students
+    if multiple_observed_students?
+      linkable_observed_students
+    else
+      Array.wrap(student)
     end
   end
 
@@ -89,39 +130,73 @@ class GradeSummaryPresenter
   end
 
   def groups
-    @groups ||= @context.assignment_groups.
-      active.includes(relevant_assignments_scope => :assignment_overrides).all
+    all_groups
   end
 
   def assignments
     @assignments ||= begin
-      group_index = groups.index_by(&:id)
-
-      groups.flat_map(&relevant_assignments_scope).select { |a|
-        a.submission_types != 'not_graded'
-      }.map { |a|
-        # prevent extra loads
-        a.context = @context
-        a.assignment_group = group_index[a.assignment_group_id]
-
-        a.overridden_for(student)
-      }.sort
+      visible_assignments = assignments_visible_to_student
+      overridden_assignments = assignments_overridden_for_student(visible_assignments)
+      sorted_assignments(overridden_assignments)
     end
   end
 
-  def relevant_assignments_scope
-    AssignmentGroup.assignment_scope_for_grading(@context)
+  def assignments_visible_to_student
+    includes = [:assignment_overrides]
+    includes << :assignment_group if @assignment_order == :assignment_group
+    AssignmentGroup.
+      visible_assignments(student, @context, all_groups, includes).
+      where.not(submission_types: %w(not_graded wiki_page)).
+      except(:order)
+  end
+
+
+  def assignments_overridden_for_student(assignments)
+    group_index = all_groups.index_by(&:id)
+    assignments.map do |assignment|
+      assignment.context = @context
+      assignment.assignment_group = group_index.fetch(assignment.assignment_group_id)
+      assignment.overridden_for(student)
+    end
+  end
+
+  def sorted_assignments(assignments)
+    case @assignment_order
+    when :due_at
+      assignments.sort_by { |a| [a.due_at || CanvasSort::Last, Canvas::ICU.collation_key(a.title)] }
+    when :title
+      Canvas::ICU.collate_by(assignments, &:title)
+    when :module
+      sorted_by_modules(assignments)
+    when :assignment_group
+      assignments.sort_by { |a| [a.assignment_group.position, a.position] }
+    end
+  end
+
+  def sort_options
+    options = [[I18n.t('Due Date'), 'due_at'], [I18n.t('Title'), 'title']]
+    if @context.active_record_types[:assignments] && assignments.uniq(&:assignment_group_id).length > 1
+      options << [I18n.t('Assignment Group'), 'assignment_group']
+    end
+    options << [I18n.t('Module'), 'module'] if @context.active_record_types[:modules]
+    Canvas::ICU.collate_by(options, &:first)
   end
 
   def submissions
     @submissions ||= begin
       ss = @context.submissions
-      .except(:includes)
-      .includes(:visible_submission_comments,
+      .preload(:visible_submission_comments,
                 {:rubric_assessments => [:rubric, :rubric_association]},
                 :content_participations)
       .where("assignments.workflow_state != 'deleted'")
-      .find_all_by_user_id(student)
+      .where(user_id: student).to_a
+
+      if vericite_enabled? || turnitin_enabled?
+        ActiveRecord::Associations::Preloader.new.preload(ss, :originality_reports)
+      end
+
+      visible_assignment_ids = AssignmentStudentVisibility.visible_assignment_ids_for_user(student_id, @context.id)
+      ss.select!{ |submission| visible_assignment_ids.include?(submission.assignment_id) }
 
       assignments_index = assignments.index_by(&:id)
 
@@ -141,28 +216,40 @@ class GradeSummaryPresenter
     end
   end
 
-  def submission_counts
-    @submission_counts ||= @context.assignments.active
-      .except(:order)
-      .joins(:submissions)
-      .group("assignments.id")
-      .count("submissions.id")
+  # Called by external classes that want to make sure we clear out
+  # cached data. Most likely this is only the GradeCalculator
+  def self.invalidate_cache(context)
+    Rails.cache.delete(cache_key(context, 'assignment_stats'))
   end
 
   def assignment_stats
-    @stats ||= @context.assignments.active
-    .except(:order)
-    .joins(:submissions)
-    .group("assignments.id")
-    .select("assignments.id, max(score) max, min(score) min, avg(score) avg")
-    .index_by(&:id)
+    # performance note: There is an overlap between
+    # Submission.not_placeholder and the submission where clause.
+    #
+    # note: because a score is needed for max/min/ave we are not filtering
+    # by assignment_student_visibilities, if a stat is added that doesn't
+    # require score then add a filter when the DA feature is on
+    @stats ||= begin
+      Rails.cache.fetch(GradeSummaryPresenter.cache_key(@context, 'assignment_stats')) do
+        @context.assignments.active.except(:order).
+          joins(:submissions).
+          joins("INNER JOIN #{Enrollment.quoted_table_name} enrollments ON submissions.user_id = enrollments.user_id").
+          merge(Enrollment.of_student_type.active_or_pending).
+          merge(Submission.not_placeholder).
+          where(enrollments: {course_id: @context}).
+          where("submissions.excused IS NOT TRUE").
+          group("assignments.id").
+          select("assignments.id, max(score) max, min(score) min, avg(score) avg, count(submissions.id) count").
+          index_by(&:id)
+      end
+    end
   end
 
   def assignment_presenters
     submission_index = submissions.index_by(&:assignment_id)
-    assignments.map{ |a|
+    assignments.map do |a|
       GradeSummaryAssignmentPresenter.new(self, @current_user, a, submission_index[a.id])
-    }
+    end
   end
 
   def has_muted_assignments?
@@ -171,10 +258,23 @@ class GradeSummaryPresenter
 
   def courses_with_grades
     @courses_with_grades ||= begin
-      if student_is_user?
-        student.courses_with_grades
-      else
-        nil
+      student.shard.activate do
+        if student_is_user?
+          Course.where(id: student.participating_student_current_and_concluded_course_ids).to_a
+        elsif user_an_observer_of_student?
+          observed_courses = []
+          Shard.partition_by_shard(student.participating_student_current_and_concluded_course_ids) do |course_ids|
+            observed_course_ids = ObserverEnrollment.
+              not_deleted.
+              where(course_id: course_ids, user_id: @current_user, associated_user_id: student).
+              pluck(:course_id)
+            next unless observed_course_ids.any?
+            observed_courses += Course.where(id: observed_course_ids).to_a
+          end
+          observed_courses
+        else
+          []
+        end
       end
     end
   end
@@ -193,7 +293,7 @@ class GradeSummaryPresenter
   end
 
   def no_calculations?
-    @groups_assignments.empty?
+    @groups_assignments.empty? && @periods_assignments.empty?
   end
 
   def total_weight
@@ -209,5 +309,56 @@ class GradeSummaryPresenter
   def groups_assignments=(value)
     @groups_assignments = value
     assignments.concat(value)
+  end
+
+  def periods_assignments=(value)
+    @periods_assignments = value
+    assignments.concat(value)
+  end
+
+  def grading_periods
+    @all_grading_periods ||= GradingPeriod.for(@context).order(:start_date).to_a
+  end
+
+  private
+
+  def all_groups
+    @all_groups ||= @context.assignment_groups.active.to_a
+  end
+
+  def sorted_by_modules(assignments)
+    Assignment.preload_context_module_tags(assignments, include_context_modules: true)
+    assignments.sort do |a, b|
+      a_tags = a.all_context_module_tags
+      b_tags = b.all_context_module_tags
+      # assignments without modules come after assignments with modules
+      next -1 if a_tags.present? && b_tags.empty?
+      next 1 if a_tags.empty? && b_tags.present?
+      # if both assignments do not belong to a module, compare by
+      # assignment title
+      next a.title.downcase <=> b.title.downcase if a_tags.empty? && b_tags.empty?
+
+      # if both assignments belong to modules, compare the module
+      # position of the first module they each belong to
+      compare_by_module_position(a_tags.first, b_tags.first)
+    end
+  end
+
+  def compare_by_module_position(module_tag1, module_tag2)
+    module_position_comparison =
+      module_tag1.context_module.position <=> module_tag2.context_module.position
+    # if module position above is the same, compare by assignment
+    # position within the module
+    if module_position_comparison.zero?
+      module_tag1.position <=> module_tag2.position
+    else
+      module_position_comparison
+    end
+  end
+
+  private_class_method
+
+  def self.cache_key(context, method)
+    ['grade_summary_presenter', context, method].cache_key
   end
 end

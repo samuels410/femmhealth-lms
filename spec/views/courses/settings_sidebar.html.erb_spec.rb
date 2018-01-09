@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -25,36 +25,79 @@ describe "courses/_settings_sidebar.html.erb" do
     @course.sis_source_id = "so_special_sis_id"
     @course.workflow_state = 'claimed'
     @course.save!
-    assigns[:context] = @course
-    assigns[:user_counts] = {}
-    assigns[:all_roles] = Role.custom_roles_and_counts_for_course(@course, @user)
+    assign(:context, @course)
+    assign(:user_counts, {})
+    assign(:all_roles, Role.custom_roles_and_counts_for_course(@course, @user))
+    assign(:course_settings_sub_navigation_tools, [])
   end
 
   describe "End this course button" do
     it "should not display if the course or term end date has passed" do
-      @course.stubs(:soft_concluded?).returns(true)
+      allow(@course).to receive(:soft_concluded?).and_return(true)
       view_context(@course, @user)
-      assigns[:current_user] = @user
+      assign(:current_user, @user)
       render
-      response.body.should_not match(/Conclude this Course/)
+      expect(response.body).not_to match(/Conclude this Course/)
     end
 
     it "should display if the course and its term haven't ended" do
-      @course.stubs(:soft_concluded?).returns(false)
+      allow(@course).to receive(:soft_concluded?).and_return(false)
       view_context(@course, @user)
-      assigns[:current_user] = @user
+      assign(:current_user, @user)
       render
-      response.body.should match(/Conclude this Course/)
+      expect(response.body).to match(/Conclude this Course/)
     end
   end
 
   describe "Reset course content" do
     it "should not display the dialog contents under the button" do
       view_context(@course, @user)
-      assigns[:current_user] = @user
+      assign(:current_user, @user)
       render
       doc = Nokogiri::HTML.parse(response.body)
-      doc.at_css('#reset_course_content_dialog')['style'].should == 'display:none;'
+      expect(doc.at_css('#reset_course_content_dialog')['style']).to eq 'display:none;'
+    end
+  end
+
+  describe "course settings sub navigation" do
+    before do
+      view_context(@course, @user)
+      assign(:current_user, @user)
+      @controller.instance_variable_set(:@context, @course)
+    end
+
+    describe "external tools" do
+      def create_course_settings_sub_navigation_tool(options = {})
+          @course.root_account.enable_feature!(:lor_for_account)
+          defaults = {
+            name: options[:name] || "external tool",
+            consumer_key: 'test',
+            shared_secret: 'asdf',
+            url: 'http://example.com/ims/lti',
+            course_settings_sub_navigation: { icon_url: '/images/delete.png' },
+          }
+          @course.context_external_tools.create!(defaults.merge(options))
+      end
+
+      it "should display all configured tools" do
+        num_tools = 3
+        (1..num_tools).each do |n|
+          create_course_settings_sub_navigation_tool(name: "tool #{n}")
+        end
+        assign(:course_settings_sub_navigation_tools, @course.context_external_tools.to_a)
+        render
+        doc = Nokogiri::HTML.parse(response.body)
+        expect(doc.css('.course-settings-sub-navigation-lti').size).to eq num_tools
+      end
+
+      it "should include the launch type parameter" do
+        create_course_settings_sub_navigation_tool
+        assign(:course_settings_sub_navigation_tools, @course.context_external_tools.to_a)
+        render
+        doc = Nokogiri::HTML.parse(response.body)
+        tool_link = doc.at_css('.course-settings-sub-navigation-lti')
+        expect(tool_link['href']).to include("launch_type=course_settings_sub_navigation")
+      end
     end
   end
 end

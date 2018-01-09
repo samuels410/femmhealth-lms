@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,7 +19,5 @@
 class OauthRequest < ActiveRecord::Base
   belongs_to :user
 
-  attr_accessible :service, :token, :secret, :user_secret, :return_url, :user, :original_host_with_port
-  
   def self.serialization_excludes; [:secret, :user_secret]; end
 end

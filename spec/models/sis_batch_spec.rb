@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,8 +20,13 @@ require 'tmpdir'
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 
 describe SisBatch do
-  before do
+  before :once do
     account_model
+    Delayed::Job.destroy_all
+  end
+
+  def sis_jobs
+    Delayed::Job.where("tag ilike 'sis'")
   end
 
   def create_csv_data(data)
@@ -35,14 +40,11 @@ describe SisBatch do
         end
       end
 
-      old_job_count = Delayed::Job.count
       batch = File.open(path, 'rb') do |tmp|
         # arrrgh attachment.rb
         def tmp.original_filename; File.basename(path); end
-        SisBatch.create_with_attachment(@account, 'instructure_csv', tmp)
+        SisBatch.create_with_attachment(@account, 'instructure_csv', tmp, @user || user_factory)
       end
-      # SisBatches shouldn't need any background processing
-      Delayed::Job.count.should == old_job_count
       yield batch if block_given?
       batch
     end
@@ -57,22 +59,22 @@ describe SisBatch do
   end
 
   it "should not add attachments to the list" do
-    create_csv_data(['abc']) { |batch| batch.attachment.position.should be_nil}
-    create_csv_data(['abc']) { |batch| batch.attachment.position.should be_nil}
-    create_csv_data(['abc']) { |batch| batch.attachment.position.should be_nil}
+    create_csv_data(['abc']) { |batch| expect(batch.attachment.position).to be_nil}
+    create_csv_data(['abc']) { |batch| expect(batch.attachment.position).to be_nil}
+    create_csv_data(['abc']) { |batch| expect(batch.attachment.position).to be_nil}
   end
 
   it "should keep the batch in initializing state during create_with_attachment" do
-    batch = SisBatch.create_with_attachment(@account, 'instructure_csv', stub_file_data('test.csv', 'abc', 'text')) do |batch|
-      batch.attachment.should_not be_new_record
-      batch.workflow_state.should == 'initializing'
+    batch = SisBatch.create_with_attachment(@account, 'instructure_csv', stub_file_data('test.csv', 'abc', 'text'), user_factory) do |batch|
+      expect(batch.attachment).not_to be_new_record
+      expect(batch.workflow_state).to eq 'initializing'
       batch.options = { :override_sis_stickiness => true }
     end
 
-    batch.workflow_state.should == 'created'
-    batch.should_not be_new_record
-    batch.changed?.should be_false
-    batch.options[:override_sis_stickiness].should == true
+    expect(batch.workflow_state).to eq 'created'
+    expect(batch).not_to be_new_record
+    expect(batch.changed?).to be_falsey
+    expect(batch.options[:override_sis_stickiness]).to eq true
   end
 
   describe ".process_all_for_account" do
@@ -85,10 +87,23 @@ describe SisBatch do
       @a1 = @account
       @a2 = account_model
       b5 = create_csv_data(['abc'])
-      b2.any_instantiation.expects(:process_without_send_later).never
-      b5.any_instantiation.expects(:process_without_send_later).never
+      expect_any_instantiation_of(b2).to receive(:process_without_send_later).never
+      expect_any_instantiation_of(b5).to receive(:process_without_send_later).never
       SisBatch.process_all_for_account(@a1)
-      [b1, b2, b4].each { |batch| [:imported, :imported_with_messages].should be_include(batch.reload.state) }
+      [b1, b2, b4].each { |batch| expect([:imported, :imported_with_messages]).to be_include(batch.reload.state) }
+    end
+
+    it 'should abort non processed sis_batches when aborted' do
+      process_csv_data([%{course_id,short_name,long_name,account_id,term_id,status
+test_1,TC 101,Test Course 101,,term1,active
+}])
+      expect(@account.all_courses.where(sis_source_id: 'test_1').take.workflow_state).to eq 'claimed'
+      batch = process_csv_data([%{course_id,short_name,long_name,account_id,term_id,status
+test_1,TC 101,Test Course 101,,term1,deleted
+}], workflow_state: 'aborted')
+      expect(batch.progress).to eq 100
+      expect(batch.workflow_state).to eq 'aborted'
+      expect(@account.all_courses.where(sis_source_id: 'test_1').take.workflow_state).to eq 'claimed'
     end
   end
 
@@ -100,8 +115,8 @@ describe SisBatch do
     end
 
     job = created_jobs.find { |j| j.tag == 'SisBatch.process_all_for_account' }
-    job.should be_present
-    job.run_at.to_i.should <= Time.now.to_i
+    expect(job).to be_present
+    expect(job.run_at.to_i).to be <= Time.now.to_i
 
     job.destroy
 
@@ -113,23 +128,39 @@ describe SisBatch do
     end
 
     job = created_jobs.find { |j| j.tag == 'SisBatch.process_all_for_account' }
-    job.should be_present
-    job.run_at.to_i.should >= 100.seconds.from_now.to_i
-    job.run_at.to_i.should <= 150.minutes.from_now.to_i
+    expect(job).to be_present
+    expect(job.run_at.to_i).to be >= 100.seconds.from_now.to_i
+    expect(job.run_at.to_i).to be <= 150.minutes.from_now.to_i
   end
 
-  it "should fail itself if the jobs dies" do
-    batch = nil
-    track_jobs do
-      batch = create_csv_data(['abc'])
-      batch.process
-      batch.update_attribute(:workflow_state, 'importing')
+  describe 'when the job dies' do
+    let!(:batch) {
+      batch = nil
+      track_jobs do
+        batch = create_csv_data(['abc'])
+        batch.process
+        batch.update_attribute(:workflow_state, 'importing')
+        batch
+      end
       batch
+    }
+
+    let!(:job) {
+      created_jobs.find { |j| j.tag == 'SisBatch.process_all_for_account' }
+    }
+
+    before do
+      track_jobs { job.reschedule }
     end
 
-    job = created_jobs.find { |j| j.tag == 'SisBatch.process_all_for_account' }
-    job.reschedule
-    batch.reload.should be_failed
+    it 'enqueue a job to clean up the account associations' do
+      job = created_jobs.find{ |j| j.tag == 'Account#update_account_associations' }
+      expect(job).to_not be_nil
+    end
+
+    it 'must fail itself' do
+      expect(batch.reload).to be_failed
+    end
   end
 
   describe "batch mode" do
@@ -153,7 +184,7 @@ describe SisBatch do
         "course_id,short_name,long_name,account_id,term_id,status\n" +
         "another_course,not-delete,not deleted not changed,,term1,active"
       ])
-      @c4 = @account.courses.find_by_course_code('not-delete')
+      @c4 = @account.courses.where(course_code: 'not-delete').first
 
       # sections are keyed off what term their course is in
       @s1 = factory_with_protected_attributes(@c1.course_sections, :name => "delete me", :sis_batch_id => @old_batch.id)
@@ -162,10 +193,10 @@ describe SisBatch do
       @s4 = factory_with_protected_attributes(@c2.course_sections, :name => "delete me", :sis_batch_id => @old_batch.id) # c2 won't be deleted, but this section should still be
 
       # enrollments are keyed off what term their course is in
-      @e1 = factory_with_protected_attributes(@c1.enrollments, :workflow_state => 'active', :user => user, :sis_batch_id => @old_batch.id, :type => 'StudentEnrollment')
-      @e2 = factory_with_protected_attributes(@c2.enrollments, :workflow_state => 'active', :user => user, :type => 'StudentEnrollment')
-      @e3 = factory_with_protected_attributes(@c3.enrollments, :workflow_state => 'active', :user => user, :sis_batch_id => @old_batch.id, :type => 'StudentEnrollment')
-      @e4 = factory_with_protected_attributes(@c2.enrollments, :workflow_state => 'active', :user => user, :sis_batch_id => @old_batch.id, :type => 'StudentEnrollment') # c2 won't be deleted, but this enrollment should still be
+      @e1 = factory_with_protected_attributes(@c1.enrollments, :workflow_state => 'active', :user => user_factory, :sis_batch_id => @old_batch.id, :type => 'StudentEnrollment')
+      @e2 = factory_with_protected_attributes(@c2.enrollments, :workflow_state => 'active', :user => user_factory, :type => 'StudentEnrollment')
+      @e3 = factory_with_protected_attributes(@c3.enrollments, :workflow_state => 'active', :user => user_factory, :sis_batch_id => @old_batch.id, :type => 'StudentEnrollment')
+      @e4 = factory_with_protected_attributes(@c2.enrollments, :workflow_state => 'active', :user => user_factory, :sis_batch_id => @old_batch.id, :type => 'StudentEnrollment') # c2 won't be deleted, but this enrollment should still be
       @e5 = factory_with_protected_attributes(@c2.enrollments, :workflow_state => 'active', :user => user_with_pseudonym, :sis_batch_id => @old_batch.id, :course_section => @s2, :type => 'StudentEnrollment') # c2 won't be deleted, and this enrollment sticks around because it's specified in the new csv
       @e5.user.pseudonym.update_attribute(:sis_user_id, 'my_user')
       @e5.user.pseudonym.update_attribute(:account_id, @account.id)
@@ -184,27 +215,27 @@ s2,test_1,section2,active},
         ],
         :batch_mode => true)
 
-      @c1.reload.should be_available
-      @c2.reload.should be_available
-      @c3.reload.should be_available
-      @c4.reload.should be_claimed
-      @cnew = @account.reload.courses.find_by_course_code('TC 101')
-      @cnew.should_not be_nil
-      @cnew.sis_batch_id.should == @batch.id
-      @cnew.should be_claimed
+      expect(@c1.reload).to be_available
+      expect(@c2.reload).to be_available
+      expect(@c3.reload).to be_available
+      expect(@c4.reload).to be_claimed
+      @cnew = @account.reload.courses.where(course_code: 'TC 101').first
+      expect(@cnew).not_to be_nil
+      expect(@cnew.sis_batch_id).to eq @batch.id
+      expect(@cnew).to be_claimed
 
-      @s1.reload.should be_active
-      @s2.reload.should be_active
-      @s3.reload.should be_active
-      @s4.reload.should be_active
-      @s5 = @cnew.course_sections.find_by_sis_source_id('s2')
-      @s5.should_not be_nil
+      expect(@s1.reload).to be_active
+      expect(@s2.reload).to be_active
+      expect(@s3.reload).to be_active
+      expect(@s4.reload).to be_active
+      @s5 = @cnew.course_sections.where(sis_source_id: 's2').first
+      expect(@s5).not_to be_nil
 
-      @e1.reload.should be_active
-      @e2.reload.should be_active
-      @e3.reload.should be_active
-      @e4.reload.should be_active
-      @e5.reload.should be_active
+      expect(@e1.reload).to be_active
+      expect(@e2.reload).to be_active
+      expect(@e3.reload).to be_active
+      expect(@e4.reload).to be_active
+      expect(@e5.reload).to be_active
     end
 
     def test_remove_specific_term
@@ -215,31 +246,44 @@ s2,test_1,section2,active},
       @previous_batch = @account.sis_batches.create!
       @old_batch = @account.sis_batches.create!
 
-      @c1 = factory_with_protected_attributes(@subacct.courses, :name => "delete me", :enrollment_term => @term1, :sis_batch_id => @previous_batch.id)
+      @c1 = factory_with_protected_attributes(@subacct.courses, name: "delete me", enrollment_term: @term1,
+                                              sis_source_id: 'my_first_course', sis_batch_id: @previous_batch.id)
       @c1.offer!
-      @c2 = factory_with_protected_attributes(@account.courses, :name => "don't delete me", :enrollment_term => @term1, :sis_source_id => 'my_course', :root_account => @account)
+      @c2 = factory_with_protected_attributes(@account.courses, name: "don't delete me", enrollment_term: @term1,
+                                              sis_source_id: 'my_course', root_account: @account)
       @c2.offer!
-      @c3 = factory_with_protected_attributes(@account.courses, :name => "delete me if terms", :enrollment_term => @term2, :sis_batch_id => @previous_batch.id)
+      @c3 = factory_with_protected_attributes(@account.courses, name: "delete me if terms", enrollment_term: @term2,
+                                              sis_source_id: 'my_third_course', sis_batch_id: @previous_batch.id)
       @c3.offer!
+      @c5 = factory_with_protected_attributes(@account.courses, name: "don't delete me cause sis was removed",
+                                              enrollment_term: @term1, sis_batch_id: @previous_batch.id, sis_source_id: nil)
+      @c5.offer!
 
       # initial import of one course, to test courses that haven't changed at all between imports
       process_csv_data([
 %{course_id,short_name,long_name,account_id,term_id,status
 another_course,not-delete,not deleted not changed,,term1,active}
       ])
-      @c4 = @account.courses.find_by_course_code('not-delete')
+      @c4 = @account.courses.where(course_code: 'not-delete').first
 
       # sections are keyed off what term their course is in
-      @s1 = factory_with_protected_attributes(@c1.course_sections, :name => "delete me", :sis_batch_id => @old_batch.id)
-      @s2 = factory_with_protected_attributes(@c2.course_sections, :name => "don't delete me", :sis_source_id => 'my_section')
-      @s3 = factory_with_protected_attributes(@c3.course_sections, :name => "delete me if terms", :sis_batch_id => @old_batch.id)
-      @s4 = factory_with_protected_attributes(@c2.course_sections, :name => "delete me", :sis_batch_id => @old_batch.id) # c2 won't be deleted, but this section should still be
+      @s1 = factory_with_protected_attributes(@c1.course_sections, name: "delete me",
+                                              sis_source_id: 's1', sis_batch_id: @old_batch.id)
+      @s2 = factory_with_protected_attributes(@c2.course_sections, name: "don't delete me",
+                                              sis_source_id: 'my_section')
+      @s3 = factory_with_protected_attributes(@c3.course_sections, name: "delete me if terms",
+                                              sis_source_id: 's3', sis_batch_id: @old_batch.id)
+      # c2 won't be deleted, but this section should still be
+      @s4 = factory_with_protected_attributes(@c2.course_sections, name: "delete me",
+                                              sis_source_id: 's4', sis_batch_id: @old_batch.id)
+      @sn = factory_with_protected_attributes(@c2.course_sections, name: "don't delete me, I've lost my sis",
+                                              sis_source_id: nil, sis_batch_id: @old_batch.id)
 
       # enrollments are keyed off what term their course is in
-      @e1 = factory_with_protected_attributes(@c1.enrollments, :workflow_state => 'active', :user => user, :sis_batch_id => @old_batch.id, :type => 'StudentEnrollment')
-      @e2 = factory_with_protected_attributes(@c2.enrollments, :workflow_state => 'active', :user => user, :type => 'StudentEnrollment')
-      @e3 = factory_with_protected_attributes(@c3.enrollments, :workflow_state => 'active', :user => user, :sis_batch_id => @old_batch.id, :type => 'StudentEnrollment')
-      @e4 = factory_with_protected_attributes(@c2.enrollments, :workflow_state => 'active', :user => user, :sis_batch_id => @old_batch.id, :type => 'StudentEnrollment') # c2 won't be deleted, but this enrollment should still be
+      @e1 = factory_with_protected_attributes(@c1.enrollments, :workflow_state => 'active', :user => user_factory, :sis_batch_id => @old_batch.id, :type => 'StudentEnrollment')
+      @e2 = factory_with_protected_attributes(@c2.enrollments, :workflow_state => 'active', :user => user_factory, :type => 'StudentEnrollment')
+      @e3 = factory_with_protected_attributes(@c3.enrollments, :workflow_state => 'active', :user => user_factory, :sis_batch_id => @old_batch.id, :type => 'StudentEnrollment')
+      @e4 = factory_with_protected_attributes(@c2.enrollments, :workflow_state => 'active', :user => user_factory, :sis_batch_id => @old_batch.id, :type => 'StudentEnrollment') # c2 won't be deleted, but this enrollment should still be
       @e5 = factory_with_protected_attributes(@c2.enrollments, :workflow_state => 'active', :user => user_with_pseudonym, :sis_batch_id => @old_batch.id, :course_section => @s2, :type => 'StudentEnrollment') # c2 won't be deleted, and this enrollment sticks around because it's specified in the new csv
       @e5.user.pseudonym.update_attribute(:sis_user_id, 'my_user')
       @e5.user.pseudonym.update_attribute(:account_id, @account.id)
@@ -259,30 +303,32 @@ s2,test_1,section2,active},
         :batch_mode => true,
         :batch_mode_term => @term1)
 
-      @batch.data[:stack_trace].should be_nil
+      expect(@batch.data[:stack_trace]).to be_nil
 
-      @c1.reload.should be_deleted
-      @c1.stuck_sis_fields.should_not be_include(:workflow_state)
-      @c2.reload.should be_available
-      @c3.reload.should be_available
-      @c4.reload.should be_claimed
-      @cnew = @account.reload.courses.find_by_course_code('TC 101')
-      @cnew.should_not be_nil
-      @cnew.sis_batch_id.should == @batch.id
-      @cnew.should be_claimed
+      expect(@c1.reload).to be_deleted
+      expect(@c1.stuck_sis_fields).not_to be_include(:workflow_state)
+      expect(@c2.reload).to be_available
+      expect(@c3.reload).to be_available
+      expect(@c4.reload).to be_claimed
+      expect(@c5.reload).to be_available
+      @cnew = @account.reload.courses.where(course_code: 'TC 101').first
+      expect(@cnew).not_to be_nil
+      expect(@cnew.sis_batch_id).to eq @batch.id
+      expect(@cnew).to be_claimed
 
-      @s1.reload.should be_deleted
-      @s2.reload.should be_active
-      @s3.reload.should be_active
-      @s4.reload.should be_deleted
-      @s5 = @cnew.course_sections.find_by_sis_source_id('s2')
-      @s5.should_not be_nil
+      expect(@s1.reload).to be_deleted
+      expect(@s2.reload).to be_active
+      expect(@s3.reload).to be_active
+      expect(@s4.reload).to be_deleted
+      expect(@sn.reload).to be_active
+      @s5 = @cnew.course_sections.where(sis_source_id: 's2').first
+      expect(@s5).not_to be_nil
 
-      @e1.reload.should be_deleted
-      @e2.reload.should be_active
-      @e3.reload.should be_active
-      @e4.reload.should be_deleted
-      @e5.reload.should be_active
+      expect(@e1.reload).to be_deleted
+      expect(@e2.reload).to be_active
+      expect(@e3.reload).to be_active
+      expect(@e4.reload).to be_deleted
+      expect(@e5.reload).to be_active
 
     end
 
@@ -312,7 +358,20 @@ s2,test_1,section2,active},
         %{course_id,short_name,long_name,account_id,term_id,status
           test_1,TC 101,Test Course 101,,,active}],
         :batch_mode => false)
-      @c1.reload.should be_available
+      expect(@c1.reload).to be_available
+    end
+
+    it "shouldn't do batch mode when there is not batch data types" do
+      @term = @account.enrollment_terms.first
+      @term.update_attribute(:sis_source_id, 'term_1')
+      @previous_batch = @account.sis_batches.create!
+
+      batch = create_csv_data([%{user_id,login_id,status
+                                 user_1,user_1,active}])
+      batch.update_attributes(batch_mode: true, batch_mode_term: @term)
+      expect(batch).to receive(:remove_previous_imports).once
+      expect(batch).to receive(:non_batch_courses_scope).never
+      batch.process_without_send_later
     end
 
     it "should only do batch mode removals for supplied data types" do
@@ -332,45 +391,49 @@ s2,test_1,section2,active},
           section_1,user_1,student,active}
           ])
 
-      @user = Pseudonym.find_by_sis_user_id('user_1').user
-      @section = CourseSection.find_by_sis_source_id('section_1')
+      @user = Pseudonym.where(sis_user_id: 'user_1').first.user
+      @section = CourseSection.where(sis_source_id: 'section_1').first
       @course = @section.course
-      @enrollment1 = @course.student_enrollments.find_by_user_id(@user.id)
+      @enrollment1 = @course.student_enrollments.where(user_id: @user).first
 
-      @user.should be_registered
-      @section.should be_active
-      @course.should be_claimed
-      @enrollment1.should be_active
+      expect(@user).to be_registered
+      expect(@section).to be_active
+      expect(@course).to be_claimed
+      expect(@enrollment1).to be_active
 
       # only supply enrollments; course and section are left alone
-      process_csv_data(
-          [%{section_id,user_id,role,status
-          section_1,user_1,teacher,active}],
-          :batch_mode => true, :batch_mode_term => @term)
+      b = process_csv_data(
+        [%{section_id,user_id,role,status
+           section_1,user_1,teacher,active}],
+        :batch_mode => true, :batch_mode_term => @term)
 
-      @user.reload.should be_registered
-      @section.reload.should be_active
-      @course.reload.should be_claimed
-      @enrollment1.reload.should be_deleted
-      @enrollment2 = @course.teacher_enrollments.find_by_user_id(@user.id)
-      @enrollment2.should be_active
+      expect(b.data[:counts][:batch_enrollments_deleted]).to eq 1
+      expect(@user.reload).to be_registered
+      expect(@section.reload).to be_active
+      expect(@course.reload).to be_claimed
+      expect(@enrollment1.reload).to be_deleted
+      @enrollment2 = @course.teacher_enrollments.where(user_id: @user).first
+      expect(@enrollment2).to be_active
 
       # only supply sections; course left alone
-      process_csv_data(
-          [%{section_id,course_id,name}],
-          :batch_mode => true, :batch_mode_term => @term)
-      @user.reload.should be_registered
-      @section.reload.should be_deleted
+      b = process_csv_data(
+        [%{section_id,course_id,name}],
+        :batch_mode => true, :batch_mode_term => @term)
+      expect(@user.reload).to be_registered
+      expect(@section.reload).to be_deleted
       @section.enrollments.not_fake.each do |e|
-        e.should be_deleted
+        expect(e).to be_deleted
       end
-      @course.reload.should be_claimed
+      expect(@course.reload).to be_claimed
+      expect(b.data[:counts][:batch_sections_deleted]).to eq 1
 
+      expect(Auditors::Course).to receive(:record_deleted).once.with(@course, anything, anything)
       # only supply courses
-      process_csv_data(
-          [%{course_id,short_name,long_name,term_id}],
-          :batch_mode => true, :batch_mode_term => @term)
-      @course.reload.should be_deleted
+      b = process_csv_data(
+        [%{course_id,short_name,long_name,term_id}],
+        :batch_mode => true, :batch_mode_term => @term)
+      expect(b.data[:counts][:batch_courses_deleted]).to eq 1
+      expect(@course.reload).to be_deleted
     end
 
     it "should treat crosslisted sections as belonging to their original course" do
@@ -399,8 +462,8 @@ s2,test_1,section2,active},
       process_csv_data(
           ['section_id,course_id,name,status}'],
           :batch_mode => true, :batch_mode_term => @term1)
-      @section1.reload.should be_deleted
-      @section2.reload.should_not be_deleted
+      expect(@section1.reload).to be_deleted
+      expect(@section2.reload).not_to be_deleted
     end
   end
 
@@ -411,17 +474,317 @@ s2,test_1,section2,active},
     batch.processing_errors = [ ['testfile.csv', 'test error'] ] * 3
     batch.save!
     batch.reload
-    batch.processing_warnings.size.should == 3
-    batch.processing_warnings.last.should == ['testfile.csv', 'test warning']
-    batch.processing_errors.size.should == 3
-    batch.processing_errors.last.should == ['testfile.csv', 'test error']
+    expect(batch.processing_warnings.size).to eq 3
+    expect(batch.processing_warnings.last).to eq ['testfile.csv', 'test warning']
+    expect(batch.processing_errors.size).to eq 3
+    expect(batch.processing_errors.last).to eq ['testfile.csv', 'test error']
     batch.processing_warnings = [ ['testfile.csv', 'test warning'] ] * 5
     batch.processing_errors = [ ['testfile.csv', 'test error'] ] * 5
     batch.save!
     batch.reload
-    batch.processing_warnings.size.should == 3
-    batch.processing_warnings.last.should == ['', 'There were 3 more warnings']
-    batch.processing_errors.size.should == 3
-    batch.processing_errors.last.should == ['', 'There were 3 more errors']
+    expect(batch.processing_warnings.size).to eq 3
+    expect(batch.processing_warnings.last).to eq ['', 'There were 3 more warnings']
+    expect(batch.processing_errors.size).to eq 3
+    expect(batch.processing_errors.last).to eq ['', 'There were 3 more errors']
+  end
+
+  it "should write all warnings/errors to a file and cleanup temp files" do
+    Setting.set('sis_batch_max_messages', '3')
+    batch = @account.sis_batches.create!
+    4.times do |i|
+      batch.add_warnings([['testfile.csv', "test warning#{i}"]])
+      batch.add_warnings([['testfile.csv', "test error#{i}"]])
+    end
+    batch.finish(false)
+    error_file = batch.errors_attachment.reload
+    expect(error_file.display_name).to eq "sis_errors_attachment_#{batch.id}.csv"
+    expect(CSV.parse(error_file.open).map.to_a.size).to eq 8
+    expect(Attachment.where(context: batch).count).to eq 1
+    expect(Attachment.where(context: batch, id: batch.errors_attachment_id).count).to eq 1
+  end
+
+  context "csv diffing" do
+    describe 'diffing_drop_status' do
+      before :once do
+        process_csv_data(
+          [
+            %{user_id,login_id,status
+              user_1,user_1,active},
+            %{course_id,short_name,long_name,term_id,status
+              course_1,course_1,course_1,term_1,active},
+            %{section_id,course_id,name,status
+              section_1,course_1,section_1,active},
+            %{section_id,user_id,role,status
+              section_1,user_1,student,active}
+          ], diffing_data_set_identifier: 'default')
+      end
+
+      it 'should use diffing_drop_status' do
+        batch = process_csv_data([%{section_id,user_id,role,status}],
+                                 diffing_data_set_identifier: 'default',
+                                 options: {diffing_drop_status: 'completed'})
+        zip = Zip::File.open(batch.generated_diff.open.path)
+        csvs = zip.glob('*.csv')
+        expect(csvs.first.get_input_stream.read).to eq(%{section_id,user_id,role,status\nsection_1,user_1,student,completed\n})
+      end
+
+      it 'should not use diffing_drop_status for non-enrollments' do
+        batch = process_csv_data(
+          [
+            %{user_id,login_id,status}
+          ], diffing_data_set_identifier: 'default', options: {diffing_drop_status: 'completed'})
+        zip = Zip::File.open(batch.generated_diff.open.path)
+        csvs = zip.glob('*.csv')
+        expect(csvs.first.get_input_stream.read).to eq("user_id,login_id,status\nuser_1,user_1,deleted\n")
+      end
+    end
+
+    it "should skip diffing if previous diff not available" do
+      expect_any_instance_of(SIS::CSV::DiffGenerator).to receive(:generate).never
+      batch = process_csv_data([
+%{course_id,short_name,long_name,account_id,term_id,status
+test_1,TC 101,Test Course 101,,term1,active
+      }], diffing_data_set_identifier: 'default')
+      # but still starts the chain
+      expect(batch.diffing_data_set_identifier).to eq 'default'
+    end
+
+    it "joins the chain but doesn't apply the diff when baseline is set" do
+      b1 = process_csv_data([
+%{course_id,short_name,long_name,account_id,term_id,status
+test_1,TC 101,Test Course 101,,term1,active
+}], diffing_data_set_identifier: 'default')
+
+      batch = process_csv_data([
+%{course_id,short_name,long_name,account_id,term_id,status
+test_1,TC 101,Test Course 101,,term1,active
+test_4,TC 104,Test Course 104,,term1,active
+}], diffing_data_set_identifier: 'default', diffing_remaster: true)
+      expect(batch.diffing_data_set_identifier).to eq 'default'
+      expect(batch.data[:diffed_against_sis_batch_id]).to eq nil
+      expect(batch.generated_diff).to eq nil
+    end
+
+    it "should diff against the most previous successful batch in the same chain" do
+      b1 = process_csv_data([
+%{course_id,short_name,long_name,account_id,term_id,status
+test_1,TC 101,Test Course 101,,term1,active
+}], diffing_data_set_identifier: 'default')
+
+      b2 = process_csv_data([
+%{course_id,short_name,long_name,account_id,term_id,status
+test_2,TC 102,Test Course 102,,term1,active
+}], diffing_data_set_identifier: 'other')
+
+      # doesn't diff against failed imports on the chain
+      b3 = process_csv_data([
+%{short_name,long_name,account_id,term_id,status
+TC 103,Test Course 103,,term1,active
+}], diffing_data_set_identifier: 'default')
+      expect(b3.workflow_state).to eq 'failed_with_messages'
+
+      batch = process_csv_data([
+%{course_id,short_name,long_name,account_id,term_id,status
+test_1,TC 101,Test Course 101,,term1,active
+test_4,TC 104,Test Course 104,,term1,active
+}], diffing_data_set_identifier: 'default')
+
+      expect(batch.data[:diffed_against_sis_batch_id]).to eq b1.id
+      # test_1 should not have been toched by this last batch, since it was diff'd out
+      expect(@account.courses.find_by_sis_source_id('test_1').sis_batch_id).to eq b1.id
+      expect(@account.courses.find_by_sis_source_id('test_4').sis_batch_id).to eq batch.id
+
+      # check the generated csv file, inside the new attached zip
+      zip = Zip::File.open(batch.generated_diff.open.path)
+      csvs = zip.glob('*.csv')
+      expect(csvs.size).to eq 1
+      expect(csvs.first.get_input_stream.read).to eq(
+%{course_id,short_name,long_name,account_id,term_id,status
+test_4,TC 104,Test Course 104,,term1,active
+})
+    end
+
+    it 'should not diff outside of diff threshold' do
+      b1 = process_csv_data([
+%{course_id,short_name,long_name,account_id,term_id,status
+test_1,TC 101,Test Course 101,,term1,active
+test_4,TC 104,Test Course 104,,term1,active
+}], diffing_data_set_identifier: 'default', change_threshold: 1)
+
+      # small change, less than 1% difference
+      b2 = process_csv_data([
+%{course_id,short_name,long_name,account_id,term_id,status
+test_1,TC 101,Test Course 101,,term1,active
+test_4,TC 104,Test Course 104b,,term1,active
+}], diffing_data_set_identifier: 'default', change_threshold: 1)
+
+      # whoops left out the whole file, don't delete everything.
+      b3 = process_csv_data([
+%{course_id,short_name,long_name,account_id,term_id,status
+}], diffing_data_set_identifier: 'default', change_threshold: 1)
+
+      expect(b2.data[:diffed_against_sis_batch_id]).to eq b1.id
+      expect(b2.generated_diff_id).not_to be_nil
+      expect(b3.data[:diffed_against_sis_batch_id]).to be_nil
+      expect(b3.generated_diff_id).to be_nil
+    end
+
+    it 'should set batch_ids on change_sis_id' do
+      course1 = @account.courses.build
+      course1.sis_source_id = 'test_1'
+      course1.save!
+      b1 = process_csv_data([
+%{old_id,new_id,type
+test_1,test_a,course
+}])
+      expect(course1.reload.sis_batch_id).to eq b1.id
+      expect(b1.processing_errors).to eq []
+      expect(b1.processing_warnings).to eq []
+    end
+
+    it 'should set batch_ids on admins' do
+      u1 = user_with_managed_pseudonym(account: @account, sis_user_id: 'U001')
+      a1 = @account.account_users.create!(user_id: u1.id)
+      b1 = process_csv_data([
+%{user_id,account_id,role,status
+U001,,AccountAdmin,active
+}])
+      expect(a1.reload.sis_batch_id).to eq b1.id
+      expect(b1.processing_errors).to eq []
+      expect(b1.processing_warnings).to eq []
+    end
+
+    it 'should not allow removing import admin with sis import' do
+      user_with_managed_pseudonym(account: @account, sis_user_id: 'U001')
+      b1 = process_csv_data([%{user_id,account_id,role,status
+                               U001,,AccountAdmin,deleted}])
+      expect(b1.processing_errors).to eq []
+      expect(b1.processing_warnings).to eq [["csv_0.csv", "Can't remove yourself user_id 'U001'"]]
+    end
+
+    it 'should not allow removing import admin user with sis import' do
+      p = user_with_managed_pseudonym(account: @account, sis_user_id: 'U001').pseudonym
+      b1 = process_csv_data([%{user_id,login_id,status
+                               U001,#{p.unique_id},deleted}])
+      expect(b1.processing_errors).to eq []
+      expect(b1.processing_warnings).to eq [["csv_0.csv", "Can't remove yourself user_id 'U001'"]]
+    end
+
+    describe 'change_threshold in batch mode' do
+      before :once do
+        @term1 = @account.enrollment_terms.first
+        @term1.update_attribute(:sis_source_id, 'term1')
+        @old_batch = @account.sis_batches.create!
+
+        @c1 = factory_with_protected_attributes(@account.courses, name: "delete me maybe", enrollment_term: @term1,
+                                                sis_source_id: 'test_1', sis_batch_id: @old_batch.id)
+
+        # enrollments are keyed off what term their course is in
+        u1 = user_with_managed_pseudonym({account: @account, sis_user_id: 'u1', active_all: true})
+        u2 = user_with_managed_pseudonym({account: @account, sis_user_id: 'u2', active_all: true})
+        @e1 = factory_with_protected_attributes(@c1.enrollments, workflow_state: 'active',
+                                                user: u1, sis_batch_id: @old_batch.id, type: 'StudentEnrollment')
+        @e2 = factory_with_protected_attributes(@c1.enrollments, workflow_state: 'active',
+                                                user: u2, sis_batch_id: @old_batch.id, type: 'StudentEnrollment')
+      end
+
+      it 'should not delete batch mode above threshold' do
+        batch = process_csv_data(
+          [
+            %{course_id,short_name,long_name,account_id,term_id,status
+test_1,TC 101,Test Course 101,,term1,active},
+            %{course_id,user_id,role,status,section_id
+test_1,u1,student,active}
+          ],
+          batch_mode: true,
+          batch_mode_term: @term1,
+          change_threshold: 20)
+
+        expect(batch.workflow_state).to eq 'aborted'
+        expect(@e1.reload).to be_active
+        expect(@e2.reload).to be_active
+        expect(batch.processing_errors.first).to eq ["1 enrollments would be deleted and exceeds the set threshold of 20%"]
+      end
+
+      it 'should delete batch mode below threshold' do
+        batch = process_csv_data(
+          [
+            %{course_id,short_name,long_name,account_id,term_id,status
+test_1,TC 101,Test Course 101,,term1,active},
+            %{course_id,user_id,role,status,section_id
+test_1,u1,student,active}
+          ],
+          batch_mode: true,
+          batch_mode_term: @term1,
+          change_threshold: 50)
+
+        expect(batch.workflow_state).to eq 'imported'
+        expect(@e1.reload).to be_active
+        expect(@e2.reload).to be_deleted
+        expect(batch.processing_errors.size).to eq 0
+      end
+
+      it 'should not abort batch if it is above the threshold' do
+        b1 = process_csv_data([%{course_id,user_id,role,status
+                                test_1,u2,student,active}],
+                              batch_mode: true,
+                              batch_mode_term: @term1,
+                              change_threshold: 51)
+        expect(b1.workflow_state).to eq 'imported'
+        expect(@e1.reload).to be_deleted
+        expect(@e2.reload).to be_active
+        expect(b1.processing_errors.size).to eq 0
+      end
+
+      describe 'multi_term_batch_mode' do
+        before :once do
+          @term2 = @account.enrollment_terms.first
+          @term2.update_attribute(:sis_source_id, 'term2')
+
+          @c2 = factory_with_protected_attributes(@account.courses, name: "delete me", enrollment_term: @term2,
+                                                  sis_source_id: 'test_2', sis_batch_id: @old_batch.id)
+        end
+
+        it 'should use multi_term_batch_mode' do
+          batch = create_csv_data([
+                                    %{term_id,name,status
+                                      term1,term1,active
+                                      term2,term2,active},
+                                    %{course_id,short_name,long_name,account_id,term_id,status},
+                                    %{course_id,user_id,role,status},
+                                  ]) do |batch|
+            batch.options = {}
+            batch.batch_mode = true
+            batch.options[:multi_term_batch_mode] = true
+            batch.save!
+            batch.process_without_send_later
+          end
+          expect(@e1.reload).to be_deleted
+          expect(@e2.reload).to be_deleted
+          expect(@c1.reload).to be_deleted
+          expect(@c2.reload).to be_deleted
+          expect(batch.workflow_state).to eq 'imported'
+        end
+
+        it 'should not use multi_term_batch_mode if no terms are passed' do
+          batch = create_csv_data([
+                                    %{course_id,short_name,long_name,account_id,term_id,status},
+                                    %{course_id,user_id,role,status},
+                                  ]) do |batch|
+            batch.options = {}
+            batch.batch_mode = true
+            batch.options[:multi_term_batch_mode] = true
+            batch.save!
+            batch.process_without_send_later
+          end
+          expect(@e1.reload).to be_active
+          expect(@e2.reload).to be_active
+          expect(@c1.reload.workflow_state).to eq 'created'
+          expect(@c2.reload.workflow_state).to eq 'created'
+          expect(batch.workflow_state).to eq 'aborted'
+        end
+      end
+
+    end
   end
 end

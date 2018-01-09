@@ -1,10 +1,22 @@
 <%
-  js_bundle :calendar_event
-  jammit_css :tinymce
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 %>
 
-<% calendar_event = full_calendar_event %>
-<div id="full_calendar_event_holder" class="<%= 'editing' if @editing %>">
+<div id="full_calendar_event_holder">
   <div class="calendar_event" id="full_calendar_event">
     <div style="float: right; text-align: right; font-size: 0.8em;">
       <div class="date_text" style="<%= hidden unless calendar_event && calendar_event.start_at %>">
@@ -29,51 +41,4 @@
     <div class="description user_content"><%= calendar_event && calendar_event.description && !calendar_event.description.empty? ? user_content(calendar_event.description) : t(:no_content, "No Content") %></div>
     <div class="course_id" style="display: none;"><%= @context.id if @context && @context.is_a?(Course) %></div>
   </div>
-  <% if can_do(calendar_event, @current_user, :update_content) %>
-  <% url = calendar_event.new_record? ? context_url(@context, :context_calendar_events_url) : context_url(@context, :context_calendar_event_url, calendar_event.id) %>
-  <%= form_for calendar_event, :url => url, :html => {:method => (calendar_event.new_record? ? 'POST' : 'PUT'), :style => 'display: none;', :id => 'edit_calendar_event_form', :class => (calendar_event.new_record? ? 'new_event' : '')} do |f| %>
-  <table class="formtable full_calendar_event_table" style="width: 100%;">
-    <% if can_do(calendar_event, @current_user, :update) %>
-    <tr>
-      <td><%= f.blabel :title, :en => "Title" %></td>
-      <td><%= f.text_field :title, :size => 20 %></td>
-    </tr><tr>
-      <td style="vertical-align: top;"><%= before_label :date, "Date" %></td>
-      <td>
-        <input type="text" name="start_date" value="<%= date_string(calendar_event.start_at) %>" style="width: 120px;" class="date_field"/>
-      </td>
-    </tr><tr>
-      <td style="vertical-align: top;"><%= before_label :from, "From" %></td>
-      <td>
-        <% ot(:timespan, "%{start_time} *to* %{end_time}", :start_time => capture { %>
-          <div style="float: left;">
-            <input type="text" name="start_time" value="<%= time_string(calendar_event.start_at) unless calendar_event.all_day %>" style="width: 60px;" class="time_field"/>
-          </div>
-        <% }, :end_time => capture { %>
-          <div style="float: left;">
-            <input type="text" name="end_time" value="<%= time_string(calendar_event.end_at) unless calendar_event.all_day %>" style="width: 60px;" class="time_field"/>
-          </div>
-        <% }, :wrapper => '<div style="float: left;">&nbsp;\1&nbsp;</div>') %>
-      </td>
-    </tr>
-    <% end %>
-    <tr>
-      <td colspan="4">
-        <div style="font-size: 0.8em; float: right;">
-          <a href="#" class="switch_full_calendar_event_view"><%= t '#editor.switch_editor_html', "HTML Editor" %></a>
-          <a href="#" class="switch_full_calendar_event_view" style="display:none;"><%= t '#editor.switch_editor_visual', "Visual Editor" %></a>
-        </div>
-        <div>
-          <%= before_label :event_description, "Event Description" %>
-        </div>
-        <div><%= f.text_area :description, :style => 'width: 100%;' %></div>
-      </td>
-    </tr>
-  </table>
-  <div class="form-actions">
-    <button type="button" class="btn cancel_button"><%= t '#buttons.cancel', "Cancel" %></button>
-    <button type="submit" class="btn btn-primary submit_button"><%= calendar_event.new_record? ? t('buttons.create', "Create Event") : t('buttons.update', "Update Event") %></button>
-  </div>
-  <% end %>
-  <% end %>
 </div>

@@ -1,16 +1,38 @@
 <%
-  jammit_css :login
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
+<%
+  css_bundle :login_confirm
   js_bundle :registration_confirmation
   @headers = false
-  @body_classes << "modal"
+  @body_classes << "full-width modal body--login-confirmation"
   content_for :page_title, t(:page_title, "Register %{email}", :email => @communication_channel.path)
 %>
 
-<div id="modal-box">
-  <h2><%= t 'titles.welcome_aboard', "Welcome Aboard!" %></h2>
+<div id="modal-box" class="ic-Login-confirmation">
+  <header class="ic-Login-confirmation__header">
+    <%= image_tag("login/canvas-logo@2x.png", class:"ic-Login-confirmation__logo", alt:"Canvas by Instructure") %>
+  </header>
+  <div class="ic-Login-confirmation__content">
+  <h2 class="ic-Login-confirmation__headline"><%= t 'titles.welcome_aboard', "Welcome Aboard!" %></h2>
   <% if @current_user && @current_user != @user && @user.registered? && @enrollment %>
     <p><%= mt 'details.wrong_account', "The invitation for %{course} was sent to **%{invited_user}**, but you are currently logged in as **%{current_user}**", :course => @course.name, :invited_user => @user.name, :current_user => @current_user.name %></p>
-    <div class="button_box">
+    <div class="button_box ic-Login-confirmation__actions">
       <a href="<%= registration_confirmation_path(@nonce, :enrollment => @enrollment.uuid, :transfer_enrollment => 1) %>" class="btn" id='transfer'><%=  t 'buttons.transfer_enrollment', "Transfer Enrollment" %></a>
       <a href="<%= login_url(:enrollment => @enrollment.uuid, :pseudonym_session => { :unique_id => @user.pseudonym.try(:unique_id) }, :expected_user_id => @user.id) %>" class="btn" id="login"><%=  t 'buttons.login_as', "Log in as %{invited_user}", :invited_user => @user.name %></a>
     </div>
@@ -26,7 +48,7 @@
   **Are you %{name}?**", :email => @communication_channel.path, :name => friendly_name(@merge_opportunities.first.last.first, @merge_opportunities) %>
           <% end %></p>
         </div>
-        <div class="button_box">
+        <div class="button_box ic-Login-confirmation__actions">
           <% if @pseudonym %><a href="#" class="btn" id="register"><%= t 'buttons.no', 'No' %></a><% end %>
           <a href="<%= merge_or_login_link(@merge_opportunities.first.last.first) %>" class="btn not_external btn-primary" id="merge"><%= @user.registered? ? t('buttons.merge', "Combine") : t('buttons.yes', "Yes") %></a>
         </div>
@@ -34,12 +56,17 @@
           </div><!-- Close #disambiguation_box -->
           <div id="where_to_log_in" style="display:none;">
             <p><strong><%=  t 'details.choose_login', "Select where you would like to log in at." %></strong></p>
-            <ul>
+            <ul class="unstyled_list">
               <% @merge_opportunities.first.last.each_with_index do |pseudonym, i| %>
-                <li><input type="radio" name="pseudonym_select" value="<%= merge_or_login_link(pseudonym) %>"<%= ' checked="checked"' if i == 0 %>>&nbsp;<%= pseudonym.account.name %> (<%= pseudonym.unique_id %>)</li>
+                <li>
+                  <label class="radio">
+                    <input type="radio" name="pseudonym_select" value="<%= merge_or_login_link(pseudonym) %>"<%= ' checked="checked"' if i == 0 %>>
+                    <%= pseudonym.account.name %> (<%= pseudonym.unique_id %>)
+                  </label>
+                </li>
               <% end %>
             </ul>
-            <div class="button_box">
+            <div class="button_box ic-Login-confirmation__actions">
               <a href="#" class="btn" id="back"><%= t 'buttons.back', "Back" %></a>
               <a href="#" class="btn btn-primary" id="merge_if_clicked"><%= t 'buttons.continue', 'Continue' %></a>
             </div>
@@ -52,7 +79,7 @@
           <%= mt 'details.logged_in_other_user', "**%{email}** is a new account, but you are currently logged in as **%{user}**.", :email => @communication_channel.path, :user => (@current_pseudonym && @current_pseudonym.user == @current_user ? @current_pseudonym : @current_user.pseudonym).unique_id %>
         <% end %></p>
         <p><strong><%=  t 'details.add_email', "Would you like to add this email address to your current account?" %></strong></p>
-        <div class="button_box">
+        <div class="button_box ic-Login-confirmation__actions">
           <a href="#" class="btn" id="register"><%= t 'buttons.new_account', 'No' %></a>
           <a href="<%= registration_confirmation_path(@nonce, :enrollment => @enrollment.try(:uuid), :confirm => 1) %>" class="btn btn-primary" id='merge'><%=  t 'buttons.add_email_address', "Yes, Add Email Address" %></a>
         </div>
@@ -64,25 +91,40 @@
 
 Which is you?", :count => @merge_opportunities.length %>
         <% end %>
-        <ul>
+        <ul class="unstyled_list">
           <% @merge_opportunities.each_with_index do |(user, pseudonyms), i| %>
             <% if pseudonyms.length == 1 || user == @current_user %>
-              <li><span class="radio_spacer"><input type="radio" name="pseudonym_select" value="<%= merge_or_login_link(pseudonyms.first) %>"<%= ' checked="checked"' if i == 0 %> /></span><%= friendly_name(pseudonyms.first, @merge_opportunities) %></li>
+              <li>
+                <label class="radio">
+                  <input type="radio" name="pseudonym_select" value="<%= merge_or_login_link(pseudonyms.first) %>"<%= ' checked="checked"' if i == 0 %> />
+                  <%= friendly_name(pseudonyms.first, @merge_opportunities) %>
+                </label>
+              </li>
             <% else %>
-              <li><span class="radio_spacer"></span><%= user.name %>
-                <ul>
+              <li><%= user.name %>
+                <ul class="unstyled_list">
                   <% pseudonyms.each_with_index do |pseudonym, j| %>
-                    <li><span class="radio_spacer"><input type="radio" name="pseudonym_select" value="<%= merge_or_login_link(pseudonym) %>"<%= ' checked="checked"' if i == 0 && j == 0 %> /></span><%= pseudonym.account.name %> (<%= pseudonym.unique_id %>)</li>
+                    <li>
+                      <label class="radio">
+                        <input type="radio" name="pseudonym_select" value="<%= merge_or_login_link(pseudonym) %>"<%= ' checked="checked"' if i == 0 && j == 0 %> />
+                        <%= pseudonym.account.name %> (<%= pseudonym.unique_id %>)
+                      </label>
+                    </li>
                   <% end %>
                 </ul>
               </li>
             <% end %>
           <% end %>
           <% if @pseudonym %>
-            <li><span class="radio_spacer"><input type="radio" name="pseudonym_select" value="new_user_account" /></span><%= t 'details.none_of_these', "None of these, I'm a new user" %></li>
+            <li>
+              <label class="radio">
+                <input type="radio" name="pseudonym_select" value="new_user_account" />
+                <%= t 'details.none_of_these', "None of these, I'm a new user" %>
+              </label>
+            </li>
           <% end %>
         </ul>
-        <div class="button_box">
+        <div class="button_box ic-Login-confirmation__actions">
           <a href="<%= merge_or_login_link(@merge_opportunities.first.last.first) %>" class="btn not_external" id="merge"><%= t 'buttons.continue', "Continue" %></a>
         </div>
       <% end %>
@@ -90,7 +132,7 @@ Which is you?", :count => @merge_opportunities.length %>
   <% elsif @enrollment && @pseudonym %>
     <div class="disambiguation_box"<%= ' style="display: none;"'.html_safe if params[:register] %>>
       <p><%= mt 'details.account_needed', "You've been invited to join **%{course}**. To accept this request you need a Canvas account. Click the link below to create a Canvas account.", :course => @course.name %></p>
-      <div class="button_box">
+      <div class="button_box ic-Login-confirmation__actions">
         <a href="<%= login_url(:host => HostUrl.context_host(@root_account, @request.try(:host_with_port)), :confirm => @communication_channel.confirmation_code, :enrollment => @enrollment.uuid) %>" class="btn not_external"><%=  t 'buttons.have_account', "I Have a Canvas Account" %></a>
         <a href="#" class="btn" id="register"><%= t 'buttons.create_account', 'Create My Account' %></a>
       </div>
@@ -120,13 +162,13 @@ Which is you?", :count => @merge_opportunities.length %>
       <div class="control-group">
         <%= blabel :user, :time_zone, :en => "Time Zone", :class => 'control-label' %>
         <div class="controls">
-          <%= time_zone_select :user, :time_zone, ActiveSupport::TimeZone.us_zones, {:default => @pseudonym.account.default_time_zone.name, :value => @user.time_zone} %>
+          <%= time_zone_select :user, :time_zone, I18nTimeZone.us_zones, :model => I18nTimeZone, :default => @pseudonym.account.default_time_zone %>
         </div>
       </div>
       <% if @pseudonym.account == Account.default %>
       <div class="control-group">
         <div class="controls">
-          <label for="user_subscribe_to_emails">
+          <label for="user_subscribe_to_emails" class="checkbox">
             <%= check_box :user, :subscribe_to_emails, :checked => true %>
             <%= t "labels.subscribe_to_emails", "I want to receive information, news and tips from Instructure" %>
           </label>
@@ -135,13 +177,17 @@ Which is you?", :count => @merge_opportunities.length %>
       <% end %>
       <div class="control-group">
         <div class="controls">
-          <% if require_terms? %>
-            <label for="user_terms_of_use">
-              <%= check_box :user, :terms_of_use %>
-              <%= agree_to_terms %>
-            </label>
-          <% else %>
-            <a href="<%= @domain_root_account.privacy_policy_url %>" target="_blank"><%= t "#site.view_privacy_policy", "View Privacy Policy" %></a>
+          <% if @root_account.require_acceptance_of_terms?(@user) %>
+            <% TermsOfService.ensure_terms_for_account(@root_account) %>
+            <% js_env(:TERMS_OF_SERVICE_CUSTOM_CONTENT => @root_account.terms_of_service.terms_of_service_content&.content) %>
+            <% js_bundle :terms_of_service_modal %>
+            <div class="terms-of-service__register">
+              <label for="user_terms_of_use" class="checkbox">
+                <%= check_box :user, :terms_of_use %>
+                <%= t("I agree to the")%>
+              </label>
+              <a href="#" class="terms_of_service_link terms-of-service__link"></a>
+            </div>
           <% end %>
         </div>
       </div>
@@ -150,10 +196,10 @@ Which is you?", :count => @merge_opportunities.length %>
           <% unless @merge_opportunities.empty? %>
             <a href="#" class="btn" id="back"><%= t 'buttons.back', "Back" %></a>
           <% end %>
-          <button type="submit" class="btn btn-primary btn-large"><%= t 'buttons.register', "Register" %></button>
+          <button type="submit" class="btn btn-primary"><%= t 'buttons.register', "Register" %></button>
         </div>
       </div>
     <% end %>
   <% end %>
-
+  </div>
 </div>

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,12 +20,28 @@ module CC::Importer::Standard
     include CC::Importer
 
     def create_file_map
+      new_assignments = []
       resources_by_type(WEBCONTENT, "associatedcontent").each do |res|
+        if res[:intended_use]
+          path = get_full_path(res[:href])
+          if path && File.exists?(path) && Attachment.mimetype(path) =~ /html/
+            case res[:intended_use]
+            when "assignment"
+              new_assignments << {:migration_id => res[:migration_id], :description => File.read(path)}
+            when "syllabus"
+              @course[:course] ||= {}
+              @course[:course][:syllabus_body] = File.read(path)
+            end
+          end
+        end
+
         main_file = {}
         main_file[:migration_id] = res[:migration_id]
         main_file[:path_name] = res[:href]
-        # todo check for CC permissions on the file
-        
+        if res[:intended_user_role] == 'Instructor'
+          main_file[:locked] = true
+        end
+
         # add any extra files in this resource
         res[:files].each do |file_ref|
           next unless file_ref[:href]
@@ -50,6 +66,11 @@ module CC::Importer::Standard
           add_course_file(main_file, true)
         end
       end
+
+      new_assignments.each do |a|
+        a[:description] = replace_urls(a[:description])
+        @course[:assignments] << a
+      end
     end
 
     def package_course_files(file_map)
@@ -58,17 +79,23 @@ module CC::Importer::Standard
 
       Zip::File.open(zip_file, 'w') do |zipfile|
         file_map.each_value do |val|
-          file_path = File.join(@unzipped_file_path, val[:path_name])
-          if File.exists?(file_path)
-            zipfile.add(val[:path_name], file_path)
+          next if zipfile.entries.include?(val[:path_name])
+
+          file_path = @package_root.item_path(val[:path_name])
+          if File.exist?(file_path)
+            zipfile.add(val[:path_name], file_path) if !File.directory?(file_path)
           else
-            # todo add warning
+            web_file_path = @package_root.item_path(WEB_RESOURCES_FOLDER, val[:path_name])
+            if File.exist?(web_file_path)
+              zipfile.add(val[:path_name], web_file_path) if !File.directory?(web_file_path)
+            else
+              val[:errored] = true
+            end
           end
         end
       end
 
       File.expand_path(zip_file)
     end
-
   end
 end

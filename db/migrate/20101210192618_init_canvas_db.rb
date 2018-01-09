@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,7 +16,10 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-class InitCanvasDb < ActiveRecord::Migration
+# rubocop:disable Migration/PrimaryKey
+class InitCanvasDb < ActiveRecord::Migration[4.2]
+  tag :predeploy
+
   def self.up
     create_table "abstract_courses", :force => true do |t|
       t.string   "sis_source_id"
@@ -1345,11 +1348,7 @@ class InitCanvasDb < ActiveRecord::Migration
       t.boolean  "summarized"
       t.integer  "account_id", :limit => 8
     end
-    if connection.adapter_name =~ /\Asqlite/i
-      execute('CREATE UNIQUE INDEX "index_page_views_request_id" ON page_views(request_id)')
-    else
-      execute('ALTER TABLE page_views ADD PRIMARY KEY (request_id)')
-    end
+    execute("ALTER TABLE #{PageView.quoted_table_name} ADD PRIMARY KEY (request_id)")
 
     add_index "page_views", ["account_id"], :name => "index_page_views_on_account_id"
     add_index "page_views", ["asset_user_access_id"], :name => "index_page_views_asset_user_access_id"

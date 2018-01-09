@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -87,6 +87,7 @@ class MediaObjectsController < ApplicationController
         :singleton => "retrieve_media_details:#{media_object.media_id}"
       })
     end
+
     media_object.viewed!
     render :json => media_object_api_json(media_object, @current_user, session)
   end

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,15 +16,16 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-def valid_submission_comment_attributes
-  {
-    :comment => "This is a test comment",
-    :author => @student
-  }
-end
+module Factories
+  def valid_submission_comment_attributes
+    {
+      :comment => "This is a test comment",
+      :author => @student
+    }
+  end
 
-def submission_comment_model(opts={})
-  args = valid_submission_comment_attributes.merge(opts)
-  submission_model
-  @submission_comment = @submission.add_comment(args)
+  def submission_comment_model(opts={})
+    args = valid_submission_comment_attributes.merge(opts)
+    @submission_comment = (opts.delete(:submission) || @submission || submission_model).add_comment(args)
+  end
 end

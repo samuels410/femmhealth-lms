@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -22,42 +22,24 @@ class PseudonymSession < Authlogic::Session::Base
   login_field :unique_id
   find_by_login_method :custom_find_by_unique_id
   remember_me_for 2.weeks
+  allow_http_basic_auth false
+  consecutive_failed_logins_limit 0
 
   attr_accessor :remote_ip, :too_many_attempts
 
-  # we need to know if the session came from http basic auth, so we override
-  # authlogic's method here to add a flag that we can check
-  def persist_by_http_auth
-    controller.authenticate_with_http_basic do |login, password|
-      if !login.blank? && !password.blank?
-        send("#{login_field}=", login)
-        send("#{password_field}=", password)
-        @valid_basic_auth = valid?
-        return @valid_basic_auth
-      end
-    end
-
+  # In authlogic 3.2.0, it tries to parse the last part of the cookie (delimited by '::')
+  # as a timestamp to verify whether the cookie is stale.
+  # This conflicts with the uuid that we use instead in that place,
+  # so skip that check for now, to keep behavior similar between Rails 2 and 3.
+  def remember_me_expired?
     false
   end
-  def used_basic_auth?
-    @valid_basic_auth
-  end
 
-  unless CANVAS_RAILS2
-    # In authlogic 3.2.0, it tries to parse the last part of the cookie (delimited by '::')
-    # as a timestamp to verify whether the cookie is stale.
-    # This conflicts with the uuid that we use instead in that place,
-    # so skip that check for now, to keep behavior similar between Rails 2 and 3.
-    def remember_me_expired?
-      false
-    end
-  end
+  secure CanvasRails::Application.config.session_options[:secure]
+  httponly true
 
   # modifications to authlogic's cookie persistence (used for the "remember me" token)
   # see the SessionPersistenceToken class for details
-  #
-  # also, the version of authlogic canvas is on doesn't support httponly (or
-  # secure-only) for the "remember me" cookie yet, so we add that support here.
   def save_cookie
     return unless remember_me?
     token = SessionPersistenceToken.generate(record)
@@ -65,8 +47,8 @@ class PseudonymSession < Authlogic::Session::Base
       :value => token.pseudonym_credentials,
       :expires => remember_me_until,
       :domain => controller.cookie_domain,
-      :httponly => true,
-      :secure => controller.request.session_options[:secure],
+      :httponly => httponly,
+      :secure => secure,
     }
   end
 

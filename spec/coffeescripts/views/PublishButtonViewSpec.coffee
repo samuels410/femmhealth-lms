@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'Backbone'
   'compiled/views/PublishButtonView'
@@ -5,7 +22,7 @@ define [
   'helpers/jquery.simulate'
 ], (Backbone, PublishButtonView, $) ->
 
-  module 'PublishButtonView',
+  QUnit.module 'PublishButtonView',
     setup: ->
       @publishable = class Publishable extends Backbone.Model
         defaults:
@@ -49,6 +66,38 @@ define [
     ok btnView.isDisabled()
     equal btnView.$text.html().match(/Published/).length, 1
     equal btnView.$el.attr('aria-label').match(/can't unpublish/).length, 1
+
+  test 'should render the provided publish text when given', ->
+    testText = 'Test Publish Text'
+    btnView = new PublishButtonView({
+      model: @publish,
+      publishText: testText
+    }).render()
+
+    equal btnView.$('.screenreader-only.accessible_label').text(), testText
+
+  test 'should render the provided unpublish text when given', ->
+    testText = 'Test Unpublish Text'
+    btnView = new PublishButtonView({
+      model: @published,
+      unpublishText: testText
+    }).render()
+
+    equal btnView.$('.screenreader-only.accessible_label').text(), testText
+
+  test 'should render title in publish text when given', ->
+    btnView = new PublishButtonView({
+      model: @publish,
+      title: 'My Published Thing'
+    }).render()
+    equal btnView.$('.screenreader-only.accessible_label').text().match(/My Published Thing/).length, 1
+
+  test 'should render title in unpublish test when given', ->
+    btnView = new PublishButtonView({
+      model: @published,
+      title: 'My Unpublished Thing'
+    }).render()
+    equal btnView.$('.screenreader-only.accessible_label').text().match(/My Unpublished Thing/).length, 1
 
   # state
   test 'disable should add disabled state', ->

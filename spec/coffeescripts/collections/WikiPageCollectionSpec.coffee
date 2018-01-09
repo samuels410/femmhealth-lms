@@ -1,9 +1,26 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'compiled/models/WikiPage'
   'compiled/collections/WikiPageCollection'
 ], (WikiPage, WikiPageCollection) ->
 
-  module 'WikiPageCollection'
+  QUnit.module 'WikiPageCollection'
 
   checkFrontPage = (collection) ->
     total = collection.reduce ((i, model) -> i += if model.get('front_page') then 1 else 0), 0
@@ -25,7 +42,7 @@ define [
     collection.models[2].set('front_page', true)
     ok checkFrontPage(collection), 'set front_page thrice'
 
-  module 'WikiPageCollection:sorting',
+  QUnit.module 'WikiPageCollection:sorting',
     setup: ->
       @collection = new WikiPageCollection
 
@@ -59,7 +76,7 @@ define [
     equal @collection.sortOrders['created_at'], 'asc', 'sort order remains'
 
   test 'setting sort triggers a sortChanged event', ->
-    sortChangedSpy = sinon.spy()
+    sortChangedSpy = @spy()
     @collection.on 'sortChanged', sortChangedSpy
     @collection.setSortField 'created_at'
     ok sortChangedSpy.calledOnce, 'sortChanged event triggered once'
@@ -73,15 +90,15 @@ define [
     equal @collection.options.params.order, 'desc', 'order param set'
 
   test 'sortByField delegates to setSortField', ->
-    setSortFieldStub = sinon.stub(@collection, 'setSortField')
-    fetchStub = sinon.stub(@collection, 'fetch')
+    setSortFieldStub = @stub(@collection, 'setSortField')
+    fetchStub = @stub(@collection, 'fetch')
 
     @collection.sortByField('created_at', 'desc')
     ok setSortFieldStub.calledOnce, 'setSortField called once'
     ok setSortFieldStub.calledWith('created_at', 'desc'), 'setSortField called with correct arguments'
 
   test 'sortByField triggers a fetch', ->
-    fetchStub = sinon.stub(@collection, 'fetch')
+    fetchStub = @stub(@collection, 'fetch')
 
     @collection.sortByField('created_at', 'desc')
     ok fetchStub.calledOnce, 'fetch called once'

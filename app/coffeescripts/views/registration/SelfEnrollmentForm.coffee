@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -53,7 +53,7 @@ define [
 
       @$el.attr 'action', switch @action
         when 'create' then '/users'
-        when 'log_in' then '/login'
+        when 'log_in' then '/login/canvas'
         when 'enroll' then @enrollUrl
 
     success: (data) =>
@@ -77,22 +77,19 @@ define [
       ret = switch @action
         when 'create' then registrationErrors(errors)
         when 'log_in' then @loginErrors(errors)
-        when 'enroll' then @enrollErrors(registrationErrors(errors))
+        when 'enroll' then @enrollErrors(errors)
       ret
 
     loginErrors: (errors) ->
-      errors = errors.base
-      error = errors[errors.length - 1].message
+      error = errors[errors.length - 1]
       {'pseudonym[password]': error}
 
     enrollErrors: (errors) =>
-      # move the "already enrolled" error to the username, since that's visible
-      if errors['user[self_enrollment_code]']
-        errors['pseudonym[unique_id]'] ?= []
-        errors['pseudonym[unique_id]'].push errors['user[self_enrollment_code]'][0]
-        delete errors['user[self_enrollment_code]']
-      # since we don't reload the form, we want a subsequent login or signup
-      # attempt to work
+      if errors.user?.errors.self_enrollment_code?[0].type == "already_enrolled"
+        # just reload if already enrolled
+        location.reload true
+        return []
+
       @action = @initialAction
       @logOut()
       errors
@@ -102,7 +99,7 @@ define [
       @$el.submit()
 
     logOut: (refresh = false) =>
-      $.ajaxJSON '/logout', 'POST', {}, ->
+      $.ajaxJSON '/logout', 'DELETE', {}, ->
         location.reload true if refresh
 
     logOutAndRefresh: (e) =>

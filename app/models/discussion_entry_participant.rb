@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,9 +19,6 @@
 class DiscussionEntryParticipant < ActiveRecord::Base
   include Workflow
 
-  # Be more restrictive if this is ever updatable from user params
-  attr_accessible :discussion_entry, :user, :workflow_state, :forced_read_state
-
   belongs_to :discussion_entry
   belongs_to :user
 
@@ -37,12 +34,17 @@ class DiscussionEntryParticipant < ActiveRecord::Base
       pluck(:discussion_entry_id)
   end
 
+  def self.entry_ratings(entry_ids, user)
+    ratings = self.where(:user_id => user, :discussion_entry_id => entry_ids).where('rating IS NOT NULL')
+    Hash[ratings.map{|x| [x.discussion_entry_id, x.rating]}]
+  end
+
   workflow do
     state :unread
     state :read
   end
 
-  scope :read, where(:workflow_state => 'read')
+  scope :read, -> { where(:workflow_state => 'read') }
   scope :existing_participants, ->(user, entry_id) {
     select([:id, :discussion_entry_id]).
       where(user_id: user, discussion_entry_id: entry_id)

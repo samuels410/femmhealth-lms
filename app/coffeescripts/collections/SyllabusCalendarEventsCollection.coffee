@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -35,6 +35,7 @@ define [
       options['data']['type'] = @type
       options['data']['context_codes'] = @context_codes
       options['data']['all_events'] ?= '1'
+      options['data']['excludes'] = ['assignment', 'description', 'child_events']
 
       super options
 

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,7 +20,7 @@ module SIS
   module CSV
     class AbstractCourseImporter < CSVBaseImporter
 
-      def self.is_abstract_course_csv?(row)
+      def self.abstract_course_csv?(row)
         row.include?('abstract_course_id') && !row.include?('course_id') && row.include?('short_name')
       end
 

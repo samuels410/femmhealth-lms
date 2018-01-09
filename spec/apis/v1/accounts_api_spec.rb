@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 - 2012 Instructure, Inc.
+# Copyright (C) 2011 - 2014 Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,15 +17,17 @@
 #
 
 require File.expand_path(File.dirname(__FILE__) + '/../api_spec_helper')
+require File.expand_path(File.dirname(__FILE__) + '/../../sharding_spec_helper')
 
 describe "Accounts API", type: :request do
-  before do
-    Pseudonym.any_instance.stubs(:works_for_account?).returns(true)
+  before :once do
     user_with_pseudonym(:active_all => true)
     @a1 = account_model(:name => 'root', :default_time_zone => 'UTC', :default_storage_quota_mb => 123, :default_user_storage_quota_mb => 45, :default_group_storage_quota_mb => 42)
-    @a1.add_user(@user)
-    @a2 = account_model(:name => 'subby', :parent_account => @a1, :root_account => @a1, :sis_source_id => 'sis1', :default_time_zone => 'Alaska', :default_storage_quota_mb => 321, :default_user_storage_quota_mb => 54, :default_group_storage_quota_mb => 41)
-    @a2.add_user(@user)
+    @a1.account_users.create!(user: @user)
+    @sis_batch = @a1.sis_batches.create
+    SisBatch.where(id: @sis_batch).update_all(workflow_state: 'imported')
+    @a2 = account_model(:name => 'subby', :parent_account => @a1, :root_account => @a1, :sis_source_id => 'sis1',  :sis_batch_id => @sis_batch.id, :default_time_zone => 'Alaska', :default_storage_quota_mb => 321, :default_user_storage_quota_mb => 54, :default_group_storage_quota_mb => 41)
+    @a2.account_users.create!(user: @user)
     @a3 = account_model(:name => 'no-access')
     # even if we have access to it implicitly, it's not listed
     @a4 = account_model(:name => 'implicit-access', :parent_account => @a1, :root_account => @a1)
@@ -35,7 +37,44 @@ describe "Accounts API", type: :request do
     it "should return the account list" do
       json = api_call(:get, "/api/v1/accounts.json",
                       { :controller => 'accounts', :action => 'index', :format => 'json' })
-      json.sort_by { |a| a['id'] }.should == [
+
+      expect(json.sort_by { |a| a['id'] }).to eq [
+        {
+          'id' => @a1.id,
+          'uuid' => @a1.uuid,
+          'name' => 'root',
+          'root_account_id' => nil,
+          'parent_account_id' => nil,
+          'default_time_zone' => 'Etc/UTC',
+          'default_storage_quota_mb' => 123,
+          'default_user_storage_quota_mb' => 45,
+          'default_group_storage_quota_mb' => 42,
+          'workflow_state' => 'active',
+        },
+        {
+          'id' => @a2.id,
+          'uuid' => @a2.uuid,
+          'integration_id' => nil,
+          'name' => 'subby',
+          'root_account_id' => @a1.id,
+          'parent_account_id' => @a1.id,
+          'sis_account_id' => 'sis1',
+          'sis_import_id' => @sis_batch.id,
+          'default_time_zone' => 'America/Juneau',
+          'default_storage_quota_mb' => 321,
+          'default_user_storage_quota_mb' => 54,
+          'default_group_storage_quota_mb' => 41,
+          'workflow_state' => 'active'
+        },
+      ]
+    end
+
+    it "doesn't include deleted accounts" do
+      @a2.destroy
+      json = api_call(:get, "/api/v1/accounts.json",
+                      { :controller => 'accounts', :action => 'index', :format => 'json' })
+
+      expect(json.sort_by { |a| a['id'] }).to eq [
         {
           'id' => @a1.id,
           'name' => 'root',
@@ -45,33 +84,87 @@ describe "Accounts API", type: :request do
           'default_storage_quota_mb' => 123,
           'default_user_storage_quota_mb' => 45,
           'default_group_storage_quota_mb' => 42,
-        },
-        {
-          'id' => @a2.id,
-          'name' => 'subby',
-          'root_account_id' => @a1.id,
-          'parent_account_id' => @a1.id,
-          'sis_account_id' => 'sis1',
-          'default_time_zone' => 'America/Juneau',
-          'default_storage_quota_mb' => 321,
-          'default_user_storage_quota_mb' => 54,
-          'default_group_storage_quota_mb' => 41,
+          'workflow_state' => 'active',
+          'uuid' => @a1.uuid
         },
       ]
+    end
+
+    it "should return accounts found through admin enrollments with the account list (but in limited form)" do
+      course_with_teacher(:user => @user, :account => @a1)
+      course_with_teacher(:user => @user, :account => @a1)# don't find it twice
+      course_with_teacher(:user => @user, :account => @a2)
+
+      json = api_call(:get, "/api/v1/course_accounts",
+        { :controller => 'accounts', :action => 'course_accounts', :format => 'json' })
+      expect(json.sort_by { |a| a['id'] }).to eq [
+            {
+              'id' => @a1.id,
+              'name' => 'root',
+              'root_account_id' => nil,
+              'parent_account_id' => nil,
+              'workflow_state' => 'active',
+              'default_time_zone' => 'Etc/UTC',
+              'uuid' => @a1.uuid
+            },
+            {
+              'id' => @a2.id,
+              'name' => 'subby',
+              'root_account_id' => @a1.id,
+              'parent_account_id' => @a1.id,
+              'workflow_state' => 'active',
+              'default_time_zone' => 'America/Juneau',
+              'uuid' => @a2.uuid
+            },
+          ]
+    end
+
+    describe "with sharding" do
+      specs_require_sharding
+      it "should include cross-shard accounts in course_accounts" do
+        course_with_teacher(:user => @user, :account => @a1)
+        @shard1.activate do
+          @a5 = account_model(:name => "crossshard", :default_time_zone => 'UTC')
+          course_with_teacher(:user => @user, :account => @a5)
+        end
+
+        json = api_call(:get, "/api/v1/course_accounts",
+                        { :controller => 'accounts', :action => 'course_accounts', :format => 'json' })
+        expect(json.sort_by { |a| a['id'] }).to eq [
+            {
+                'id' => @a1.id,
+                'name' => 'root',
+                'root_account_id' => nil,
+                'parent_account_id' => nil,
+                'workflow_state' => 'active',
+                'default_time_zone' => 'Etc/UTC',
+                'uuid' => @a1.uuid
+            },
+            {
+                'id' => @a5.global_id,
+                'name' => 'crossshard',
+                'root_account_id' => nil,
+                'parent_account_id' => nil,
+                'workflow_state' => 'active',
+                'default_time_zone' => 'Etc/UTC',
+                'uuid' => @a5.uuid
+            },
+        ]
+      end
     end
   end
 
   describe 'sub_accounts' do
-    before do
+    before :once do
       root = @a1
       a1 = root.sub_accounts.create! :name => "Account 1"
       a2 = root.sub_accounts.create! :name => "Account 2"
       a1.sub_accounts.create! :name => "Account 1.1"
-      a1_2 = a1.sub_accounts.create! :name => "Account 1.2"
+      @a1_2 = a1.sub_accounts.create! :name => "Account 1.2"
       a1.sub_accounts.create! :name => "Account 1.2.1"
-      3.times.each { |i|
+      3.times.each do |i|
         a2.sub_accounts.create! :name => "Account 2.#{i+1}"
-      }
+      end
     end
 
     it "should return child accounts" do
@@ -79,26 +172,38 @@ describe "Accounts API", type: :request do
         "/api/v1/accounts/#{@a1.id}/sub_accounts",
         {:controller => 'accounts', :action => 'sub_accounts',
          :account_id => @a1.id.to_s, :format => 'json'})
-      json.map { |j| j['name'] }.should == ['subby', 'implicit-access',
+      expect(json.map { |j| j['name'] }).to eq ['subby', 'implicit-access',
         'Account 1', 'Account 2']
     end
 
     it "should add sub account" do
       previous_sub_count = @a1.sub_accounts.size
-      json = api_call(:post,
+      api_call(:post,
         "/api/v1/accounts/#{@a1.id}/sub_accounts",
          {:controller=>'sub_accounts', :action=>'create',
           :account_id => @a1.id.to_s, :format => 'json'},
          {:account => { 'name' => 'New sub-account',
+                        'sis_account_id' => '567',
                         'default_storage_quota_mb' => 123,
                         'default_user_storage_quota_mb' => 456,
                         'default_group_storage_quota_mb' => 147 }})
-      @a1.sub_accounts.size.should == previous_sub_count + 1
+      expect(@a1.sub_accounts.size).to eq previous_sub_count + 1
       sub = @a1.sub_accounts.detect{|a| a.name == "New sub-account"}
-      sub.should_not be_nil
-      sub.default_storage_quota_mb.should == 123
-      sub.default_user_storage_quota_mb.should == 456
-      sub.default_group_storage_quota_mb.should == 147
+      expect(sub).not_to be_nil
+      expect(sub.sis_source_id).to eq '567'
+      expect(sub.default_storage_quota_mb).to eq 123
+      expect(sub.default_user_storage_quota_mb).to eq 456
+      expect(sub.default_group_storage_quota_mb).to eq 147
+    end
+
+    it 'should destroy a sub_account' do
+      json = api_call(:delete,
+                      "/api/v1/accounts/#{@a1.id}/sub_accounts/#{@a1_2.id}",
+                      {controller: 'sub_accounts', action: 'destroy',
+                       account_id: @a1.to_param, format: 'json', id: @a1_2.to_param})
+      expect(json['id']).to eq @a1_2.id
+      expect(json['workflow_state']).to eq 'deleted'
+      expect(@a1_2.reload.workflow_state).to eq 'deleted'
     end
 
     describe "recursive" do
@@ -109,7 +214,7 @@ describe "Accounts API", type: :request do
           {:controller => 'accounts', :action => 'sub_accounts',
            :account_id => @a1.id.to_s, :recursive => "1", :format => 'json'})
 
-        json.map { |j| j['name'] }.sort.should == ['subby', 'implicit-access',
+        expect(json.map { |j| j['name'] }.sort).to eq ['subby', 'implicit-access',
           'Account 1', 'Account 1.1', 'Account 1.2', 'Account 1.2.1',
           'Account 2', 'Account 2.1', 'Account 2.2', 'Account 2.3'].sort
       end
@@ -118,14 +223,14 @@ describe "Accounts API", type: :request do
         @a1.sub_accounts.create!(:name => "Deleted Account").destroy
         parent_account = @a1.sub_accounts.create!(:name => "Deleted Parent Account")
         parent_account.sub_accounts.create!(:name => "Child Account")
-        parent_account.destroy
+        Account.where(id: parent_account).update_all(workflow_state: 'deleted')
 
         json = api_call(:get,
                         "/api/v1/accounts/#{@a1.id}/sub_accounts?recursive=1",
                         {:controller => 'accounts', :action => 'sub_accounts',
                          :account_id => @a1.id.to_s, :recursive => "1", :format => 'json'})
 
-        json.map { |j| j['name'] }.sort.should == ['subby', 'implicit-access',
+        expect(json.map { |j| j['name'] }.sort).to eq ['subby', 'implicit-access',
                                                    'Account 1', 'Account 1.1', 'Account 1.2', 'Account 1.2.1',
                                                    'Account 2', 'Account 2.1', 'Account 2.2', 'Account 2.3'].sort
       end
@@ -137,34 +242,199 @@ describe "Accounts API", type: :request do
       # by id
       json = api_call(:get, "/api/v1/accounts/#{@a1.id}",
                       { :controller => 'accounts', :action => 'show', :id => @a1.to_param, :format => 'json' })
-      json.should ==
+      expect(json).to eq(
         {
           'id' => @a1.id,
           'name' => 'root',
+          'uuid' => @a1.uuid,
           'root_account_id' => nil,
           'parent_account_id' => nil,
           'default_time_zone' => 'Etc/UTC',
           'default_storage_quota_mb' => 123,
           'default_user_storage_quota_mb' => 45,
           'default_group_storage_quota_mb' => 42,
+          'workflow_state' => 'active',
         }
+      )
+    end
+
+    it "should return an individual account for a teacher (but in limited form)" do
+      limited = account_model(:name => "limited")
+      course_with_teacher(:user => @user, :account => limited)
+
+      json = api_call(:get, "/api/v1/accounts/#{limited.id}",
+                      { :controller => 'accounts', :action => 'show', :id => limited.to_param, :format => 'json' })
+      expect(json).to eq(
+          {
+              'id' => limited.id,
+              'name' => 'limited',
+              'root_account_id' => nil,
+              'parent_account_id' => nil,
+              'workflow_state' => 'active',
+              'default_time_zone' => 'Etc/UTC',
+              'uuid' => limited.uuid
+          }
+      )
+    end
+
+    it "should return the lti_guid" do
+      @a1.lti_guid = 'hey'
+      @a1.save!
+      json = api_call(:get, "/api/v1/accounts?include[]=lti_guid",
+                      { :controller => 'accounts', :action => 'index', :format => 'json', :include => ['lti_guid'] }, {})
+      expect(json[0]["lti_guid"]).to eq 'hey'
+    end
+
+    it "should honor deprecated includes parameter" do
+      @a1.lti_guid = 'hey'
+      @a1.save!
+      json = api_call(:get, "/api/v1/accounts?includes[]=lti_guid",
+                      { :controller => 'accounts', :action => 'index', :format => 'json', :includes => ['lti_guid'] }, {})
+      expect(json[0]["lti_guid"]).to eq 'hey'
     end
   end
 
   describe 'update' do
+
+    let(:header_options_hash) do
+      {
+        :controller => 'accounts',
+        :action => 'update',
+        :id => @a1.to_param,
+        :format => 'json'
+      }
+    end
+
+    let(:query_params_hash) do
+      {
+        :account => {
+          :settings => {
+            :sis_assignment_name_length_input => {
+              :value => nil
+            }
+          }
+        }
+      }
+    end
+
     it "should update the name for an account" do
       new_name = 'root2'
       json = api_call(:put, "/api/v1/accounts/#{@a1.id}",
                       { :controller => 'accounts', :action => 'update', :id => @a1.to_param, :format => 'json' },
                       { :account => {:name => new_name} })
 
-      json.should include({
+      expect(json).to include({
         'id' => @a1.id,
         'name' => new_name,
       })
 
       @a1.reload
-      @a1.name.should == new_name
+      expect(@a1.name).to eq new_name
+    end
+
+    it "should update account settings" do
+      new_name = 'root2'
+      json = api_call(:put, "/api/v1/accounts/#{@a1.id}",
+        { :controller => 'accounts', :action => 'update', :id => @a1.to_param, :format => 'json' },
+        { :account => {:settings => {:restrict_student_past_view => {:value => true, :locked => false}}} })
+
+      @a1.reload
+      expect(@a1.restrict_student_past_view).to eq({:value => true, :locked => false})
+    end
+
+    it "should update services" do
+      expect(@a1.service_enabled?(:avatars)).to be_falsey
+      json = api_call(:put, "/api/v1/accounts/#{@a1.id}",
+        { :controller => 'accounts', :action => 'update', :id => @a1.to_param, :format => 'json' },
+        { :account => {:services => {:avatars => "1"}}})
+
+      expect(json['services']['avatars']).to be_truthy
+      expect(Account.find(@a1.id).service_enabled?(:avatars)).to be_truthy
+    end
+
+    it "should update sis_id" do
+      json = api_call(:put, "/api/v1/accounts/#{@a2.id}",
+        { controller: 'accounts', action: 'update', id: @a2.to_param, format: 'json' },
+        { account: {sis_account_id: 'subsis'}})
+
+      expect(json['sis_account_id']).to eq 'subsis'
+      expect(Account.find(@a2.id).sis_source_id).to eq 'subsis'
+    end
+
+    it "should not update sis_id for root_accounts" do
+      json = api_call(:put, "/api/v1/accounts/#{@a1.id}",
+        { controller: 'accounts', action: 'update', id: @a1.to_param, format: 'json' },
+        { account: {sis_account_id: 'subsis'}}, {}, expected_status: 401)
+      expect(json["errors"]["unauthorized"].first["message"]).to eq 'Cannot set sis_account_id on a root_account.'
+      expect(Account.find(@a1.id).sis_source_id).to be_nil
+    end
+
+    # These following tests focus on testing the sis_assignment_name_length_input account setting
+    # through the API. This setting is used to enforce assignment name length for assignments.
+    # Valid values for this setting are integers/strings between 0-255. If a value is set greater
+    # than or less than those boundaries OR if the value is nil/some arbitrary string the default
+    # assignment name length value of 255 will be assigned to the setting to mitigate these cases.
+    # Otherwise the value sent in will be assigned to the setting.
+    it "should update account with sis_assignment_name_length_input with string number value" do
+      query_params_hash[:account][:settings][:sis_assignment_name_length_input][:value] = '120'
+      api_call(:put, "/api/v1/accounts/#{@a1.id}", header_options_hash, query_params_hash)
+
+      expect(Account.find(@a1.id).settings[:sis_assignment_name_length_input][:value]).to eq '120'
+    end
+
+    it "should update account with sis_assignment_name_length_input with string text value" do
+      query_params_hash[:account][:settings][:sis_assignment_name_length_input][:value] = 'too much tuna'
+      api_call(:put, "/api/v1/accounts/#{@a1.id}", header_options_hash, query_params_hash)
+
+      expect(Account.find(@a1.id).settings[:sis_assignment_name_length_input][:value]).to eq '255'
+    end
+
+    it "should update account with sis_assignment_name_length_input with nil value" do
+      api_call(:put, "/api/v1/accounts/#{@a1.id}", header_options_hash, query_params_hash)
+
+      expect(Account.find(@a1.id).settings[:sis_assignment_name_length_input][:value]).to eq '255'
+    end
+
+    it "should update account with sis_assignment_name_length_input with empty string value" do
+      query_params_hash[:account][:settings][:sis_assignment_name_length_input][:value] = ''
+      api_call(:put, "/api/v1/accounts/#{@a1.id}", header_options_hash, query_params_hash)
+
+      expect(Account.find(@a1.id).settings[:sis_assignment_name_length_input][:value]).to eq '255'
+    end
+
+    it "should update account with sis_assignment_name_length_input with integer value" do
+      query_params_hash[:account][:settings][:sis_assignment_name_length_input][:value] = 200
+      api_call(:put, "/api/v1/accounts/#{@a1.id}", header_options_hash, query_params_hash)
+
+      expect(Account.find(@a1.id).settings[:sis_assignment_name_length_input][:value]).to eq '200'
+    end
+
+    it "should set sis_assignment_name_length_input to default 255 if value is integer and over 255" do
+      query_params_hash[:account][:settings][:sis_assignment_name_length_input][:value] = 400
+      api_call(:put, "/api/v1/accounts/#{@a1.id}", header_options_hash, query_params_hash)
+
+      expect(Account.find(@a1.id).settings[:sis_assignment_name_length_input][:value]).to eq '255'
+    end
+
+    it "should set sis_assignment_name_length_input to default 255 if value is string and over 255" do
+      query_params_hash[:account][:settings][:sis_assignment_name_length_input][:value] = '300'
+      api_call(:put, "/api/v1/accounts/#{@a1.id}", header_options_hash, query_params_hash)
+
+      expect(Account.find(@a1.id).settings[:sis_assignment_name_length_input][:value]).to eq '255'
+    end
+
+    it "should set sis_assignment_name_length_input to default 255 if value is string and less than 0" do
+      query_params_hash[:account][:settings][:sis_assignment_name_length_input][:value] = '-2'
+      api_call(:put, "/api/v1/accounts/#{@a1.id}", header_options_hash, query_params_hash)
+
+      expect(Account.find(@a1.id).settings[:sis_assignment_name_length_input][:value]).to eq '255'
+    end
+
+    it "should set sis_assignment_name_length_input to default 255 if value is integer and under 0" do
+      query_params_hash[:account][:settings][:sis_assignment_name_length_input][:value] = -12
+      api_call(:put, "/api/v1/accounts/#{@a1.id}", header_options_hash, query_params_hash)
+
+      expect(Account.find(@a1.id).settings[:sis_assignment_name_length_input][:value]).to eq '255'
     end
 
     it "should not update with a blank name" do
@@ -174,16 +444,16 @@ describe "Accounts API", type: :request do
         { :controller => 'accounts', :action => 'update', :id => @a1.to_param, :format => 'json' },
         { :account => {:name => ""} }, {}, :expected_status => 400)
 
-      json["errors"]["name"].first["message"].should == "The account name cannot be blank"
+      expect(json["errors"]["name"].first["message"]).to eq "The account name cannot be blank"
 
       json = api_call(:put, "/api/v1/accounts/#{@a1.id}",
         { :controller => 'accounts', :action => 'update', :id => @a1.to_param, :format => 'json' },
         { :account => {:name => nil} }, {}, :expected_status => 400)
 
-      json["errors"]["name"].first["message"].should == "The account name cannot be blank"
+      expect(json["errors"]["name"].first["message"]).to eq "The account name cannot be blank"
 
       @a1.reload
-      @a1.name.should == "blah"
+      expect(@a1.name).to eq "blah"
     end
 
     it "should update the default_time_zone for an account with an IANA timezone name" do
@@ -192,13 +462,13 @@ describe "Accounts API", type: :request do
                       { :controller => 'accounts', :action => 'update', :id => @a1.to_param, :format => 'json' },
                       { :account => {:default_time_zone => new_zone} })
 
-      json.should include({
+      expect(json).to include({
         'id' => @a1.id,
         'default_time_zone' => new_zone,
       })
 
       @a1.reload
-      @a1.default_time_zone.tzinfo.name.should == new_zone
+      expect(@a1.default_time_zone.tzinfo.name).to eq new_zone
     end
 
     it "should update the default_time_zone for an account with a Rails timezone name" do
@@ -206,20 +476,20 @@ describe "Accounts API", type: :request do
                       { :controller => 'accounts', :action => 'update', :id => @a1.to_param, :format => 'json' },
                       { :account => {:default_time_zone => 'Alaska'} })
 
-      json.should include({
+      expect(json).to include({
                               'id' => @a1.id,
                               'default_time_zone' => 'America/Juneau',
                           })
 
       @a1.reload
-      @a1.default_time_zone.name.should == 'Alaska'
+      expect(@a1.default_time_zone.name).to eq 'Alaska'
     end
 
     it "should check for a valid time zone" do
       json = api_call(:put, "/api/v1/accounts/#{@a1.id}",
                { :controller => 'accounts', :action => 'update', :id => @a1.to_param, :format => 'json' },
                { :account => {:default_time_zone => 'Booger'} }, {}, { :expected_status => 400 })
-      json["errors"]["default_time_zone"].first["message"].should == "'Booger' is not a recognized time zone"
+      expect(json["errors"]["default_time_zone"].first["message"]).to eq "'Booger' is not a recognized time zone"
     end
 
     it "should not update other attributes (yet)" do
@@ -227,24 +497,24 @@ describe "Accounts API", type: :request do
                       { :controller => 'accounts', :action => 'update', :id => @a1.to_param, :format => 'json' },
                       { :account => {:settings => {:setting => 'set'}}} )
 
-      json.should include({
+      expect(json).to include({
         'id' => @a1.id,
         'name' => @a1.name,
       })
 
       @a1.reload
-      @a1.settings.should be_empty
+      expect(@a1.settings).to be_empty
     end
 
     context 'with :manage_storage_quotas' do
-      before(:each) do
+      before(:once) do
         # remove the user from being an Admin
-        @a1.add_user(@user).destroy
+        @a1.account_users.where(user_id: @user).delete_all
 
         # re-add the user as an admin with quota rights
-        custom_account_role 'quotas', :account => @a1
-        @a1.role_overrides.create! :enrollment_type => 'quotas', :permission => 'manage_storage_quotas', :enabled => true
-        @a1.add_user @user, 'quotas'
+        role = custom_account_role 'quotas', :account => @a1
+        @a1.role_overrides.create! :role => role, :permission => 'manage_storage_quotas', :enabled => true
+        @a1.account_users.create!(user: @user, :role => role)
 
         @params = { :controller => 'accounts', :action => 'update', :id => @a1.to_param, :format => 'json' }
       end
@@ -252,50 +522,50 @@ describe "Accounts API", type: :request do
       it 'should allow the default storage quota to be set' do
         json = api_call(:put, "/api/v1/accounts/#{@a1.id}", @params, {:account => {:default_storage_quota_mb => 789}})
 
-        json.should include({
+        expect(json).to include({
           'id' => @a1.id,
           'default_storage_quota_mb' => 789,
         })
 
         @a1.reload
-        @a1.default_storage_quota_mb.should == 789
+        expect(@a1.default_storage_quota_mb).to eq 789
       end
 
       it 'should allow the default user quota to be set' do
         json = api_call(:put, "/api/v1/accounts/#{@a1.id}", @params, {:account => {:default_user_storage_quota_mb => 678}})
 
-        json.should include({
+        expect(json).to include({
           'id' => @a1.id,
           'default_user_storage_quota_mb' => 678,
         })
 
         @a1.reload
-        @a1.default_user_storage_quota_mb.should == 678
+        expect(@a1.default_user_storage_quota_mb).to eq 678
       end
 
       it 'should allow the default group quota to be set' do
         json = api_call(:put, "/api/v1/accounts/#{@a1.id}", @params, {:account => {:default_group_storage_quota_mb => 678}})
 
-        json.should include({
+        expect(json).to include({
           'id' => @a1.id,
           'default_group_storage_quota_mb' => 678,
         })
 
         @a1.reload
-        @a1.default_group_storage_quota_mb.should == 678
+        expect(@a1.default_group_storage_quota_mb).to eq 678
       end
     end
 
     context 'without :manage_storage_quotas' do
-      before(:each) do
+      before(:once) do
         # remove the user from being an Admin
-        @a1.add_user(@user).destroy
+        @a1.account_users.where(user_id: @user).delete_all
 
         # re-add the user as an admin without quota rights
-        custom_account_role 'no-quotas', :account => @a1
-        @a1.role_overrides.create! :enrollment_type => 'no-quotas', :permission => 'manage_account_settings', :enabled => true
-        @a1.role_overrides.create! :enrollment_type => 'no-quotas', :permission => 'manage_storage_quotas', :enabled => false
-        @a1.add_user @user, 'no-quotas'
+        role = custom_account_role 'no-quotas', :account => @a1
+        @a1.role_overrides.create! :role => role, :permission => 'manage_account_settings', :enabled => true
+        @a1.role_overrides.create! :role => role, :permission => 'manage_storage_quotas', :enabled => false
+        @a1.account_users.create!(user: @user, role: role)
 
         @params = { :controller => 'accounts', :action => 'update', :id => @a1.to_param, :format => 'json' }
       end
@@ -304,34 +574,34 @@ describe "Accounts API", type: :request do
         json = api_call(:put, "/api/v1/accounts/#{@a1.id}", @params, {:account => {:default_storage_quota_mb => 789}}, {}, {:expected_status => 401})
 
         @a1.reload
-        @a1.default_storage_quota_mb.should == 123
+        expect(@a1.default_storage_quota_mb).to eq 123
       end
 
       it 'should not allow the default user quota to be set' do
         json = api_call(:put, "/api/v1/accounts/#{@a1.id}", @params, {:account => {:default_user_storage_quota_mb => 678}}, {}, {:expected_status => 401})
 
         @a1.reload
-        @a1.default_user_storage_quota_mb.should == 45
+        expect(@a1.default_user_storage_quota_mb).to eq 45
       end
 
       it 'should not allow the default group quota to be set' do
         json = api_call(:put, "/api/v1/accounts/#{@a1.id}", @params, {:account => {:default_group_storage_quota_mb => 678}}, {}, {:expected_status => 401})
 
         @a1.reload
-        @a1.default_group_storage_quota_mb.should == 42
+        expect(@a1.default_group_storage_quota_mb).to eq 42
       end
     end
   end
 
   it "should find accounts by sis in only this root account" do
-    Account.default.add_user(@user)
+    Account.default.account_users.create!(user: @user)
     other_sub = account_model(:name => 'other_sub', :parent_account => Account.default, :root_account => Account.default, :sis_source_id => 'sis1')
-    other_sub.add_user(@user)
+    other_sub.account_users.create!(user: @user)
 
     # this is scoped to Account.default
     json = api_call(:get, "/api/v1/accounts/sis_account_id:sis1",
                     { :controller => 'accounts', :action => 'show', :id => "sis_account_id:sis1", :format => 'json' })
-    json['id'].should == other_sub.id
+    expect(json['id']).to eq other_sub.id
 
     # we shouldn't find the account in the other root account by sis
     other_sub.update_attribute(:sis_source_id, 'sis2')
@@ -345,53 +615,130 @@ describe "Accounts API", type: :request do
       Time.use_zone(@user.time_zone) do
         @me = @user
         @c1 = course_model(:name => 'c1', :account => @a1, :root_account => @a1)
-        @c1.enrollments.delete_all
+        @c1.enrollments.each(&:destroy_permanently!)
         @c2 = course_model(:name => 'c2', :account => @a2, :root_account => @a1, :sis_source_id => 'sis2')
         @c2.course_sections.create!
         @c2.course_sections.create!
         @user = @me
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json' })
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :account_id => @a1.to_param, :format => 'json' })
 
         [@c1, @c2].each { |c| c.reload }
-        json.first['id'].should == @c1.id
-        json.first['name'].should == 'c1'
-        json.first['account_id'].should == @c1.account_id
+        expect(json.first['id']).to eq @c1.id
+        expect(json.first['name']).to eq 'c1'
+        expect(json.first['account_id']).to eq @c1.account_id
+        expect(json.first['is_public']).to eq true
 
-        json.last['id'].should == @c2.id
-        json.last['name'].should == 'c2'
-        json.last['account_id'].should == @c2.account_id
+        expect(json.last['id']).to eq @c2.id
+        expect(json.last['name']).to eq 'c2'
+        expect(json.last['account_id']).to eq @c2.account_id
 
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json' },
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :account_id => @a1.to_param, :format => 'json' },
                           { :hide_enrollmentless_courses => '1' })
-        json.first['id'].should == @c2.id
-        json.first['name'].should == 'c2'
-        json.first['account_id'].should == @c2.account_id
+        expect(json.first['id']).to eq @c2.id
+        expect(json.first['name']).to eq 'c2'
+        expect(json.first['account_id']).to eq @c2.account_id
 
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json' },
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :account_id => @a1.to_param, :format => 'json' },
                           { :per_page => 1, :page => 2 })
-        json.first['id'].should == @c2.id
-        json.first['name'].should == 'c2'
-        json.first['account_id'].should == @c2.account_id
+        expect(json.first['id']).to eq @c2.id
+        expect(json.first['name']).to eq 'c2'
+        expect(json.first['account_id']).to eq @c2.account_id
 
       end
     end
 
-    it "should return courses filtered by state[]" do
-      @me = @user
-      [:c1, :c2].each do |course|
-        instance_variable_set("@#{course}".to_sym, course_model(:name => course.to_s, :account => @a1))
+    it "should honor the includes[]" do
+      @c1 = course_model(:name => 'c1', :account => @a1, :root_account => @a1)
+      @a1.account_users.create!(user: @user)
+      json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?include[]=storage_quota_used_mb",
+                      { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+                        :format => 'json', :include => ['storage_quota_used_mb'] }, {})
+      expect(json[0].has_key?("storage_quota_used_mb")).to be_truthy
+    end
+
+    it "should include enrollment term information for each course" do
+      @c1 = course_model(:name => 'c1', :account => @a1, :root_account => @a1)
+      @a1.account_users.create!(user: @user)
+      json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?include[]=term",
+                      { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+                        :format => 'json', :include => ['term'] })
+      expect(json[0].has_key?('term')).to be_truthy
+    end
+
+    describe "handles crosslisting properly" do
+      before :once do
+        @root_account = Account.create!
+        @account1 = Account.create!({ :root_account => @root_account })
+        @account2 = Account.create!({ :root_account => @root_account })
+        @course1 = course_factory({ :account => @account1, :course_name => "course1" })
+        @course2 = course_factory({ :account => @account2, :course_name => "course2" })
+        @course2.course_sections.create!
+        @course2.course_sections.first.crosslist_to_course(@course1)
       end
-      @c2.destroy
-      @user = @me
 
-      json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?state[]=deleted",
-        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :state => %w[deleted] })
+      it "don't include crosslisted course when querying account section was crosslisted from" do
+        @account2.account_users.create!(user: @user)
+        json = api_call(:get, "/api/v1/accounts/#{@account2.id}/courses",
+          { :controller => 'accounts', :action => 'courses_api',
+            :account_id => @account2.to_param, :format => 'json',
+          })
+        expect(json.length).to eq 1
+        expect(json.first["name"]).to eq "course2"
+      end
 
-      json.length.should eql 1
-      json.first['name'].should eql 'c2'
+      it "don't include crosslisted course when querying account section was crosslisted to" do
+        @account1.account_users.create!(user: @user)
+        json = api_call(:get, "/api/v1/accounts/#{@account1.id}/courses",
+          { :controller => 'accounts', :action => 'courses_api',
+            :account_id => @account1.to_param, :format => 'json',
+          })
+        expect(json.length).to eq 1
+        expect(json.first["name"]).to eq "course1"
+      end
+    end
+
+    describe "courses filtered by state[]" do
+      before :once do
+        @me = @user
+        [:c1, :c2, :c3, :c4].each do |course|
+          instance_variable_set("@#{course}".to_sym, course_model(:name => course.to_s, :account => @a1))
+        end
+        @c2.destroy
+        Course.where(id: @c1).update_all(workflow_state: 'claimed')
+        Course.where(id: @c3).update_all(workflow_state: 'available')
+        Course.where(id: @c4).update_all(workflow_state: 'completed')
+        @user = @me
+      end
+
+      it "should return courses filtered by state[]='deleted'" do
+        json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?state[]=deleted",
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :account_id => @a1.to_param, :format => 'json', :state => %w[deleted] })
+        expect(json.length).to eql 1
+        expect(json.first['name']).to eql 'c2'
+      end
+
+      it "should return courses filtered by state[]=nil" do
+        json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses",
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :account_id => @a1.to_param, :format => 'json' })
+        expect(json.length).to eql 3
+        expect(json.collect{ |c| c['id'].to_i }.sort).to eq [@c1.id, @c3.id, @c4.id].sort
+      end
+
+      it "should return courses filtered by state[]='all'" do
+        json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?state[]=all",
+                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+                          :format => 'json', :state => %w[all] })
+        expect(json.length).to eql 4
+        expect(json.collect{ |c| c['id'].to_i }.sort).to eq [@c1.id, @c2.id, @c3.id, @c4.id].sort
+      end
     end
 
     it "should return courses filtered by enrollment_term" do
@@ -400,13 +747,14 @@ describe "Accounts API", type: :request do
       @a1.courses.create!(:name => 'c2', :enrollment_term => term)
 
       json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?enrollment_term_id=#{term.id}",
-                      { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :enrollment_term_id => term.to_param })
-      json.length.should eql 1
-      json.first['name'].should eql 'c2'
+                      { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+                        :format => 'json', :enrollment_term_id => term.to_param })
+      expect(json.length).to eql 1
+      expect(json.first['name']).to eql 'c2'
     end
 
     describe "?with_enrollments" do
-      before do
+      before :once do
         @me = @user
         c1 = course_model(:account => @a1, :name => 'c1')    # has a teacher
         c2 = Course.create!(:account => @a1, :name => 'c2')  # has no enrollments
@@ -415,25 +763,28 @@ describe "Accounts API", type: :request do
 
       it "should not apply if not specified" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json' })
-        json.collect{|row|row['name']}.should eql ['c1', 'c2']
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :format => 'json', :account_id => @a1.to_param })
+        expect(json.collect{|row|row['name']}).to eql ['c1', 'c2']
       end
 
       it "should filter on courses with enrollments" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?with_enrollments=1",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :with_enrollments => "1" })
-        json.collect{|row|row['name']}.should eql ['c1']
+                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+                          :format => 'json', :with_enrollments => "1" })
+        expect(json.collect{|row|row['name']}).to eql ['c1']
       end
 
       it "should filter on courses without enrollments" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?with_enrollments=0",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :with_enrollments => "0" })
-        json.collect{|row|row['name']}.should eql ['c2']
+                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+                          :format => 'json', :with_enrollments => "0" })
+        expect(json.collect{|row|row['name']}).to eql ['c2']
       end
     end
 
     describe "?published" do
-      before do
+      before :once do
         @me = @user
         [:c1, :c2].each do |course|
           instance_variable_set("@#{course}".to_sym, course_model(:name => course.to_s, :account => @a1))
@@ -444,30 +795,35 @@ describe "Accounts API", type: :request do
 
       it "should not apply if not specified" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json' })
-        json.collect{|row|row['name']}.should eql ['c1', 'c2']
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :account_id => @a1.to_param, :format => 'json' })
+        expect(json.collect{|row|row['name']}).to eql ['c1', 'c2']
       end
 
       it "should filter courses on published state" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?published=true",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :published => "true" })
-        json.collect{|row|row['name']}.should eql ['c1']
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :account_id => @a1.to_param, :format => 'json', :published => "true" })
+        expect(json.collect{|row|row['name']}).to eql ['c1']
       end
 
       it "should filter courses on non-published state" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?published=false",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :published => "false" })
-        json.collect{|row|row['name']}.should eql ['c2']
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :account_id => @a1.to_param, :format => 'json',
+                          :published => "false" })
+        expect(json.collect{|row|row['name']}).to eql ['c2']
       end
     end
 
     describe "?completed" do
-      before do
+      before :once do
         @me = @user
         [:c1, :c2, :c3, :c4].each do |course|
           instance_variable_set("@#{course}".to_sym, course_model(:name => course.to_s, :account => @a1, :conclude_at => 2.days.from_now))
         end
 
+        @c2.start_at = 2.weeks.ago
         @c2.conclude_at = 1.week.ago
         @c2.save!
 
@@ -481,25 +837,28 @@ describe "Accounts API", type: :request do
 
       it "should not apply if not specified" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json' })
-        json.collect{|row|row['name']}.should eql ['c1', 'c2', 'c3', 'c4']
+                        { :controller => 'accounts', :action => 'courses_api',
+                           :account_id => @a1.to_param, :format => 'json' })
+        expect(json.collect{|row|row['name']}).to eql ['c1', 'c2', 'c3', 'c4']
       end
 
       it "should filter courses on completed state" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?completed=yes",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :completed => "yes" })
-        json.collect{|row|row['name']}.should eql ['c2', 'c3', 'c4']
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :account_id => @a1.to_param, :format => 'json', :completed => "yes" })
+        expect(json.collect{|row|row['name']}).to eql ['c2', 'c3', 'c4']
       end
 
       it "should filter courses on non-completed state" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?completed=no",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :completed => "no" })
-        json.collect{|row|row['name']}.should eql ['c1']
+                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+                          :format => 'json', :completed => "no" })
+        expect(json.collect{|row|row['name']}).to eql ['c1']
       end
     end
 
     describe "?by_teachers" do
-      before do
+      before :once do
         @me = @user
         course_with_teacher(:account => @a1, :course_name => 'c1a', :user => user_with_pseudonym(:account => @a1))
         @pseudonym.sis_user_id = 'a_sis_id'
@@ -515,28 +874,31 @@ describe "Accounts API", type: :request do
 
       it "should not apply when not specified" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json' },
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :account_id => @a1.to_param, :format => 'json' },
                         {}, {}, { :domain_root_account => @a1 })
-        json.collect{|row|row['name']}.should eql ['c1a', 'c1b', 'c2', 'c3']
+        expect(json.collect{|row|row['name']}).to eql ['c1a', 'c1b', 'c2', 'c3']
       end
 
       it "should filter courses by teacher enrollments" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?by_teachers[]=sis_user_id:a_sis_id&by_teachers[]=#{@t3.id}",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :by_teachers => ['sis_user_id:a_sis_id', "#{@t3.id}"] },
+                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+                          :format => 'json', :by_teachers => ['sis_user_id:a_sis_id', "#{@t3.id}"] },
                         {}, {}, { :domain_root_account => @a1 })
-        json.collect{|row|row['name']}.should eql ['c1a', 'c1b', 'c3']
+        expect(json.collect{|row|row['name']}).to eql ['c1a', 'c1b', 'c3']
       end
 
       it "should not break with an empty result set" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?by_teachers[]=bad_id",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :by_teachers => ['bad_id'] },
+                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+                          :format => 'json', :by_teachers => ['bad_id'] },
                         {}, {}, { :domain_root_account => @a1 })
-        json.should eql []
+        expect(json).to eql []
       end
     end
 
     describe "?by_subaccounts" do
-      before do
+      before :once do
         @me = @user
         @sub1 = account_model(:name => 'sub1', :parent_account => @a1, :root_account => @a1, :sis_source_id => 'sub1')
         @sub1a = account_model(:name => 'sub1a', :parent_account => @sub1, :root_account => @a1, :sis_source_id => 'sub1a')
@@ -553,90 +915,141 @@ describe "Accounts API", type: :request do
 
       it "should not apply when not specified" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json' },
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :account_id => @a1.to_param, :format => 'json' },
                         {}, {}, { :domain_root_account => @a1 })
-        json.collect{|row|row['name']}.should eql ['in sub1', 'in sub1a', 'in sub1b', 'in sub2', 'in top level']
+        expect(json.collect{|row|row['name']}).to eql ['in sub1', 'in sub1a', 'in sub1b', 'in sub2', 'in top level']
       end
 
       it "should include descendants of the specified subaccount" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?by_subaccounts[]=sis_account_id:sub1",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :by_subaccounts => ['sis_account_id:sub1'] },
+                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+                          :format => 'json', :by_subaccounts => ['sis_account_id:sub1'] },
                         {}, {}, { :domain_root_account => @a1 })
-        json.collect{|row|row['name']}.should eql ['in sub1', 'in sub1a', 'in sub1b']
+        expect(json.collect{|row|row['name']}).to eql ['in sub1', 'in sub1a', 'in sub1b']
       end
 
       it "should work with multiple subaccounts specified" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?by_subaccounts[]=sis_account_id:sub1a&by_subaccounts[]=sis_account_id:sub1b",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :by_subaccounts => ['sis_account_id:sub1a', 'sis_account_id:sub1b'] },
+                        { :controller => 'accounts', :action => 'courses_api',
+                          :account_id => @a1.to_param, :format => 'json',
+                          :by_subaccounts => ['sis_account_id:sub1a', 'sis_account_id:sub1b'] },
                         {}, {}, { :domain_root_account => @a1 })
-        json.collect{|row|row['name']}.should eql ['in sub1a', 'in sub1b']
+        expect(json.collect{|row|row['name']}).to eql ['in sub1a', 'in sub1b']
       end
 
       it "should work with a numeric ID" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?by_subaccounts[]=#{@sub2.id}",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :by_subaccounts => ["#{@sub2.id}"] },
+                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+                          :format => 'json', :by_subaccounts => ["#{@sub2.id}"] },
                         {}, {}, { :domain_root_account => @a1 })
-        json.collect{|row|row['name']}.should eql ['in sub2']
+        expect(json.collect{|row|row['name']}).to eql ['in sub2']
       end
 
       it "should not break with an empty result set" do
         json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?by_subaccounts[]=bad_id",
-                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :by_subaccounts => ['bad_id'] },
+                        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+                          :format => 'json', :by_subaccounts => ['bad_id'] },
                         {}, {}, { :domain_root_account => @a1 })
-        json.should eql []
+        expect(json).to eql []
       end
     end
 
     it "should limit the maximum per-page returned" do
-      @me = @user
-      15.times { |i| course_model(:name => "c#{i}", :account => @a1, :root_account => @a1) }
-      @user = @me
-      api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?per_page=12", :controller => "accounts", :action => "courses_api", :account_id => @a1.to_param, :format => 'json', :per_page => '12').size.should == 12
+      create_courses(15, account: @a1, account_associations: true)
+      expect(api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?per_page=12", :controller => "accounts",
+        :action => "courses_api", :account_id => @a1.to_param, :format => 'json',
+        :per_page => '12').size).to eq 12
       Setting.set('api_max_per_page', '5')
-      api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?per_page=12", :controller => "accounts", :action => "courses_api", :account_id => @a1.to_param, :format => 'json', :per_page => '12').size.should == 5
+      expect(api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?per_page=12", :controller => "accounts", :action => "courses_api",
+        :account_id => @a1.to_param, :format => 'json', :per_page => '12').size).to eq 5
     end
 
     it "should return courses filtered search term" do
-      @user, @courses = @user, (5..12).map { |i| course_model(:name => "name#{i}", :course_code => "code#{i}", :account => @a1, :root_account => @a1) }
+      data = (5..12).map{ |i| {name: "name#{i}", course_code: "code#{i}" }}
+      @courses = create_courses(data, account: @a1, account_associations: true, return_type: :record)
+      @course = @courses.last
 
       search_term = "name"
       json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?search_term=#{search_term}",
-        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :search_term => search_term })
-      json.length.should eql @courses.length
+        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+          :format => 'json', :search_term => search_term })
+      expect(json.length).to eql @courses.length
 
       search_term = "code"
       json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?search_term=#{search_term}",
-        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :search_term => search_term })
-      json.length.should eql @courses.length
+        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+           :format => 'json', :search_term => search_term })
+      expect(json.length).to eql @courses.length
 
       search_term = "name1"
       json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?search_term=#{search_term}",
-        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :search_term => search_term })
-      json.length.should eql 3
+        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+          :format => 'json', :search_term => search_term })
+      expect(json.length).to eql 3
 
       search_term = Shard.global_id_for(@course)
       json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?search_term=#{search_term}",
-        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :search_term => search_term })
-      json.length.should eql 1
-      json.first['name'].should == @course.name
+        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+          :format => 'json', :search_term => search_term })
+      expect(json.length).to eql 1
+      expect(json.first['name']).to eq @course.name
 
       # Should return empty result set
       search_term = "0000000000"
       json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?search_term=#{search_term}",
-        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :search_term => search_term })
-      json.length.should eql 0
-
-      # Should return empty result set
-      search_term = "42"
-      json = api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?search_term=#{search_term}",
-        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :search_term => search_term })
-      json.length.should eql 0
+        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+          :format => 'json', :search_term => search_term })
+      expect(json.length).to eql 0
 
       # To short should return 400
       search_term = "a"
       response = raw_api_call(:get, "/api/v1/accounts/#{@a1.id}/courses?search_term=#{search_term}",
-        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param, :format => 'json', :search_term => search_term })
-      response.should == 400
+        { :controller => 'accounts', :action => 'courses_api', :account_id => @a1.to_param,
+          :format => 'json', :search_term => search_term })
+      expect(response).to eq 400
+    end
+
+    context "blueprint courses" do
+      before :once do
+        @a = Account.create!
+        @a.enable_feature! :master_courses
+        @mc = course_model :name => 'MasterCourse', :account => @a
+        @cc = course_model :name => 'ChildCourse', :account => @a
+        @oc = course_model :name => 'OtherCourse', :account => @a
+        template = MasterCourses::MasterTemplate.set_as_master_course(@mc)
+        template.add_child_course!(@cc).destroy # ensure deleted subscriptions don't affect the result
+        template.add_child_course!(@cc)
+        account_admin_user(:account => @a)
+      end
+
+      it 'filters in blueprint courses' do
+        json = api_call(:get, "/api/v1/accounts/#{@a.id}/courses?blueprint=true",
+          { :controller => 'accounts', :action => 'courses_api', :account_id => @a.to_param,
+            :format => 'json', :blueprint => true })
+        expect(json.map{ |c| c['name'] }).to match_array %w(MasterCourse)
+      end
+
+      it 'filters out blueprint courses' do
+        json = api_call(:get, "/api/v1/accounts/#{@a.id}/courses?blueprint=false",
+          { :controller => 'accounts', :action => 'courses_api', :account_id => @a.to_param,
+            :format => 'json', :blueprint => false })
+        expect(json.map{ |c| c['name'] }).to match_array %w(ChildCourse OtherCourse)
+      end
+
+      it 'filters in associated courses' do
+        json = api_call(:get, "/api/v1/accounts/#{@a.id}/courses?blueprint_associated=true",
+          { :controller => 'accounts', :action => 'courses_api', :account_id => @a.to_param,
+            :format => 'json', :blueprint_associated => true })
+        expect(json.map{ |c| c['name'] }).to match_array %w(ChildCourse)
+      end
+
+      it 'filters out associated courses' do
+        json = api_call(:get, "/api/v1/accounts/#{@a.id}/courses?blueprint_associated=false",
+          { :controller => 'accounts', :action => 'courses_api', :account_id => @a.to_param,
+            :format => 'json', :blueprint_associated => false })
+        expect(json.map{ |c| c['name'] }).to match_array %w(MasterCourse OtherCourse)
+      end
     end
   end
 
@@ -655,11 +1068,11 @@ describe "Accounts API", type: :request do
     include Api::V1::Account
 
     it "should allow a plugin to extend the account_json method" do
-      Api::V1::Account.register_extension(BadMockPlugin).should be_false
-      Api::V1::Account.register_extension(MockPlugin).should be_true
+      expect(Api::V1::Account.register_extension(BadMockPlugin)).to be_falsey
+      expect(Api::V1::Account.register_extension(MockPlugin)).to be_truthy
 
       begin
-        account_json(@a1, @me, @session, [])[:extra_thing].should == "something"
+        expect(account_json(@a1, @me, @session, [])[:extra_thing]).to eq "something"
       ensure
         Api::V1::Account.deregister_extension(MockPlugin)
       end

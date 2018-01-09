@@ -2,155 +2,121 @@ $canvas_tasks_loaded ||= false
 unless $canvas_tasks_loaded
 $canvas_tasks_loaded = true
 
-def check_syntax(files)
-  quick = ENV["quick"] && ENV["quick"] == "true"
-  puts "--> Checking Syntax...."
-  show_stoppers = []
-  raise "jsl needs to be in your $PATH, download from: javascriptlint.com" if `which jsl`.empty?
-  puts "--> Found jsl..."
-
-  Array(files).each do |js_file|
-    js_file.strip!
-    # only lint things in public/javascripts that are not in /vendor, /compiled, etc.
-    if js_file.match /public\/javascripts\/(?!vendor|compiled|i18n.js|translations)/
-      file_path = File.join(Rails.root, js_file)
-
-      unless quick
-        # to use this, you need to have jshint installed from npm
-        # (which means you need to have node.js installed)
-        # on osx you can do:
-        # brew install node
-        # npm install jshint
-        unless `which jshint`.empty?
-          puts " --> Checking #{js_file} using JSHint:"
-          js_hint_errors = `jshint #{file_path} --config "#{File.join(Rails.root, '.jshintrc')}"`
-          puts js_hint_errors
-        end
-
-        # Checks for coding style problems using google's js style guide.
-        # Only works if you have gjslint installed.
-        # Download from http://code.google.com/closure/utilities/
-        unless `which gjslint`.empty?
-          puts " --> Checking #{js_file} using gjslint.py:"
-          gjslint_errors = `gjslint --nojsdoc --strict #{js_file}`
-          puts gjslint_errors = gjslint_errors.split("\n").reject{ |l| l.match("Line too long") }.join("\n")
-        end
-      end
-
-      jsl_output = `jsl -process "#{file_path}" -nologo -conf "#{File.join(Rails.root, 'config', 'jslint.conf')}"`
-      exit_status = $?.exitstatus
-      if exit_status != 0
-        puts " --> Error checking #{js_file} using jsl:"
-        if jsl_output.match("warning: trailing comma is not legal in ECMA-262 object initializers") || jsl_output.match("extra comma is not recommended in array initializers")
-          exit_status = 2
-          jsl_output << "fatal trailing comma found. Stupid IE!"
-        end
-        if exit_status >= 2
-          show_stoppers << jsl_output
-        end
-        puts jsl_output
-      end
-    end
-  end
-  if show_stoppers.empty?
-    puts " --> No JavaScript errors found using jsl"
-  else
-    raise "FATAL JavaScript errors found using jsl"
-  end
+def log_time(name, &block)
+  puts "--> Starting: '#{name}'"
+  time = Benchmark.realtime(&block)
+  puts "--> Finished: '#{name}' in #{time}"
+  time
 end
 
+def parallel_processes
+  processes = (ENV['CANVAS_BUILD_CONCURRENCY'] || Parallel.processor_count).to_i
+  puts "working in #{processes} processes"
+  processes
+end
 
 namespace :canvas do
-  desc "Compresses static assets"
-  task :compress_assets do
-    assets = FileList.new('public/**/*.js', 'public/**/*.css')
-    before_bytes = 0
-    after_bytes = 0
-    processed = 0
-    assets.each do |asset|
-      asset_compressed = "#{asset}.gz"
-      unless File.exists?(asset_compressed)
-        `gzip --best --stdout "#{asset}" > "#{asset_compressed}"`
-        before_bytes += File::Stat.new(asset).size
-        after_bytes += File::Stat.new(asset_compressed).size
-        processed += 1
-      end
-    end
-    puts "Compressed #{processed} assets, #{before_bytes} -> #{after_bytes} bytes (#{"%.0f" % ((before_bytes.to_f - after_bytes.to_f) / before_bytes * 100)}% reduction)"
-  end
-
-  task :check_syntax  => "canvas:check_syntax:all"
-  namespace :check_syntax do
-    desc "Checks all js files that are staged for commiting to git for syntax errors. Make your .git/hooks/pre-commit look like: rake canvas:check_syntax:changed quick=true to not allow committing js with syntax errors"
-    task :changed do
-      files = `git diff-index --name-only --cached HEAD -- | grep '\.js$'`
-      check_syntax(files)
-    end
-
-    desc "Checks all js files for sytax errors."
-    task :all do
-      #bundles = YAML.load(ERB.new(File.read('config/assets.yml')).result)['javascripts']
-      files = (Dir.glob('./public/javascripts/*.js')).
-        reject{ |file| file =~ /\A\.\/public\/javascripts\/(i18n.js|translations\/)/ }
-
-      check_syntax(files)
-    end
-  end
-
   desc "Compile javascript and css assets."
-  task :compile_assets, :generate_documentation do |t, args|
-    args.with_defaults(:generate_documentation => 'true')
-    generate_docs = args[:generate_documentation]
-    generate_docs = 'true' if !['true', 'false'].include?(args[:generate_documentation])
+  task :compile_assets do |t, args|
 
-    puts "--> Compiling static assets [css]"
-    Rake::Task['css:generate'].invoke
-    Rake::Task['css:styleguide'].invoke
+    # opt out
+    npm_install = ENV["COMPILE_ASSETS_NPM_INSTALL"] != "0"
+    compile_css = ENV["COMPILE_ASSETS_CSS"] != "0"
+    build_styleguide = ENV["COMPILE_ASSETS_STYLEGUIDE"] != "0"
+    build_webpack = ENV["COMPILE_ASSETS_BUILD_JS"] != "0"
+    build_api_docs = ENV["COMPILE_ASSETS_API_DOCS"] != "0"
 
-    puts "--> Compiling static assets [jammit]"
-    output = `bundle exec jammit 2>&1`
-    raise "Error running jammit: \n#{output}\nABORTING" if $?.exitstatus != 0
-    puts "--> Compiled static assets [css/jammit]"
+    if npm_install
+      log_time('Making sure node_modules are up to date') {
+        Rake::Task['js:yarn_install'].invoke
+      }
+    end
 
-    puts "--> Compiling static assets [javascript]"
-    Rake::Task['js:generate'].invoke
+    raise "Error running gulp rev" unless system('yarn run gulp rev')
 
-    puts "--> Generating js localization bundles"
-    Rake::Task['i18n:generate_js'].invoke
+    if compile_css
+      # public/dist/brandable_css/brandable_css_bundles_with_deps.json needs
+      # to exist before we run handlebars stuff, so we have to do this first
+      Rake::Task['css:compile'].invoke
+    end
 
-    puts "--> Optimizing JavaScript [r.js]"
-    Rake::Task['js:build'].invoke
+    require 'parallel'
+    tasks = Hash.new
 
-    if generate_docs == 'true'
-      puts "--> Generating documentation [yardoc]"
-      Rake::Task['doc:api'].invoke
+    if build_styleguide
+      tasks["css:styleguide"] = -> {
+        Rake::Task['css:styleguide'].invoke
+      }
+    end
+
+    Rake::Task['js:build_client_apps'].invoke
+
+    generate_tasks = []
+    generate_tasks << 'i18n:generate_js' if build_webpack
+    build_tasks = []
+    if build_webpack
+      # build dev bundles even in prod mode so you can debug with ?optimized_js=0 query string 
+      # (except for on jenkins where we set JS_BUILD_NO_UGLIFY anyway so there's no need for an unminified fallback)
+      build_prod = ENV['RAILS_ENV'] == 'production' || ENV['USE_OPTIMIZED_JS'] == 'true' || ENV['USE_OPTIMIZED_JS'] == 'True'
+      dont_need_dev_fallback = build_prod && ENV['JS_BUILD_NO_UGLIFY']
+      build_tasks << 'js:webpack_development' unless dont_need_dev_fallback
+      build_tasks << 'js:webpack_production' if build_prod
+    end
+
+    msg = "run " + (generate_tasks + build_tasks).join(", ")
+    tasks[msg] = -> {
+      if generate_tasks.any?
+        Parallel.each(generate_tasks, in_processes: parallel_processes) do |name|
+          log_time(name) { Rake::Task[name].invoke }
+        end
       end
+
+      if build_tasks.any?
+        Parallel.each(build_tasks, in_threads: parallel_processes) do |name|
+          log_time(name) { Rake::Task[name].invoke }
+        end
+      end
+    }
+
+    if build_api_docs
+      tasks["Generate documentation [yardoc]"] = -> {
+        Rake::Task['doc:api'].invoke
+      }
+    end
+
+    times = nil
+    real_time = Benchmark.realtime do
+      times = Parallel.map(tasks, :in_processes => parallel_processes) do |name, lamduh|
+        log_time(name) { lamduh.call }
+      end
+    end
+    combined_time = times.reduce(:+)
+    puts "Finished compiling assets in #{real_time}. parallelism saved #{combined_time - real_time} (#{real_time.to_f / combined_time.to_f * 100.0}%)"
   end
 
-  desc "Check static assets and generate api documentation."
-     task :check_static_assets do
-       threads = []
-       threads << Thread.new do
-         puts "--> JS tests"
-         Rake::Task['js:test'].invoke
-       end
+  desc "Just compile css and js for development"
+  task :compile_assets_dev do
+    ENV["COMPILE_ASSETS_NPM_INSTALL"] = "0"
+    ENV["COMPILE_ASSETS_STYLEGUIDE"] = "0"
+    ENV["COMPILE_ASSETS_API_DOCS"] = "0"
+    Rake::Task['canvas:compile_assets'].invoke
+  end
 
-       threads << Thread.new do
-         puts "--> i18n check"
-         Rake::Task['i18n:check'].invoke
-       end
+  desc "Load config/dynamic_settings.yml into the configured consul cluster"
+  task :seed_consul => [:environment] do
+    def load_tree(root, tree)
+      tree.each do |node, subtree|
+        key = [root, node].compact.join('/')
+        if Hash === subtree
+          load_tree(key, subtree)
+        else
+          Imperium::KV.put(key, subtree, cas: 0)
+        end
+      end
+    end
 
-       threads << Thread.new do
-         puts "--> Check syntax"
-         Rake::Task['canvas:check_syntax'].invoke
-       end
-
-       threads << Thread.new do
-         puts "--> Generating API documentation"
-         Rake::Task['doc:api'].invoke
-       end
-     threads.each(&:join)
-   end
+    load_tree(nil, ConfigFile.load('dynamic_settings'))
+  end
 end
 
 namespace :lint do
@@ -170,7 +136,8 @@ end
 namespace :db do
   desc "Shows pending db migrations."
   task :pending_migrations => :environment do
-    pending_migrations = ActiveRecord::Migrator.new(:up, 'db/migrate').pending_migrations
+    migrations = ActiveRecord::Migrator.migrations(ActiveRecord::Migrator.migrations_paths)
+    pending_migrations = ActiveRecord::Migrator.new(:up, migrations).pending_migrations
     pending_migrations.each do |pending_migration|
       tags = pending_migration.tags
       tags = " (#{tags.join(', ')})" unless tags.empty?
@@ -178,27 +145,23 @@ namespace :db do
     end
   end
 
-   desc "execute migration_lint script."
-   task :migration_lint do
-     output = `script/migration_lint`
-     exit_status = $?.exitstatus
-     puts output
-     if exit_status != 0
-       raise "migration_lint test failed"
-     else
-       puts "migration_lint test succeeded"
-     end
-   end
+  desc "Shows skipped db migrations."
+  task :skipped_migrations => :environment do
+    migrations = ActiveRecord::Migrator.migrations(ActiveRecord::Migrator.migrations_paths)
+    skipped_migrations = ActiveRecord::Migrator.new(:up, migrations).skipped_migrations
+    skipped_migrations.each do |skipped_migration|
+      tags = skipped_migration.tags
+      tags = " (#{tags.join(', ')})" unless tags.empty?
+      puts '  %4d %s%s' % [skipped_migration.version, skipped_migration.name, tags]
+    end
+  end
 
   namespace :migrate do
     desc "Run all pending predeploy migrations"
     task :predeploy => [:environment, :load_config] do
-      ActiveRecord::Migrator.new(:up, "db/migrate/", nil).migrate(:predeploy)
-    end
-
-    desc "Run all pending postdeploy migrations"
-    task :postdeploy => [:environment, :load_config] do
-      ActiveRecord::Migrator.new(:up, "db/migrate/", nil).migrate(:postdeploy)
+      migrations = ActiveRecord::Migrator.migrations(ActiveRecord::Migrator.migrations_paths)
+      migrations = migrations.select { |m| m.tags.include?(:predeploy) }
+      ActiveRecord::Migrator.new(:up, migrations).migrate
     end
   end
 
@@ -208,23 +171,36 @@ namespace :db do
       raise "Run with RAILS_ENV=test" unless Rails.env.test?
       config = ActiveRecord::Base.configurations['test']
       queue = config['queue']
-      drop_database(queue) if queue rescue nil
-      drop_database(config) rescue nil
+      ActiveRecord::Tasks::DatabaseTasks.drop(queue) if queue rescue nil
+      ActiveRecord::Tasks::DatabaseTasks.drop(config) rescue nil
       Canvas::Cassandra::DatabaseBuilder.config_names.each do |cass_config|
         db = Canvas::Cassandra::DatabaseBuilder.from_config(cass_config)
         db.tables.each do |table|
           db.execute("DROP TABLE #{table}")
         end
       end
-      create_database(queue) if queue
-      create_database(config)
-      unless CANVAS_RAILS2
-        ::ActiveRecord::Base.connection.schema_cache.clear!
-        ::ActiveRecord::Base.descendants.each(&:reset_column_information)
-      end
+      ActiveRecord::Tasks::DatabaseTasks.create(queue) if queue
+      ActiveRecord::Tasks::DatabaseTasks.create(config)
+      ::ActiveRecord::Base.connection.schema_cache.clear!
+      ::ActiveRecord::Base.descendants.each(&:reset_column_information)
       Rake::Task['db:migrate'].invoke
     end
   end
+end
+
+Switchman::Rake.filter_database_servers do |servers, block|
+  if ENV['REGION']
+    if ENV['REGION'] == 'self'
+      servers.select!(&:in_current_region?)
+    else
+      servers.select! { |server| server.in_region?(ENV['REGION']) }
+    end
+  end
+  block.call(servers)
+end
+
+%w{db:pending_migrations db:skipped_migrations db:migrate:predeploy}.each do |task_name|
+  Switchman::Rake.shardify_task(task_name, categories: ->{ Shard.categories })
 end
 
 end

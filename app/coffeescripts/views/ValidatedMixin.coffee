@@ -1,12 +1,31 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'Backbone'
   'jquery'
   'underscore'
   'compiled/fn/preventDefault'
+  'str/htmlEscape'
   'jquery.toJSON'
   'jquery.disableWhileLoading'
   'jquery.instructure_forms'
-], (Backbone, $, _, preventDefault) ->
+  'jquery.instructure_misc_helpers'
+], (Backbone, $, _, preventDefault, htmlEscape) ->
 
   ValidatedMixin =
 
@@ -29,11 +48,21 @@ define [
     #     first_name: '[name=user[first_name]]'
     fieldSelectors: null
 
+    ##
+    # For a given dom element, retrieve the sibling tinymce wrapper.
+    #
+    # @param {jQuery Object} the textarea for whom we wish to get the
+    #   related tinymce editor area
+    # @return {jQuery Object} the relevant div that wraps the tinymce
+    #   iframe related to this textarea
+    findSiblingTinymce: ($el)->
+      $el.siblings('.mce-tinymce').find(".mce-edit-area")
+
     findField: (field) ->
       selector = @fieldSelectors?[field] or "[name='#{field}']"
       $el = @$(selector)
       if $el.data('rich_text')
-        $el = $el.next('.mceEditor').find(".mceIframeContainer")
+        $el = @findSiblingTinymce($el)
       $el
 
     ##
@@ -58,13 +87,35 @@ define [
     #       }
     #     ]
     #   }
-
     showErrors: (errors) ->
       for fieldName, field of errors
-        $input = @findField fieldName
-        # check for a translations option first, fall back to just displaying otherwise
-        html = (@translations?[message] or message for {message} in field).join('</p><p>')
-        $input.errorBox "<div>#{html}</div>"
+        $input = field.element || @findField fieldName
+        html = field.message || (htmlEscape(@translations?[message] or message) for {message} in field).join('</p><p>')
+        $input.errorBox($.raw("#{html}"))?.css("z-index", "20")?.attr('role', 'alert')
+        @attachErrorDescription($input, html)
         field.$input = $input
         field.$errorBox = $input.data 'associated_error_box'
 
+    attachErrorDescription: ($input, message) ->
+      errorDescriptionField = @findOrCreateDescriptionField($input)
+      errorDescriptionField["description"].text($.raw("#{message}"))
+      $input.attr('aria-describedby',
+        errorDescriptionField["description"].attr('id') + " " +
+        errorDescriptionField["originalDescriptionIds"]
+      )
+
+    findOrCreateDescriptionField: ($input) ->
+      id = $input.attr('id')
+      unless $("##{id}_sr_description").length > 0
+        $('<div>').attr({
+          id: "#{id}_sr_description"
+          class: "screenreader-only"
+        }).insertBefore($input)
+      description = $("##{id}_sr_description")
+      originalDescriptionIds = @getExistingDescriptionIds($input, id)
+      {description: description, originalDescriptionIds: originalDescriptionIds}
+
+    getExistingDescriptionIds: ($input, id) ->
+      descriptionIds = $input.attr('aria-describedby')
+      idArray = if descriptionIds then descriptionIds.split(" ") else []
+      _.without(idArray,"#{id}_sr_description")

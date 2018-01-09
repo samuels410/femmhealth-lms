@@ -1,4 +1,21 @@
-class MakeSisIdsUnique < ActiveRecord::Migration
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+class MakeSisIdsUnique < ActiveRecord::Migration[4.2]
   tag :postdeploy
   disable_ddl_transaction!
 
@@ -9,11 +26,7 @@ class MakeSisIdsUnique < ActiveRecord::Migration
     add_index :course_sections, [:sis_source_id, :root_account_id], where: "sis_source_id IS NOT NULL", unique: true, algorithm: :concurrently
     add_index :enrollment_terms, [:sis_source_id, :root_account_id], where: "sis_source_id IS NOT NULL", unique: true, algorithm: :concurrently
     add_index :enrollment_terms, :root_account_id, algorithm: :concurrently
-    if connection.adapter_name == 'PostgreSQL'
-      concurrently = " CONCURRENTLY" if connection.open_transactions == 0
-      execute "CREATE UNIQUE INDEX#{concurrently} index_pseudonyms_on_unique_id_and_account_id ON pseudonyms (LOWER(unique_id), account_id) WHERE workflow_state='active'"
-      remove_index :pseudonyms, :unique_id
-    end
+    remove_index :pseudonyms, name: 'index_pseudonyms_on_unique_id'
     add_index :pseudonyms, [:sis_user_id, :account_id], where: "sis_user_id IS NOT NULL", unique: true, algorithm: :concurrently
     add_index :pseudonyms, :account_id, algorithm: :concurrently
     add_index :groups, [:sis_source_id, :root_account_id], where: "sis_source_id IS NOT NULL", unique: true, algorithm: :concurrently
@@ -42,9 +55,7 @@ class MakeSisIdsUnique < ActiveRecord::Migration
     remove_index :course_sections, [:sis_source_id, :root_account_id]
     remove_index :enrollment_terms, [:sis_source_id, :root_account_id]
     remove_index :enrollment_terms, :root_account_id
-    if connection.adapter_name == 'PostgreSQL'
-      remove_index :pseudonyms, [:unique_id, :account_id]
-    end
+    remove_index :pseudonyms, [:unique_id, :account_id]
     remove_index :pseudonyms, [:sis_user_id, :account_id]
     remove_index :pseudonyms, :account_id
     remove_index :groups, [:sis_source_id, :root_account_id]

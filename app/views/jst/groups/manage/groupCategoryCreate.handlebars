@@ -1,4 +1,4 @@
-<div class="form-dialog-content pad-box form-horizontal">
+<div class="form-dialog-content pad-box form-horizontal group-category-create">
   <fieldset class="pad-box{{#if ENV.allow_self_signup}} dotted-separator{{/if}}">
     <label class="control-label" for="new_category_name">
       {{#t "group_set_name"}}Group Set Name{{/t}}
@@ -11,7 +11,7 @@
   <fieldset class="pad-box dotted-separator">
     <span class="control-label">{{#t "self_signup"}}Self Sign-Up{{/t}}</span>
     <div class="controls">
-      <label class="checkbox">
+      <label class="checkbox" for="enable_self_signup">
         {{checkbox "enable_self_signup" class="self-signup-toggle"}}
         {{#t "allow_self_signup"}}Allow self sign-up{{/t}}
         {{> [groups/manage/selfSignupHelp]}}
@@ -19,20 +19,26 @@
     </div>
     <input name="group_limit" type="hidden" value="">
     <div class="controls">
-      <label class="checkbox self-signup-controls">
+      <label class="checkbox self-signup-controls" for="restrict_self_signup">
         {{checkbox "restrict_self_signup"}}
         {{#t "require_same_section"}}Require group members to be in the same section{{/t}}
       </label>
     </div>
   </fieldset>
-  <fieldset class="pad-box admin-signup-controls">
+  <fieldset class="pad-box admin-signup-controls dotted-separator">
     <span class="control-label">{{#t "group_structure"}}Group Structure{{/t}}</span>
     <div class="controls" style="margin-top:-4px">
       <label class="radio">
         <input type="radio" id="split_groups" name="split_groups" value="1" style="margin-top:8px">
         {{#t "split_into_groups"}}
-          Split students into {{{num_groups}}} equal groups
+          Split students into {{{num_groups}}} groups
         {{/t}}
+      </label>
+    </div>
+    <div class="controls group-by-section-controls">
+      <label class="checkbox" for="group_by_section">
+        {{checkbox "group_by_section"}}
+        {{#t}}Require group members to be in the same section{{/t}}
       </label>
     </div>
     <div class="controls">
@@ -44,7 +50,8 @@
       </label>
     </div>
   </fieldset>
-  <fieldset class="pad-box self-signup-controls">
+
+  <fieldset class="pad-box self-signup-controls dotted-separator">
     <span class="control-label">{{#t "group_structure"}}Group Structure{{/t}}</span>
     <div class="controls">
       <label>
@@ -64,9 +71,11 @@
       </label>
     </div>
   </fieldset>
+  {{> [groups/manage/autoLeadershipControls]}}
+
   {{/if}}
 </div>
 <div class="form-controls">
   <button type="button" class="btn dialog_closer">{{#t "cancel"}}Cancel{{/t}}</button>
-  <button type="submit" class="btn btn-primary" data-text-while-loading='{{#t "saving"}}Saving...{{/t}}'>{{#t "save"}}Save{{/t}}</button>
+  <button id="newGroupSubmitButton" type="submit" class="btn btn-primary" data-text-while-loading='{{#t "saving"}}Saving...{{/t}}'>{{#t "save"}}Save{{/t}}</button>
 </div>

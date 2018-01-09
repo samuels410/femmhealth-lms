@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -36,8 +36,8 @@ define [
     #
     # Returns nothing.
     render: ->
-      html = _.map(@collection.models, @renderPageView)
-      @$el.append(html.join(''))
+      html = _.map(@collection.models, @renderPageView).join('')
+      @$el.append(html)
       super
 
     # Public: Return HTML for a given record.

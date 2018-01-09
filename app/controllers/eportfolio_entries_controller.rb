@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,15 +16,19 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+require 'securerandom'
+
 class EportfolioEntriesController < ApplicationController
   include EportfolioPage
+  before_action :rich_content_service_config
+
   def create
     @portfolio = Eportfolio.find(params[:eportfolio_id])
     if authorized_action(@portfolio, @current_user, :update)
       @category = @portfolio.eportfolio_categories.find(params[:eportfolio_entry].delete(:eportfolio_category_id))
-      
+
       page_names = @category.eportfolio_entries.map{|c| c.name}
-      @page = @portfolio.eportfolio_entries.build(params[:eportfolio_entry])
+      @page = @portfolio.eportfolio_entries.build(eportfolio_entry_params)
       @page.eportfolio_category = @category
       @page.parse_content(params)
       respond_to do |format|
@@ -37,22 +41,22 @@ class EportfolioEntriesController < ApplicationController
       end
     end
   end
-  
+
   def show
     @portfolio = Eportfolio.find(params[:eportfolio_id])
     if params[:verifier] == @portfolio.uuid
       session[:eportfolio_ids] ||= []
       session[:eportfolio_ids] << @portfolio.id
-      session[:session_affects_permissions] = true
+      session[:permissions_key] = SecureRandom.uuid
     end
     if authorized_action(@portfolio, @current_user, :read)
       if params[:category_name]
-        @category = @portfolio.eportfolio_categories.find_by_slug(params[:category_name])
+        @category = @portfolio.eportfolio_categories.where(slug: params[:category_name]).first
       end
       if params[:id]
         @page = @portfolio.eportfolio_entries.find(params[:id])
       elsif params[:entry_name] && @category
-        @page = @category.eportfolio_entries.find_by_slug(params[:entry_name])
+        @page = @category.eportfolio_entries.where(slug: params[:entry_name]).first
       end
       if !@page
         flash[:notice] = t('notices.missing_page', "Couldn't find that page")
@@ -61,22 +65,23 @@ class EportfolioEntriesController < ApplicationController
       end
       @category = @page.eportfolio_category
       eportfolio_page_attributes
-      render :template => "eportfolios/show"
+      render "eportfolios/show"
     end
   end
-  
+
   def update
     @portfolio = Eportfolio.find(params[:eportfolio_id])
     if authorized_action(@portfolio, @current_user, :update)
       @entry = @portfolio.eportfolio_entries.find(params[:id])
       @entry.parse_content(params) if params[:section_count]
       category_id = params[:eportfolio_entry].delete(:eportfolio_category_id)
+      entry_params = eportfolio_entry_params
       if category_id && category_id.to_i != @entry.eportfolio_category_id
         category = @portfolio.eportfolio_categories.find(category_id)
-        params[:eportfolio_entry][:eportfolio_category] = category
+        entry_params[:eportfolio_category] = category
       end
       respond_to do |format|
-        if @entry.update_attributes!(params[:eportfolio_entry])
+        if @entry.update_attributes!(entry_params)
           format.html { redirect_to eportfolio_entry_url(@portfolio, @entry) }
           format.json { render :json => @entry }
         else
@@ -86,8 +91,8 @@ class EportfolioEntriesController < ApplicationController
       end
     end
   end
-  
-  
+
+
   def destroy
     @portfolio = Eportfolio.find(params[:eportfolio_id])
     if authorized_action(@portfolio, @current_user, :update)
@@ -102,22 +107,22 @@ class EportfolioEntriesController < ApplicationController
       end
     end
   end
-  
+
   def attachment
     @portfolio = Eportfolio.find(params[:eportfolio_id])
     if authorized_action(@portfolio, @current_user, :read)
       @entry = @portfolio.eportfolio_entries.find(params[:entry_id])
       @category = @entry.eportfolio_category
-      @attachment = @portfolio.user.all_attachments.find_by_uuid(params[:attachment_id])
+      @attachment = @portfolio.user.all_attachments.where(uuid: params[:attachment_id]).first
       # @entry.check_for_matching_attachment_id
       begin
-        redirect_to verified_file_download_url(@attachment)
+        redirect_to file_download_url(@attachment, { :verifier => @attachment.uuid })
       rescue
         raise t('errors.not_found', "Not Found")
       end
     end
   end
-  
+
   def submission
     @portfolio = Eportfolio.find(params[:eportfolio_id])
     if authorized_action(@portfolio, @current_user, :read)
@@ -129,7 +134,16 @@ class EportfolioEntriesController < ApplicationController
       @context = @assignment.context
       # @entry.check_for_matching_attachment_id
       @headers = false
-      render :template => "submissions/show_preview"
+      render "submissions/show_preview"
     end
+  end
+
+  protected
+  def rich_content_service_config
+    rce_js_env(:basic)
+  end
+
+  def eportfolio_entry_params
+    params.require(:eportfolio_entry).permit(:name, :allow_comments, :show_comments)
   end
 end

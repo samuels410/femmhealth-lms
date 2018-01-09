@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,13 +17,14 @@
 #
 
 class AppCenterController < ApplicationController
-  before_filter :require_context
+  before_action :require_context
 
   def map_tools_to_apps!(context, apps)
     return unless apps
     ContextExternalTool.all_tools_for(context).each do |tool|
       app = nil
-      app = apps.find{|a| tool.tool_id == a['short_name'] } if tool.tool_id
+      app_center_id = tool.app_center_id || tool.tool_id
+      app = apps.find{|a| app_center_id == a['short_name'] } if app_center_id
       app['is_installed'] = true if app
     end
   end
@@ -40,7 +41,7 @@ class AppCenterController < ApplicationController
     per_page = Api.per_page_for(self, default: 72, max: 72)
     endpoint_scope = (@context.is_a?(Account) ? 'account' : 'course')
     base_url = send("api_v1_#{endpoint_scope}_app_center_apps_url")
-    response = app_api.get_apps(page, per_page) || {}
+    response = app_api.get_apps(page, per_page, app_list_token) || {}
     if response['lti_apps']
       collection = PaginatedCollection.build do |pager|
         map_tools_to_apps!(@context, response['lti_apps'])
@@ -54,29 +55,11 @@ class AppCenterController < ApplicationController
     end
   end
 
-  def reviews
-    per_page = Api.per_page_for(self, default: 15)
-    endpoint_scope = (@context.is_a?(Account) ? 'account' : 'course')
-    base_url = send("api_v1_#{endpoint_scope}_app_center_app_reviews_url")
-    force_refresh = params['force_refresh'] == '1'
-    collection = PaginatedCollection.build do |pager|
-      json = app_api.get_app_reviews(params[:app_id], page, per_page, force_refresh) || {}
-      pager.replace(json['reviews'])
-      pager.next_page = json['meta']['next_page'] if json['meta']
-      pager
+  def app_list_token
+    if @context.is_a?(Account)
+      @account.calculate_inherited_setting(:app_center_access_token)[:value]
+    else
+      @context.account.calculate_inherited_setting(:app_center_access_token)[:value]
     end
-    render :json => Api.paginate(collection, self, base_url, :per_page => per_page.to_i)
-  end
-
-  def review
-    app_api = AppCenter::AppApi.new
-    review = app_api.get_app_user_review(params[:app_id], @current_user.try(:uuid))
-    render :json => review
-  end
-
-  def add_review
-    app_api = AppCenter::AppApi.new
-    review = app_api.add_app_review(params[:app_id], @current_user, params[:rating], params[:comments])
-    render :json => review
   end
 end

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -27,7 +27,7 @@ module EportfoliosHelper
 
   def delete_icon(png=false)
     if png
-      image_tag("delete.png")
+      image_tag("delete.png", :alt => t("Delete"))
     else
       raw('&#215;')
     end

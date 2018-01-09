@@ -1,4 +1,23 @@
-class IndexCleanupPt1 < ActiveRecord::Migration
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+class IndexCleanupPt1 < ActiveRecord::Migration[4.2]
+  tag :predeploy
+
   # cleaning up unused and inefficient indexes
   def self.up
     if connection.adapter_name =~ /postgres/i
@@ -6,7 +25,7 @@ class IndexCleanupPt1 < ActiveRecord::Migration
       # we *do* query by (context_type, context_id, file_state where root_attachment_id = null),
       # but that uses the context index.
       # so, we'll restrict this index to just non-null root_attachment_ids.
-      execute %{create index index_attachments_on_root_attachment_id_not_null on attachments (root_attachment_id) where root_attachment_id is not null}
+      execute %{create index index_attachments_on_root_attachment_id_not_null on #{Attachment.quoted_table_name} (root_attachment_id) where root_attachment_id is not null}
       remove_index "attachments", :name => "index_attachments_on_root_attachment_id"
     end
 

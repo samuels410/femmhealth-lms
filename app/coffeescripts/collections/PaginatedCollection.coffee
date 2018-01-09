@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,9 +17,10 @@
 #
 
 define [
+  'jquery'
   'Backbone'
   'underscore'
-], (Backbone, _) ->
+], ($, Backbone, _) ->
 
   capitalize = (string = '') ->
     string.charAt(0).toUpperCase() + string.substring(1).toLowerCase()
@@ -47,14 +48,19 @@ define [
       @loadedAll = false
       exclusionFlag = "fetching#{capitalize options.page}Page"
       @[exclusionFlag] = true
+
       if options.page?
-        options.url = @urls[options.page] if @urls?
+        options.url = @urls[options.page] if @urls?[options.page]
         options.remove = false unless options.remove?
         # API keeps params intact, kill data here to avoid appending in super
         options.data = ''
       else
         # we want the first fetch to reset (since a lot of existing code wants a reset event)
         options.reset = true unless options.reset?
+
+      if options.fetchOptions?
+        options.data = options.fetchOptions
+
       @trigger 'beforeFetch', this, options
       @trigger "beforeFetch:#{options.page}", this, options if options.page?
 
@@ -66,6 +72,7 @@ define [
         @_setStateAfterFetch(xhr, options)
         data
 
+      dfd = options.dfd || $.Deferred()
       xhr = super(options).done (response, text, xhr) =>
         @trigger 'fetch', this, response, options
         @trigger "fetch:#{options.page}", this, response, options if options.page?
@@ -74,7 +81,13 @@ define [
           @loadedAll = true
         if @loadAll and @urls.next?
           setTimeout =>
-            @fetch page: 'next' # next tick so we can show loading indicator, etc.
+            @fetch page: 'next', dfd: dfd # next tick so we can show loading indicator, etc.
+        else
+          dfd.resolve(response, text, xhr)
+      dfd.abort = xhr.abort
+      dfd.success = dfd.done
+      dfd.error = dfd.fail
+      dfd
 
     canFetch: (page) ->
       @urls? and @urls[page]?
@@ -82,7 +95,7 @@ define [
     _setStateAfterFetch: (xhr, options) =>
       @_urlCache ?= []
       urlIsNotCached = options.url not in @_urlCache
-      @_urlCache.push options.url if not urlIsNotCached
+      @_urlCache.push options.url unless urlIsNotCached
       firstRequest = !@atLeastOnePageFetched
       setBottom = firstRequest or (options.page in ['next', 'bottom'] and urlIsNotCached)
       setTop = firstRequest or (options.page in ['prev', 'top'] and urlIsNotCached)
@@ -106,7 +119,7 @@ define [
       url = @urls.first ? @urls.next
       if url?
         perPage = parseInt(url.match(@perPageRegex)[1], 10)
-        (@options.params ?= {}).per_page = perPage
+        ((@options ?= {}).params ?= {}).per_page = perPage
 
       if @urls.last and match = @urls.last.match(@pageRegex)
         @totalPages = parseInt(match[1], 10)
@@ -122,4 +135,3 @@ define [
         links[key] = val
         links
       , {}
-

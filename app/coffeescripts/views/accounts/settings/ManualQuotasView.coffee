@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'i18n!accounts'
@@ -85,9 +102,10 @@ define [
         messages = errors[integerField]
         control_group.toggleClass('error', messages?)
         if messages
-          helpInline = $('<span class="help-inline"></span>')
-          helpInline.html((htmlEscape(message) for {message} in messages).join('<br/>'))
-          control_group.find('.controls').append(helpInline)
+          $helpInline = $('<span class="help-inline"></span>')
+          html = (htmlEscape(message) for {message} in messages).join('<br/>')
+          $helpInline.html(html)
+          control_group.find('.controls').append($helpInline)
 
     findItem: ->
       @hideErrors()
@@ -132,7 +150,7 @@ define [
       @showErrors(errors)
 
     findSuccess: =>
-      @$link.html(@model.get('name'))
+      @$link.text(@model.get('name'))
       @$link.attr('href', @model.path + '/' + @model.get('id'))
 
       @$quota.val(@model.get('storage_quota_mb'))

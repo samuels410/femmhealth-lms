@@ -1,7 +1,23 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'jquery'
   'i18n!pages'
-  'wikiSidebar'
   'compiled/models/WikiPage'
   'compiled/views/PaginatedCollectionView'
   'compiled/views/wiki/WikiPageEditView'
@@ -10,13 +26,14 @@ define [
   'compiled/views/StickyHeaderMixin'
   'compiled/str/splitAssetString'
   'jquery.disableWhileLoading'
-], ($, I18n, wikiSidebar, WikiPage, PaginatedCollectionView, WikiPageEditView, itemView, template, StickyHeaderMixin, splitAssetString) ->
+], ($, I18n, WikiPage, PaginatedCollectionView, WikiPageEditView, itemView, template, StickyHeaderMixin, splitAssetString) ->
 
   class WikiPageIndexView extends PaginatedCollectionView
     @mixin StickyHeaderMixin
     @mixin
       events:
         'click .new_page': 'createNewPage'
+        'keyclick .new_page': 'createNewPage'
         'click .header-row a[data-sort-field]': 'sort'
 
       els:
@@ -30,6 +47,8 @@ define [
     @optionProperty 'default_editing_roles'
     @optionProperty 'WIKI_RIGHTS'
 
+    @lastFocusField: null
+
     initialize: (options) ->
       super
       @WIKI_RIGHTS ||= {}
@@ -38,6 +57,7 @@ define [
       @itemViewOptions.indexView = @
       @itemViewOptions.collection = @collection
       @itemViewOptions.WIKI_RIGHTS = @WIKI_RIGHTS
+      @focusAfterRenderSelector = null
 
       @contextAssetString = options?.contextAssetString
       [@contextName, @contextId] = splitAssetString(@contextAssetString) if @contextAssetString
@@ -58,11 +78,15 @@ define [
       super
       @$noPages.redirectClickTo(@$noPagesLink)
       @renderSortHeaders()
+      if @focusAfterRenderSelector
+        # We do a setTimeout here just to force it to the next tick.
+        setTimeout =>
+          $(@focusAfterRenderSelector).focus()
+        , 1
 
-    sort: (event) ->
-      event?.preventDefault()
-
-      sortField = $(event.currentTarget).data('sort-field')
+    sort: (event = {}) ->
+      event.preventDefault()
+      @lastFocusField = sortField = $(event.currentTarget).data('sort-field')
       sortOrder = @collection.sortOrders[sortField] unless @currentSortField
       @$el.disableWhileLoading @collection.sortByField(sortField, sortOrder)
 
@@ -90,6 +114,9 @@ define [
         $i.removeClass('icon-mini-arrow-up icon-mini-arrow-down')
         $i.addClass("icon-mini-arrow-#{sortOrder}")
 
+      if @lastFocusField
+        $("[data-sort-field='#{@lastFocusField}']").focus()
+
     createNewPage: (ev) ->
       ev?.preventDefault()
 
@@ -112,9 +139,7 @@ define [
 
       # override the cancel behavior
       @editView.on 'cancel', =>
-        @editView.$el.remove()
-        wikiSidebar.hide()
-
+        @editView.destroyEditor()
         $('body').removeClass('edit with-right-side')
         $('body').addClass('index')
         @$el.show()

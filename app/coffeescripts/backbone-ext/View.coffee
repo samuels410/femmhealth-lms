@@ -1,9 +1,27 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
-  'use!vendor/backbone'
+  'jquery'
+  'node_modules-version-of-backbone'
   'underscore'
   'str/htmlEscape'
   'compiled/util/mixin'
-], (Backbone, _, htmlEscape, mixin) ->
+], ($, Backbone, _, htmlEscape, mixin) ->
 
   ##
   # Extends Backbone.View on top of itself to be 100X more useful
@@ -98,16 +116,16 @@ define [
       @attach()
       this
 
-    # Store all children views for easy access. 
-    #   ie: 
+    # Store all children views for easy access.
+    #   ie:
     #      @view.children # {@view1, @view2}
     #
     # @api private
-    
+
     storeChildrenViews: ->
       return unless @constructor.__childViews__
       @children = _.map @constructor.__childViews__, (viewObj) => @[viewObj.name]
-    
+
     ##
     # Sets the option properties
     #
@@ -248,6 +266,10 @@ define [
     #   <div data-bind="foo">{I will always mirror @model.get('foo') in here}</div>
     #
     # @api private
+
+    ###
+    xsslint safeString.method format
+    ###
 
     createBindings: (index, el) =>
       @$('[data-bind]').each (index, el) =>

@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2011 Instructure, Inc.
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
  *
  * This file is part of Canvas.
  *
@@ -12,19 +12,19 @@
  * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
  * details.
  *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-define([
-  'i18n!user_name',
-  'jquery' /* $ */,
-  'jquery.ajaxJSON' /* ajaxJSON */,
-  'jquery.instructure_forms' /* formSubmit */,
-  'jqueryui/dialog',
-  'compiled/jquery/fixDialogButtons' /* fix dialog formatting */,
-  'jquery.templateData' /* fillTemplateData */
-], function(I18n, $) {
+import I18n from 'i18n!user_name'
+import $ from 'jquery'
+import htmlEscape from './str/htmlEscape'
+import './jquery.ajaxJSON'
+import './jquery.instructure_forms' /* formSubmit */
+import 'jqueryui/dialog'
+import 'compiled/jquery/fixDialogButtons'
+import './jquery.templateData'
+
 $(document).ready(function() {
   $("#name_and_email").delegate('.edit_user_link', 'click', function(event) {
     event.preventDefault();
@@ -71,11 +71,10 @@ $(document).ready(function() {
     var $link = $(this);
     $link.text(I18n.t('messages.reporting_image', "Reporting image..."));
     $.ajaxJSON($link.attr('href'), 'POST', {}, function(data) {
-      $link.after(I18n.t('notices.image_reported', "This image has been reported"));
+      $link.after(htmlEscape(I18n.t('notices.image_reported', "This image has been reported")));
       $link.remove();
     }, function(data) {
       $link.text(I18n.t('errors.failed_to_report_image', "Failed to report the image, please try again"));
     });
   });
-});
 });

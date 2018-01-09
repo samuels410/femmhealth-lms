@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,10 +17,11 @@
 #
 
 define [
+  'jquery'
   'underscore'
   'compiled/views/PaginatedView'
   'jquery.disableWhileLoading'
-], (_, PaginatedView) ->
+], ($, _, PaginatedView) ->
 
   class TokenSelectorList extends PaginatedView
     tagName: 'div'

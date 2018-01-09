@@ -1,3 +1,21 @@
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
+ *
+ * This file is part of Canvas.
+ *
+ * Canvas is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License.
+ *
+ * Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+ * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
 // TinyMCE-jQuery EditorBox plugin
 // Called on a jQuery selector (should be a single object only)
 // to initialize a TinyMCE editor box in the place of the
@@ -31,67 +49,34 @@
 //   options.url is used for the href of the link, and options.title
 //   will be the body of the link if no text is currently selected.
 
-define([
-  'i18nObj',
-  'jquery',
-  'compiled/editor/editorAccessibility', /* editorAccessibility */
-  //'compiled/tinymce', // required, but the bundles that ACTUALLY use
-                        // tiny can require it themselves or else we have
-                        // build problems
-  'INST', // for IE detection; need to handle links in a special way
-  'jqueryui/draggable' /* /\.draggable/ */,
-  'jquery.instructure_misc_plugins' /* /\.indicate/ */,
-  'vendor/jquery.scrollTo' /* /\.scrollTo/ */,
-  'vendor/jquery.ba-tinypubsub',
-  'vendor/scribd.view' /* scribd */
-], function(I18nObj, $, EditorAccessibility, INST) {
+import I18nObj from 'i18nObj'
+import $ from 'jquery'
+import editorOptions from 'jsx/shared/rce/editorOptions'
+import EditorAccessibility from 'compiled/editor/editorAccessibility'
+import EditorBoxList from './tinymce.editor_box_list'
+import EditorConfig from './tinymce.config'
+import {remove, insertLink} from './tinymce.commands'
+import {cleanUrl} from './tinymce.editor_box_utils'
+
+//'compiled/tinymce', // required, but the bundles that ACTUALLY use
+                      // tiny can require it themselves or else we have
+                      // build problems
+
+import INST from './INST'
+import decodeString from 'decode_string'
+import 'jqueryui/draggable'
+import './jquery.instructure_misc_plugins' /* /\.indicate/ */
+import './vendor/jquery.scrollTo'
+import 'vendor/jquery.ba-tinypubsub'
 
   var enableBookmarking = !!INST.browser.ie;
   $(document).ready(function() {
     enableBookmarking = !!INST.browser.ie;
   });
 
-  function EditorBoxList() {
-    this._textareas = {};
-    this._editors = {};
-    this._editor_boxes = {};
-  };
-
-  $.extend(EditorBoxList.prototype, {
-    _addEditorBox: function(id, box) {
-      $.publish('editorBox/add', id, box);
-      this._editor_boxes[id] = box;
-      this._editors[id] = tinyMCE.get(id);
-      this._textareas[id] = $("textarea#" + id);
-    },
-    _removeEditorBox: function(id) {
-      delete this._editor_boxes[id];
-      delete this._editors[id];
-      delete this._textareas[id];
-      $.publish('editorBox/remove', id);
-      if ($.isEmptyObject(this._editors)) $.publish('editorBox/removeAll');
-    },
-    _getTextArea: function(id) {
-      if(!this._textareas[id]) {
-        this._textareas[id] = $("textarea#" + id);
-      }
-      return this._textareas[id];
-    },
-    _getEditor: function(id) {
-      if(!this._editors[id]) {
-        this._editors[id] = tinyMCE.get(id);
-      }
-      return this._editors[id];
-    },
-    _getEditorBox: function(id) {
-      return this._editor_boxes[id];
-    }
-  });
-
   var $instructureEditorBoxList = new EditorBoxList();
 
   function fillViewportWithEditor(editorID, elementToLeaveInViewport){
-
     var $iframe = $("#"+editorID+"_ifr");
     if ($iframe.length) {
       var newHeight = $(window).height() - ($iframe.offset().top + elementToLeaveInViewport.height() + 1);
@@ -114,146 +99,8 @@ define([
     if(width == 0) {
       width = $textarea.closest(":visible").width();
     }
-    var instructure_buttons = ",instructure_image,instructure_equation";
-    for(var idx in INST.editorButtons) {
-      // maxVisibleEditorButtons should be the max number of external tool buttons
-      // that are visible, INCLUDING the catchall "more external tools" button that
-      // will appear if there are too many to show at once.
-      if(INST.editorButtons.length <= INST.maxVisibleEditorButtons || idx < INST.maxVisibleEditorButtons - 1) {
-        instructure_buttons = instructure_buttons + ",instructure_external_button_" + INST.editorButtons[idx].id;
-      } else if(!instructure_buttons.match(/instructure_external_button_clump/)) {
-        instructure_buttons = instructure_buttons + ",instructure_external_button_clump";
-      }
-    }
-    if(INST && INST.allowMediaComments) {
-      instructure_buttons = instructure_buttons + ",instructure_record";
-    }
-    var equella_button = INST && INST.equellaEnabled ? ",instructure_equella" : "";
-    instructure_buttons = instructure_buttons + equella_button;
 
-    var buttons1 = "bold,italic,underline,forecolor,backcolor,removeformat,justifyleft,justifycenter,justifyright,bullist,outdent,indent,sup,sub,numlist,table,instructure_links,unlink" + instructure_buttons + ",fontsizeselect,formatselect";
-    var buttons2 = "";
-    var buttons3 = "";
-
-    if (width < 359 && width > 0) {
-      buttons1 = "bold,italic,underline,forecolor,backcolor,removeformat,justifyleft,justifycenter,justifyright";
-      buttons2 = "outdent,indent,sup,sub,bullist,numlist,table,instructure_links,unlink" + instructure_buttons;
-      buttons3 = "fontsizeselect,formatselect";
-    } else if (width < 600) {
-      buttons1 = "bold,italic,underline,forecolor,backcolor,removeformat,justifyleft,justifycenter,justifyright,outdent,indent,sup,sub,bullist,numlist";
-      buttons2 = "table,instructure_links,unlink" + instructure_buttons + ",fontsizeselect,formatselect";
-    }
-
-    var editor_css = "/javascripts/tinymce/jscripts/tiny_mce/themes/advanced/skins/default/ui.css,/stylesheets/compiled/tiny_like_ck_with_external_tools.css";
-
-    var tinyOptions = $.extend({
-      mode : "exact",
-      elements: id,
-      theme : "advanced",
-      plugins: "autolink,instructure_external_tools,instructure_contextmenu,instructure_links," +
-               "instructure_embed,instructure_image,instructure_equation,instructure_record,instructure_equella," +
-               "media,paste,table,inlinepopups",
-      dialog_type: 'modal',
-      language_load: false,
-      relative_urls: false,
-      remove_script_host: true,
-      theme_advanced_buttons1: buttons1,
-      theme_advanced_toolbar_location : "top",
-      theme_advanced_toolbar_align : "center",
-      theme_advanced_buttons2: buttons2,
-      theme_advanced_buttons3: buttons3,
-
-      theme_advanced_resize_horizontal : false,
-      theme_advanced_resizing : true,
-      theme_advanced_blockformats : "p,h2,h3,h4,pre",
-      theme_advanced_more_colors: false,
-      extended_valid_elements : "iframe[src|width|height|name|align|style|class|sandbox]",
-      content_css: "/stylesheets/compiled/instructure_style.css,/stylesheets/compiled/tinymce.editor_box.css",
-      editor_css: editor_css,
-      auto_focus: options.focus ? id : null,
-
-      onchange_callback: function(e) {
-        $("#" + id).trigger('change');
-      },
-
-      setup : function(ed) {
-        var $editor = $("#" + ed.editorId);
-        var focus = function() {
-          $(document).triggerHandler('editor_box_focus', $editor);
-          $.publish('editorBox/focus', $editor);
-        };
-        
-        // Make shift+tab take the user to the previous focusable element in the DOM.
-        var focusPrevious = function (ed, event) {
-          if (event.keyCode == 9 && event.shiftKey) {
-            var $cur = $(ed.getContainer());
-            while (true) {
-              // When jQuery is upgraded to 1.8+, use .addBack(':tabbable') instead of andSelf().filter(...)
-              if ($cur.prevAll().find(':tabbable').andSelf().filter(':tabbable').last().focus().length) {
-                return false;
-              }
-              $cur = $cur.parent();
-              if (!$cur || !$cur.length || $cur.is(document)) {
-                return false;
-              }
-            }
-          } else {
-            return true;
-          }
-        };
-        
-        ed.onClick.add(focus);
-        ed.onKeyPress.add(focus);
-        ed.onKeyUp.add(focusPrevious);
-        ed.onActivate.add(focus);
-        ed.onEvent.add(function() {
-          if(enableBookmarking && ed.selection) {
-            $textarea.data('last_bookmark', ed.selection.getBookmark(1));
-          }
-        });
-
-        ed.onInit.add(function(){
-          new EditorAccessibility(ed).accessiblize();
-        });
-
-        ed.onInit.add(function(){
-          $(window).triggerHandler("resize");
-
-          // this is a hack so that when you drag an image from the wikiSidebar to the editor that it doesn't
-          // try to embed the thumbnail but rather the full size version of the image.
-          // so basically, to document why and how this works: in wiki_sidebar.js we add the
-          // _mce_src="http://path/to/the/fullsize/image" to the images whose src="path/to/thumbnail/of/image/"
-          // what this does is check to see if some DOM node that got inserted into the editor has the attribute _mce_src
-          // and if it does, use that instead.
-          $(ed.contentDocument).bind("DOMNodeInserted", function(e){
-            var target = e.target,
-                mceSrc;
-            if (target.nodeType === 1 && target.nodeName === 'IMG'  && (mceSrc = $(target).data('url')) ) {
-              $(target).attr('src', tinyMCE.activeEditor.documentBaseURI.toAbsolute(mceSrc));
-            }
-          });
-
-          // tiny sets a focusout event handler, which only IE supports
-          // (Chrome/Safari/Opera support DOMFocusOut, FF supports neither)
-          // we attach a blur event that does the same thing (which in turn
-          // ensures the change callback fires)
-          // this fixes FF's broken behavior (http://www.tinymce.com/develop/bugtracker_view.php?id=4004 )
-          // as well as an issue in Safari where tiny didn't register some
-          // change events if the previously focused element was a numerical
-          // quiz input (something to do with changing its value in a change
-          // handler)
-          if (!('onfocusout' in ed.contentWindow)) {
-            $(ed.contentWindow).blur(function(e) {
-              if (!ed.removed && ed.undoManager.typing) {
-                ed.undoManager.typing = false;
-                ed.undoManager.add();
-              }
-            });
-          }
-        });
-      }
-    }, options.tinyOptions || {});
-
+    var tinyOptions = editorOptions(width, id, options, enableBookmarking, tinymce)
     tinyMCE.init(tinyOptions);
 
     this._textarea =  $textarea;
@@ -386,6 +233,8 @@ define([
         this._removeEditor(more_options);
       } else if(options == "is_dirty") {
         return $instructureEditorBoxList._getEditor(id).isDirty();
+      } else if(options == 'exists?') {
+        return !!$instructureEditorBoxList._getEditor(id);
       }
       return this;
     }
@@ -425,8 +274,8 @@ define([
         content = $instructureEditorBoxList._getEditor(id).getContent();
       }
     } catch(e) {
-      if(tinyMCE && tinyMCE.getInstanceById(id)) {
-        content = tinyMCE.getInstanceById(id).getContent();
+      if(tinyMCE && tinyMCE.get(id)) {
+        content = tinyMCE.get(id).getContent();
       } else {
         content = this.val() || '';
       }
@@ -498,8 +347,8 @@ define([
 
   $.fn._toggleView = function() {
     var id = this.attr('id');
-    this._setContentCode(this._getContentCode());
     tinyMCE.execCommand('mceToggleEditor', false, id);
+    this._setContentCode(this._getContentCode());
     // Ensure that keyboard focus doesn't get trapped in the ether.
     this.removeAttr('aria-hidden')
       .filter('textarea:visible')
@@ -507,19 +356,21 @@ define([
   };
 
   $.fn._removeEditor = function() {
-    var id = this.attr('id');
-    this.data('rich_text', false);
-    if(tinyMCE && tinyMCE.execCommand) {
-      tinyMCE.execCommand('mceRemoveControl', false, id);
-      $instructureEditorBoxList._removeEditorBox(id);
-    }
+    remove(this, $instructureEditorBoxList)
   };
 
   $.fn._setContentCode = function(val) {
     var id = this.attr('id');
+    var editbox = tinyMCE.get(id)
     $instructureEditorBoxList._getTextArea(id).val(val);
-    if(tinyMCE.get(id) && $.isFunction(tinyMCE.get(id).execCommand)) {
-      tinyMCE.get(id).execCommand('mceSetContent', false, val);
+    if(editbox && $.isFunction(editbox.execCommand)) {
+      editbox.execCommand('mceSetContent', false, val);
+      // the refocusing check fixes a keyboard only nav issue in chrome and
+      // safari that causes the focus to become trapped in the html editor
+      var refocusing = (typeof(event) != 'undefined') && event.relatedTarget
+      if(refocusing) {
+        $(event.relatedTarget).focus()
+      }
     }
   };
 
@@ -554,12 +405,7 @@ define([
       options = {url: options};
     }
     var title = options.title;
-    var url = options.url || "";
-    if(url.match(/@/) && !url.match(/\//) && !url.match(/^mailto:/)) {
-      url = "mailto:" + url;
-    } else if(!url.match(/^\w+:\/\//) && !url.match(/^mailto:/) && !url.match(/^\//)) {
-      url = "http://" + url;
-    }
+    var url = cleanUrl(options.url || "");
     var classes = options.classes || "";
     var defaultText = options.text || options.title || "Link";
     var target = options.target || null;
@@ -567,9 +413,6 @@ define([
     if(url.indexOf("@") != -1) {
       options.file = false;
       options.image = false;
-      if(url.indexOf("mailto:") != 0) {
-        url = "mailto:" + url;
-      }
     } else if (url.indexOf("/") == -1) {
       title = url;
       url = url.replace(/\s/g, "");
@@ -600,43 +443,53 @@ define([
     }
     var selection = tinyMCE.get(id).selection;
     var anchor = selection.getNode();
-    while(anchor.nodeName != 'A' && anchor.nodeName != 'BODY' && anchor.parentNode) {
+    while(anchor.nodeName !== "A" && anchor.nodeName !== "BODY" && anchor.parentNode) {
       anchor = anchor.parentNode;
     }
-    if(anchor.nodeName != 'A') { anchor = null; }
+    if(anchor.nodeName !== "A") { anchor = null; }
 
-    var selectedContent = selection.getContent();
+    var selectedContent = options.selectedContent || selection.getContent();
+    var selectedContent = decodeString(selectedContent)
+
+    var linkAttrs = {
+      target: target || '',
+      title: title || '',
+      href: url,
+      'class': classes,
+      id: link_id
+    };
+
+    if (options.dataAttributes && options.dataAttributes['preview-alt']) {
+      linkAttrs['data-preview-alt'] = options.dataAttributes['preview-alt'];
+    }
+
     if($instructureEditorBoxList._getEditor(id).isHidden()) {
       selectionText = defaultText;
       var $div = $("<div><a/></div>");
-      $div.find("a")
-        [link_id ? 'attr' : 'removeAttr']('id', link_id).attr({
-          title: title,
-          href: url,
-          target: target
-        })
-        [classes ? 'attr' : 'removeAttr']('class', classes)
-        .text(selectionText);
+      var $a = $div.find("a");
+      $a.attr(linkAttrs);
+      if (!link_id) {
+        $a.removeAttr('id')
+      }
+      if (!classes) {
+        $a.removeAttr('class')
+      }
+      $a.text(selectionText);
       var link_html = $div.html();
       $(this).replaceSelection(link_html);
     } else if(!selectedContent || selectedContent == "") {
       if(anchor) {
-        $(anchor).attr({
-          href: url,
-          '_mce_href': url,
-          title: title || '',
-          id: link_id,
-          'class': classes,
-          target: target
-        });
+        linkAttrs['data-mce-href'] = url
+        linkAttrs['_mce_href'] = url
+        $(anchor).attr(linkAttrs);
       } else {
         selectionText = defaultText;
         var $div = $("<div/>");
-        $div.append($("<a/>", {id: link_id, target: target, title: title, href: url, 'class': classes}).text(selectionText));
+        $div.append($("<a/>", linkAttrs).text(selectionText));
         tinyMCE.get(id).execCommand('mceInsertContent', false, $div.html());
       }
     } else {
-      tinyMCE.get(id).execCommand('mceInsertLink', false, {target: (target || ''), title: (title || ''), href: url, 'class': classes, 'id': link_id});
+      insertLink(id, selectedContent, linkAttrs)
     }
 
     var ed = tinyMCE.get(id);
@@ -666,5 +519,3 @@ define([
       $(e).indicate({offset: offset, singleFlash: true, scroll: true, container: $(box).find('iframe')});
     }
   };
-
-});

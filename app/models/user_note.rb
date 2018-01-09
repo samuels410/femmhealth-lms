@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 - 2013 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,11 +18,13 @@
 
 class UserNote < ActiveRecord::Base
   include Workflow
-  attr_accessible :user, :note, :title, :creator
+
   belongs_to :user
   belongs_to :creator, :class_name => 'User', :foreign_key => :created_by_id
+
   validates_presence_of :user_id, :created_by_id, :workflow_state
   validates_length_of :note, :maximum => maximum_text_length, :allow_nil => true, :allow_blank => true
+  validates_length_of :title, :maximum => maximum_string_length, :allow_nil => true, :allow_blank => true
   after_save :update_last_user_note
 
   sanitize_field :note, CanvasSanitize::SANITIZE
@@ -31,42 +33,42 @@ class UserNote < ActiveRecord::Base
     state :active
     state :deleted
   end
-  
-  scope :active, where("workflow_state<>'deleted'")
-  scope :desc_by_date, order('created_at DESC')
-  
+
+  scope :active, -> { where("workflow_state<>'deleted'") }
+  scope :desc_by_date, -> { order('created_at DESC') }
+
   set_policy do
     given { |user| self.creator == user }
     can :delete and can :read
-    
-    given { |user| self.user.grants_right?(user, nil, :delete_user_notes) }
+
+    given { |user| self.user.grants_right?(user, :delete_user_notes) }
     can :delete and can :read
-    
-    given { |user| self.user.grants_right?(user, nil, :read_user_notes) }
+
+    given { |user| self.user.grants_right?(user, :read_user_notes) }
     can :read
   end
-  
-  alias_method :destroy!, :destroy
+
+  alias_method :destroy_permanently!, :destroy
   def destroy
     self.workflow_state = 'deleted'
     self.deleted_at = Time.now.utc
     save!
   end
-  
+
   def formatted_note(truncate=nil)
     self.extend TextHelper
     res = self.note
     res = truncate_html(self.note, :max_length => truncate, :words => true) if truncate
     res
   end
-  
+
   def creator_name
     self.creator ? self.creator.name : nil
   end
-  
+
   def update_last_user_note
     self.user.update_last_user_note
     self.user.save
   end
-  
+
 end

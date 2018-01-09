@@ -1,23 +1,42 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'underscore'
   'Backbone'
   'compiled/models/WikiPageRevision'
+  'compiled/models/Assignment'
   'compiled/backbone-ext/DefaultUrlMixin'
   'compiled/str/splitAssetString'
   'i18n!pages'
-], (_, Backbone, WikiPageRevision, DefaultUrlMixin, splitAssetString, I18n) ->
+], (_, Backbone, WikiPageRevision, Assignment, DefaultUrlMixin,
+    splitAssetString, I18n) ->
 
   pageOptions = ['contextAssetString', 'revision']
 
   class WikiPage extends Backbone.Model
     @mixin DefaultUrlMixin
     resourceName: 'pages'
+    idAttribute: 'url'
 
     initialize: (attributes, options) ->
       super
-      _.extend(this, _.pick(options || {}, pageOptions))
+      Object.assign(this, _.pick(options || {}, pageOptions))
       [@contextName, @contextId] = splitAssetString(@contextAssetString) if @contextAssetString
-      @set(id: attributes.url) if attributes?.url
 
       @on 'change:front_page', @setPublishable
       @on 'change:published', @setPublishable
@@ -47,7 +66,7 @@ define [
     latestRevision: (options) ->
       if !@_latestRevision && @get('url')
         unless @_latestRevision
-          revisionOptions = _.extend({}, {@contextAssetString, page: @, pageUrl: @get('url'), latest: true, summary: true}, options)
+          revisionOptions = Object.assign({}, {@contextAssetString, page: @, pageUrl: @get('url'), latest: true, summary: true}, options)
           @_latestRevision = new WikiPageRevision({revision_id: @revision}, revisionOptions)
       @_latestRevision
 
@@ -55,20 +74,32 @@ define [
     parse: (response, options) ->
       if response.wiki_page
         response = _.extend _.omit(response, 'wiki_page'), response.wiki_page
-
-      response.id = response.url if response.url
+      response.set_assignment = response.assignment?
+      assign_attributes = response.assignment || {}
+      response.assignment = @createAssignment(assign_attributes)
       response
 
+    createAssignment: (attributes) ->
+      a = new Assignment(attributes)
+      a.alreadyScoped = true
+      a
+
     # Gives a json representation of the model
-    #
-    # Specifically, the id is removed as the only reason for it's presense is to make Backbone happy
     toJSON: ->
+      json = super
+      delete json.assignment unless json.set_assignment
+      json.assignment = json.assignment?.toJSON()
+
       wiki_page:
-        _.omit super, 'id'
+        json
 
     # Returns a json representation suitable for presenting
     present: ->
-      _.extend _.omit(@attributes, 'id'), contextName: @contextName, contextId: @contextId, new_record: !@get('url')
+      Object.assign {}, @attributes, contextName: @contextName, contextId: @contextId, new_record: !@get('url')
+
+    duplicate: (courseId, callback) ->
+      $.ajaxJSON "/api/v1/courses/#{courseId}/pages/#{@id}/duplicate", 'POST',
+        {}, callback
 
     # Uses the api to perform a publish on the page
     publish: ->
@@ -85,11 +116,11 @@ define [
       @save attrs, attrs: attrs, wait: true
 
     # Uses the api to set the page as the front page
-    setFrontPage: ->
+    setFrontPage: (callback) ->
       attrs =
         wiki_page:
           front_page: true
-      @save attrs, attrs: attrs, wait: true
+      @save attrs, attrs: attrs, wait: true, complete: callback
 
     # Uses the api to unset the page as the front page
     unsetFrontPage: ->

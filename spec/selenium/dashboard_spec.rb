@@ -1,12 +1,41 @@
-require File.expand_path(File.dirname(__FILE__) + '/common')
+#
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
+require_relative 'common'
+require_relative 'helpers/notifications_common'
 
 describe "dashboard" do
-  include_examples "in-process server selenium tests"
+  include NotificationsCommon
+  include_context "in-process server selenium tests"
+
+  shared_examples_for 'load events list' do
+    it "should load events list sidebar", priority: "2", test_id: 210275 do
+      get "/"
+      wait_for_ajaximations
+      expect(f('.events_list')).to be_displayed
+    end
+  end
 
   context "as a student" do
 
-    before (:each) do
+    before :each do
       course_with_student_logged_in(:active_all => true)
+      @course.default_view = 'feed'
+      @course.save!
     end
 
     def create_announcement
@@ -17,37 +46,78 @@ describe "dashboard" do
       })
     end
 
-    def click_recent_activity_header
-      f('.stream-announcement .stream_header').click
-    end
-
     def test_hiding(url)
       create_announcement
       items = @user.stream_item_instances
-      items.size.should == 1
-      items.first.hidden.should == false
+      expect(items.size).to eq 1
+      expect(items.first.hidden).to eq false
 
       get url
+      if url =='/'
+        f('#DashboardOptionsMenu_Container button').click
+        fj('span[role="menuitemradio"]:contains("Recent Activity")').click
+      end
       click_recent_activity_header
       item_selector = '#announcement-details tbody tr'
-      ff(item_selector).size.should == 1
+      expect(ff(item_selector).size).to eq 1
       f('#announcement-details .ignore-item').click
-      keep_trying_until { ff(item_selector).size.should == 0 }
+      expect(f("#content")).not_to contain_css(item_selector)
 
       # should still be gone on reload
       get url
-      ff(item_selector).size.should == 0
+      if url =='/'
+        f('#DashboardOptionsMenu_Container button').click
+        fj('span[role="menuitemradio"]:contains("Recent Activity")').click
+      end
+      expect(f("#content")).not_to contain_css(item_selector)
 
-      @user.recent_stream_items.size.should == 0
-      items.first.reload.hidden.should == true
+      expect(@user.recent_stream_items.size).to eq 0
+      expect(items.first.reload.hidden).to eq true
     end
 
-    it "should allow hiding a stream item on the dashboard" do
+    it_should_behave_like 'load events list'
+
+    it "should allow hiding a stream item on the dashboard", priority: "1", test_id: 215577 do
       test_hiding("/")
     end
 
-    it "should allow hiding a stream item on the course page" do
+    it "should allow hiding a stream item on the course page", priority: "1", test_id: 215578 do
       test_hiding("/courses/#{@course.to_param}")
+    end
+
+    it "should not show stream items for deleted objects", priority: "1", test_id: 215579 do
+      enable_cache do
+        announcement = create_announcement
+        item_selector = '#announcement-details tbody tr'
+        Timecop.freeze(5.minutes.ago) do
+          items = @user.stream_item_instances
+          expect(items.size).to eq 1
+          expect(items.first.hidden).to eq false
+
+          get "/"
+          f('#DashboardOptionsMenu_Container button').click
+          fj('span[role="menuitemradio"]:contains("Recent Activity")').click
+
+          click_recent_activity_header
+          expect(ff(item_selector).size).to eq 1
+        end
+
+        announcement.destroy
+
+        get "/"
+        expect(f('.no_recent_messages')).to include_text('No Recent Messages')
+      end
+    end
+
+    it "should not show announcement stream items without permissions" do
+      @course.account.role_overrides.create!(:role => student_role,
+                                             :permission => 'read_announcements',
+                                             :enabled => false)
+
+      get "/"
+      f('#DashboardOptionsMenu_Container button').click
+      fj('span[role="menuitemradio"]:contains("Recent Activity")').click
+      expect(f('.no_recent_messages')).to include_text('No Recent Messages')
     end
 
     def click_recent_activity_header(type='announcement')
@@ -55,11 +125,11 @@ describe "dashboard" do
     end
 
     def assert_recent_activity_category_closed(type='announcement')
-      f(".stream-#{type} .details_container").should_not be_displayed
+      expect(f(".stream-#{type} .details_container")).not_to be_displayed
     end
 
     def assert_recent_activity_category_is_open(type='announcement')
-      f(".stream-#{type} .details_container").should be_displayed
+      expect(f(".stream-#{type} .details_container")).to be_displayed
     end
 
     def click_recent_activity_course_link(type='announcement')
@@ -73,9 +143,11 @@ describe "dashboard" do
       JS
     end
 
-    it "should expand/collapse recent activity category" do
+    it "should expand/collapse recent activity category", priority: "1", test_id: 215580 do
       create_announcement
       get '/'
+      f('#DashboardOptionsMenu_Container button').click
+      fj('span[role="menuitemradio"]:contains("Recent Activity")').click
       assert_recent_activity_category_closed
       click_recent_activity_header
       assert_recent_activity_category_is_open
@@ -83,9 +155,11 @@ describe "dashboard" do
       assert_recent_activity_category_closed
     end
 
-    it "should not expand category when a course/group link is clicked" do
+    it "should not expand category when a course/group link is clicked", priority: "2", test_id: 215581 do
       create_announcement
       get '/'
+      f('#DashboardOptionsMenu_Container button').click
+      fj('span[role="menuitemradio"]:contains("Recent Activity")').click
       assert_recent_activity_category_closed
       disable_recent_activity_header_course_link
       click_recent_activity_course_link
@@ -95,38 +169,70 @@ describe "dashboard" do
     it "should update the item count on stream item hide"
     it "should remove the stream item category if all items are removed"
 
-    it "should show conversation stream items on the dashboard" do
+    it "should show conversation stream items on the dashboard", priority: "1", test_id: 197536 do
       c = User.create.initiate_conversation([@user, User.create])
       c.add_message('test')
       c.add_participants([User.create])
 
       items = @user.stream_item_instances
-      items.size.should == 1
+      expect(items.size).to eq 1
 
       get "/"
-      ff('#conversation-details tbody tr').size.should == 1
+      f('#DashboardOptionsMenu_Container button').click
+      fj('span[role="menuitemradio"]:contains("Recent Activity")').click
+      expect(ff('#conversation-details tbody tr').size).to eq 1
     end
 
-    it "should show account notifications on the dashboard" do
-      a1 = @course.account.announcements.create!(:message => "hey there")
-      a2 = @course.account.announcements.create!(:message => "another announcement")
+    it "shows an assignment stream item under Recent Activity in dashboard", priority: "1", test_id: 108725 do
+      setup_notification(@student, name: 'Assignment Created')
+      assignment_model({:submission_types => ['online_text_entry'], :course => @course})
+      get "/"
+      f('#DashboardOptionsMenu_Container button').click
+      fj('span[role="menuitemradio"]:contains("Recent Activity")').click
+      find('.toggle-details').click
+      expect(fj('.fake-link:contains("Unnamed")')).to be_present
+    end
+
+    it "should show account notifications on the dashboard", priority: "1", test_id: 215582 do
+      a1 = @course.account.announcements.create!(:subject => 'test',
+                                                 :message => "hey there",
+                                                 :start_at => Time.zone.today - 1.day,
+                                                 :end_at => Time.zone.today + 1.day)
+      a2 = @course.account.announcements.create!(:subject => 'test 2',
+                                                 :message => "another annoucement",
+                                                 :start_at => Time.zone.today - 2.days,
+                                                 :end_at => Time.zone.today + 1.day)
 
       get "/"
-      messages =  ffj("#dashboard .global-message .message.user_content")
-      messages.size.should == 2
-      messages[0].text.should == a2.message
-      messages[1].text.should == a1.message
+      f('#DashboardOptionsMenu_Container button').click
+      fj('span[role="menuitemradio"]:contains("Recent Activity")').click
+      messages = ff("#dashboard .account_notification .notification_message")
+      expect(messages.size).to eq 2
+      expect(messages[0].text).to eq a1.message
+      expect(messages[1].text).to eq a2.message
     end
 
     it "should interpolate the user's domain in global notifications" do
-      announcement = @course.account.announcements.create!(:message => "blah blah http://random-survey-startup.ly/?some_GET_parameter_by_which_to_differentiate_results={{ACCOUNT_DOMAIN}}")
+      announcement = @course.account.announcements.create!(:message => "blah blah http://random-survey-startup.ly/?some_GET_parameter_by_which_to_differentiate_results={{ACCOUNT_DOMAIN}}",
+                                                           :subject => 'test',
+                                                           :start_at => Date.today,
+                                                           :end_at => Date.today + 1.day)
 
       get "/"
-      fj("#dashboard .global-message .message.user_content").text.should == announcement.message.gsub("{{ACCOUNT_DOMAIN}}",@course.account.domain)
+      expect(fj("#dashboard .account_notification .notification_message").text).to eq announcement.message.gsub("{{ACCOUNT_DOMAIN}}", @course.account.domain)
     end
 
-    it "should show appointment stream items on the dashboard" do
-      pending "we need to add this stuff back in"
+    it "should interpolate the user's id in global notifications" do
+      announcement = @course.account.announcements.create!(:message => "blah blah http://random-survey-startup.ly/?surveys_are_not_really_anonymous={{CANVAS_USER_ID}}",
+                                                           :subject => 'test',
+                                                           :start_at => Date.today,
+                                                           :end_at => Date.today + 1.day)
+      get "/"
+      expect(fj("#dashboard .account_notification .notification_message").text).to eq announcement.message.gsub("{{CANVAS_USER_ID}}", @user.global_id.to_s)
+    end
+
+    it "should show appointment stream items on the dashboard", priority: "2", test_id: 215585 do
+      skip "we need to add this stuff back in"
       Notification.create(:name => 'Appointment Group Published', :category => "Appointment Availability")
       Notification.create(:name => 'Appointment Group Updated', :category => "Appointment Availability")
       Notification.create(:name => 'Appointment Reserved For User', :category => "Appointment Signups")
@@ -143,126 +249,59 @@ describe "dashboard" do
       @appointment_group.update_attributes(:new_appointments => [[Time.now.utc + 2.hour, Time.now.utc + 3.hour]])
 
       get "/"
-      ffj(".topic_message .communication_message.dashboard_notification").size.should == 3
+      expect(ffj(".topic_message .communication_message.dashboard_notification").size).to eq 3
       # appointment group publish and update notifications
-      ffj(".communication_message.message_appointment_group_#{@appointment_group.id}").size.should == 2
+      expect(ffj(".communication_message.message_appointment_group_#{@appointment_group.id}").size).to eq 2
       # signup notification
-      ffj(".communication_message.message_group_#{@group.id}").size.should == 1
+      expect(ffj(".communication_message.message_group_#{@group.id}").size).to eq 1
     end
 
-    it "should display assignment in to do list" do
-      due_date = Time.now.utc + 2.days
-      @assignment = assignment_model({:due_at => due_date, :course => @course})
-      get "/"
-      f('.events_list .event a').should include_text(@assignment.title)
-      # use jQuery to get the text since selenium can't figure it out when the elements aren't displayed
-      driver.execute_script("return $('.event a .tooltip_text').text()").should match(@course.short_name)
-    end
-
-    it "should put locked graded discussions / quizzes in the coming up list only" do
-      def check_list_text(list_element, text, should_have_text = true)
-        if should_have_text
-          list_element.should include_text(text)
-        else
-          list_element.should_not include_text(text)
-        end
+    describe "course menu" do
+      before do
+        @course.update_attributes(:start_at => 2.days.from_now, :conclude_at => 4.days.from_now, :restrict_enrollments_to_course_dates => false)
+        Enrollment.update_all(:created_at => 1.minute.ago)
+        get "/"
       end
 
-      due_date = Time.now.utc + 2.days
-      names = ['locked discussion assignment', 'locked quiz']
-      @course.assignments.create(:name => names[0], :submission_types => 'discussion', :due_at => due_date, :lock_at => Time.now, :unlock_at => due_date)
-      q = @course.quizzes.create!(:title => names[1], :due_at => due_date, :lock_at => Time.now, :unlock_at => due_date)
-      q.workflow_state = 'available'
-      q.save
-      q.reload
-      get "/"
-
-      # No "To Do" list shown
-      f('.right-side-list.to-do-list').should be_nil
-      coming_up_list = f('.right-side-list.events')
-
-      2.times { |i| check_list_text(coming_up_list, names[i]) }
-    end
-
-    it "should limit the number of visible items in the to do list" do
-      due_date = Time.now.utc + 2.days
-      20.times do
-        assignment_model :due_at => due_date, :course => @course, :submission_types => 'online_text_entry'
+      it "should display course name in course menu", priority: "1", test_id: 215586 do
+        f('#global_nav_courses_link').click
+        expect(driver.current_url).not_to match(/\/courses$/)
+        expect(fj(".ic-NavMenu__headline:contains('Courses')")).to be_displayed
+        wait_for_ajax_requests
+        expect(fj(".ic-NavMenu-list-item a:contains('#{@course.name}')")).to be_displayed
       end
 
-      get "/"
+      it "should display student groups in header nav", priority: "2", test_id: 215587 do
+        group = Group.create!(:name => "group1", :context => @course)
+        group.add_user(@user)
 
-      keep_trying_until { ffj(".to-do-list li:visible").size.should == 5 + 1 } # +1 is the see more link
-      f(".more_link").click
-      wait_for_ajaximations
-      ffj(".to-do-list li:visible").size.should == 20
-    end
+        other_unpublished_course = course_factory
+        other_group = Group.create!(:name => "group2", :context => other_unpublished_course)
+        other_group.add_user(@user)
 
-    it "should display assignments to do in to do list and assignments menu for a student" do
-      notification_model(:name => 'Assignment Due Date Changed')
-      notification_policy_model(:notification_id => @notification.id)
-      assignment = assignment_model({:submission_types => 'online_text_entry', :course => @course})
-      assignment.due_at = Time.now + 60
-      assignment.created_at = 1.month.ago
-      assignment.save!
+        get "/"
 
-      get "/"
+        f('#global_nav_groups_link').click
+        expect(fj(".ic-NavMenu__headline:contains('Groups')")).to be_displayed
+        wait_for_ajax_requests
 
-      #verify assignment changed notice is in messages
-      f('.stream-assignment .stream_header').click
-      f('#assignment-details').should include_text('Assignment Due Date Changed')
-      #verify assignment is in to do list
-      f('.to-do-list > li').should include_text(assignment.submission_action_string)
+        list = fj(".ic-NavMenu-list-item")
+        expect(list).to include_text(group.name)
+        expect(list).to_not include_text(other_group.name)
+      end
 
-      #verify assignment is in drop down
-      assignment_menu = f('#assignments_menu_item')
-      driver.action.move_to(assignment_menu).perform
-      keep_trying_until { assignment_menu.should include_text("To Turn In") }
-      assignment_menu.should include_text(assignment.title)
-    end
+      it "should present /courses as the href of the courses nav item", priority: "2", test_id: 215612 do
+        expect(f('#global_nav_courses_link').attribute('href')).to match(/\/courses$/)
+      end
 
-    it "should display student groups in course menu" do
-      @course.update_attributes(:start_at => 2.days.from_now, :conclude_at => 4.days.from_now, :restrict_enrollments_to_course_dates => false)
-      Enrollment.update_all(:created_at => 1.minute.ago)
-
-      get "/"
-
-      course_menu = f('#courses_menu_item')
-
-      driver.action.move_to(course_menu).perform
-      keep_trying_until { course_menu.should include_text('My Courses') }
-      course_menu.should include_text(@course.name)
-    end
-
-
-    it "should display student groups in course menu" do
-      group = Group.create!(:name => "group1", :context => @course)
-      group.add_user(@user)
-      @course.update_attributes(:start_at => 2.days.from_now, :conclude_at => 4.days.from_now, :restrict_enrollments_to_course_dates => false)
-      Enrollment.update_all(:created_at => 1.minute.ago)
-
-      get "/"
-
-      course_menu = f('#courses_menu_item')
-
-      driver.action.move_to(course_menu).perform
-      keep_trying_until { course_menu.should include_text('Current Groups') }
-      course_menu.should include_text(group.name)
-    end
-
-    it "should go to /courses when the courses nav item is clicked" do
-      @course.update_attributes(:start_at => 2.days.from_now, :conclude_at => 4.days.from_now, :restrict_enrollments_to_course_dates => false)
-      Enrollment.update_all(:created_at => 1.minute.ago)
-
-      get '/'
-
-      keep_trying_until do
-        f('#courses_menu_item a').click
-        driver.current_url.should include('courses')
+      it "should go to a course when clicking a course link from the menu", priority: "1", test_id: 215614 do
+        f('#global_nav_courses_link').click
+        fj(".ic-NavMenu-list-item a:contains('#{@course.name}')").click
+        expect(driver.current_url).to match "/courses/#{@course.id}"
       end
     end
 
-    it "should display scheduled web conference in stream" do
+    it "should display scheduled web conference in stream", priority: "1", test_id: 216354 do
       PluginSetting.create!(:name => "wimba", :settings => {"domain" => "wimba.instructure.com"})
 
       # NOTE: recently changed the behavior here: conferences only display on
@@ -276,47 +315,42 @@ describe "dashboard" do
       @conference.save!
 
       get "/courses/#{@course.to_param}"
-      f('.conference .message').should include_text(@conference.title)
+      expect(f('.conference .notification_message')).to include_text(@conference.title)
     end
 
-    it "should display calendar events in the coming up list" do
-      calendar_event_model({
-                               :title => "super fun party",
-                               :description => 'celebrating stuff',
-                               :start_at => 5.minutes.from_now,
-                               :end_at => 10.minutes.from_now
-                           })
-      get "/"
-      f('.events_list .event a').should include_text(@event.title)
+    it "should end conferences from stream", priority: "1", test_id: 216355 do
+      skip_if_safari(:alert)
+      PluginSetting.create!(:name => "wimba", :settings => {"domain" => "wimba.instructure.com"})
+
+      course_with_teacher_logged_in
+      @course.default_view = 'feed'
+      @course.save!
+
+      @conference = @course.web_conferences.build({:title => "my Conference", :conference_type => "Wimba", :duration => nil})
+      @conference.user = @user
+      @conference.save!
+      @conference.restart
+      @conference.add_initiator(@user)
+      @conference.add_invitee(@user)
+      @conference.save!
+
+      get "/courses/#{@course.to_param}"
+      f('.conference .close_conference_link').click
+      expect(alert_present?).to be_truthy
+      accept_alert
+      wait_for_ajaximations
+      expect(f('.conference')).to_not be_displayed
+      @conference.reload
+      expect(@conference).to be_finished
     end
 
-    it "should display quiz submissions with essay questions as submitted in coming up list" do
-      quiz_with_graded_submission([:question_data => {:id => 31,
-                                                      :name => "Quiz Essay Question 1",
-                                                      :question_type => 'essay_question',
-                                                      :question_text => 'qq1',
-                                                      :points_possible => 10}],
-                                  {:user => @student, :course => @course}) do
-        {
-            "question_31" => "<p>abeawebawebae</p>",
-            "question_text" => "qq1"
-        }
-      end
-
-      @assignment.due_at = Time.now.utc + 1.week
-      @assignment.save!
-
-      get "/"
-      keep_trying_until { ffj(".events_list .event .tooltip_wrap").size.should > 0 }
-      driver.execute_script("$('.events_list .event .tooltip_wrap, .events_list .event .tooltip_text').css('visibility', 'visible')")
-      f('.events_list .event .tooltip_wrap').should include_text 'submitted'
-    end
-
-    it "should create an announcement for the first course that is not visible in the second course" do
+    it "should create an announcement for the first course that is not visible in the second course", priority: "1", test_id: 216356 do
       @context = @course
       announcement_model({:title => "hey all read this k", :message => "announcement"})
       @second_course = Course.create!(:name => 'second course')
       @second_course.offer!
+      @second_course.default_view = 'feed'
+      @second_course.save!
       #add teacher as a user
       u = User.create!
       u.register!
@@ -330,13 +364,13 @@ describe "dashboard" do
       Enrollment.update_all(:created_at => 1.minute.ago) # need to make created_at and updated_at different
 
       get "/"
-      f('.no-recent-messages').should be_nil
+      expect(f("#content")).not_to contain_css('.no_recent_messages')
 
       get "/courses/#{@second_course.id}"
-      f('.no-recent-messages').should include_text('No Recent Messages')
+      expect(f('.no_recent_messages')).to include_text('No Recent Messages')
     end
 
-    it "should validate the functionality of soft concluded courses in dropdown" do
+    it "should validate the functionality of soft concluded courses in dropdown", priority: "1", test_id: 216372 do
       course_with_student(:active_all => true, :course_name => "a_soft_concluded_course", :user => @user)
       c1 = @course
       c1.conclude_at = 1.week.ago
@@ -345,25 +379,46 @@ describe "dashboard" do
       c1.save!
       get "/"
 
-      driver.action.move_to(f('#courses_menu_item')).perform
-      course_menu = f('#menu_enrollments')
-      keep_trying_until { course_menu.should be_displayed }
-      course_menu.should_not include_text(c1.name)
+      f('#global_nav_courses_link').click
+      expect(fj(".ic-NavMenu__headline:contains('Courses')")).to be_displayed
+      expect(f(".ic-NavMenu__link-list")).not_to include_text(c1.name)
     end
 
-    it "should show recent feedback and it should work" do
+    it "should show recent feedback and it should work", priority: "1", test_id: 216373 do
       assign = @course.assignments.create!(:title => 'hi', :due_at => 1.day.ago, :points_possible => 5)
-      assign.grade_student(@student, :grade => '4')
+      assign.grade_student(@student, grade: '4', grader: @teacher)
 
       get "/"
       wait_for_ajaximations
 
-      f('.recent_feedback a').attribute('href').should match /courses\/#{@course.id}\/assignments\/#{assign.id}\/submissions\/#{@student.id}/
+      expect(f('.recent_feedback a')).to have_attribute("href", /courses\/#{@course.id}\/assignments\/#{assign.id}\/submissions\/#{@student.id}/)
       f('.recent_feedback a').click
       wait_for_ajaximations
 
       # submission page should load
-      f('h2').text.should == "Submission Details"
+      expect(f('h2').text).to eq "Submission Details"
+    end
+
+    it "should validate the functionality of soft concluded courses on courses page", priority: "1", test_id: 216374 do
+      term = EnrollmentTerm.new(:name => "Super Term", :start_at => 1.month.ago, :end_at => 1.week.ago)
+      term.root_account_id = @course.root_account_id
+      term.save!
+      c1 = @course
+      c1.name = 'a_soft_concluded_course'
+      c1.update_attributes!(:enrollment_term => term)
+      c1.reload
+      get "/courses"
+      expect(fj("#past_enrollments_table a[href='/courses/#{@course.id}']")).to include_text(c1.name)
+    end
+
+    context "course menu customization" do
+
+      it "should always have a link to the courses page (with customizations)", priority: "1", test_id: 216378 do
+        course_with_teacher({:user => @user, :active_course => true, :active_enrollment => true})
+        get "/"
+        f('#global_nav_courses_link').click
+        expect(fj('.ic-NavMenu-list-item a:contains("All Courses")')).to be_present
+      end
     end
   end
 
@@ -373,164 +428,68 @@ describe "dashboard" do
       course_with_teacher_logged_in(:active_cc => true)
     end
 
-    it "should validate the functionality of soft concluded courses on courses page" do
-      term = EnrollmentTerm.new(:name => "Super Term", :start_at => 1.month.ago, :end_at => 1.week.ago)
-      term.root_account_id = @course.root_account_id
-      term.save!
-      c1 = @course
-      c1.name = 'a_soft_concluded_course'
-      c1.update_attributes!(:enrollment_term => term)
-      c1.reload
+    it_should_behave_like 'load events list'
 
-      get "/courses"
-      f('.past_enrollments').should include_text(c1.name)
+    context "restricted future courses" do
+      before :once do
+        term = EnrollmentTerm.new(:name => "Super Term", :start_at => 1.week.from_now, :end_at => 1.month.from_now)
+        term.root_account_id = Account.default.id
+        term.save!
+        course_with_student(:active_all => true)
+        @c1 = @course
+        @c1.name = 'a future course'
+        @c1.update_attributes!(:enrollment_term => term)
+
+        course_with_student(:active_course => true, :user => @student)
+        @c2 = @course
+        @c2.name = "a restricted future course"
+        @c2.restrict_student_future_view = true
+        @c2.update_attributes!(:enrollment_term => term)
+      end
+
+      before do
+        user_session(@student)
+      end
+
+      it "should show future courses (even if restricted) to students on courses page" do
+        get "/courses"
+        expect(fj("#future_enrollments_table a[href='/courses/#{@c1.id}']")).to include_text(@c1.name)
+
+        expect(f("#content")).not_to contain_css("#future_enrollments_table a[href='/courses/#{@c2.id}']") # should not have a link
+        expect(f("#future_enrollments_table")).to include_text(@c2.name) # but should still show restricted future enrollment
+      end
+
+      it "should not show restricted future courses to students on courses page if configured on account" do
+        a = @c2.account
+        a.settings[:restrict_student_future_listing] = {:value => true}
+        a.save!
+        get "/courses"
+        expect(fj("#future_enrollments_table a[href='/courses/#{@c1.id}']")).to include_text(@c1.name)
+        expect(f("#future_enrollments_table")).to_not include_text(@c2.name) # shouldn't be included at all
+      end
     end
 
-    it "should display assignment to grade in to do list and assignments menu for a teacher" do
+    it "should display assignment to grade in to do list for a teacher", priority: "1", test_id: 216376 do
       assignment = assignment_model({:submission_types => 'online_text_entry', :course => @course})
-      student = user_with_pseudonym(:active_user => true, :username => 'student@example.com', :password => 'qwerty')
+      student = user_with_pseudonym(:active_user => true, :username => 'student@example.com', :password => 'qwertyuiop')
       @course.enroll_user(student, "StudentEnrollment", :enrollment_state => 'active')
       assignment.reload
       assignment.submit_homework(student, {:submission_type => 'online_text_entry', :body => 'ABC'})
       assignment.reload
-      get "/"
 
-      #verify assignment is in to do list
-      f('.to-do-list > li').should include_text('Grade ' + assignment.title)
+      User.where(:id => @teacher).update_all(:updated_at => 1.day.ago) # ensure cache refresh
+      enable_cache do
+        get "/"
 
-      #verify assignment is in drop down
-      assignment_menu = f('#assignments_menu_item')
-      driver.action.move_to(assignment_menu).perform
-      keep_trying_until { assignment_menu.should include_text("To Grade") }
-      assignment_menu.should include_text(assignment.title)
-    end
+        #verify assignment is in to do list
+        expect(f('.to-do-list > li')).to include_text('Grade ' + assignment.title)
 
-    it "should show submitted essay quizzes in the todo list" do
-      quiz_title = 'new quiz'
-      student_in_course(:active_all => true)
-      q = @course.quizzes.create!(:title => quiz_title)
-      q.quiz_questions.create!(:question_data => {:id => 31, :name => "Quiz Essay Question 1", :question_type => 'essay_question', :question_text => 'qq1', :points_possible => 10})
-      q.generate_quiz_data
-      q.workflow_state = 'available'
-      q.save
-      q.reload
-      qs = q.generate_submission(@user)
-      qs.mark_completed
-      qs.submission_data = {"question_31" => "<p>abeawebawebae</p>", "question_text" => "qq1"}
-      qs.grade_submission
-      get "/"
-
-      todo_list = f('.to-do-list')
-      todo_list.should_not be_nil
-      todo_list.should include_text(quiz_title)
-    end
-
-    context "course menu customization" do
-
-      it "should allow customization if there are sufficient courses" do
-        20.times { course_with_teacher({:user => @user, :active_course => true, :active_enrollment => true}) }
+        student.enrollments.first.destroy
 
         get "/"
 
-        course_menu = f('#courses_menu_item')
-        driver.action.move_to(course_menu).perform
-        keep_trying_until do
-          course_menu.should include_text('My Courses')
-          course_menu.should include_text('Customize')
-          course_menu.should include_text('View all courses')
-        end
-      end
-
-      it "should allow customization if there are sufficient course invitations" do
-        20.times { course_with_teacher({:user => user_with_communication_channel(:user_state => :creation_pending), :active_course => true}) }
-
-        get "/"
-
-        course_menu = f('#courses_menu_item')
-        driver.action.move_to(course_menu).perform
-        keep_trying_until do
-          course_menu.should include_text('My Courses')
-          course_menu.should include_text('Customize')
-          course_menu.should include_text('View all courses')
-        end
-      end
-
-      it "should allow customization if all courses are already favorited" do
-        @user.favorites.create(:context => @course)
-        20.times {
-          course_with_teacher({:user => @user, :active_course => true, :active_enrollment => true})
-          @user.favorites.create(:context => @course)
-        }
-
-        get "/"
-
-        course_menu = f('#courses_menu_item')
-        driver.action.move_to(course_menu).perform
-        keep_trying_until do
-          course_menu.should include_text('My Courses')
-          course_menu.should include_text('Customize')
-        end
-      end
-
-      it "should allow customization even before the course ajax request comes back" do
-        20.times { course_with_teacher({:user => @user, :active_course => true, :active_enrollment => true}) }
-
-        get "/"
-
-        # Now artificially make the next ajax request slower. We want to make sure that we click the
-        # customize button before the ajax request returns. Delaying the request by 1s should
-        # be enough.
-        UsersController.before_filter { sleep 1; true }
-
-        course_menu = f('#courses_menu_item')
-        driver.execute_script(%{$("#menu li.menu-item:first").trigger('mouseenter')})
-        sleep 0.4 # there's a fixed 300ms delay before the menu will display
-
-        # For some reason, a normal webdriver click here causes strangeness on FF in XP with
-        # firebug installed.
-        driver.execute_script("$('#menu .customListOpen:first').click()")
-        wait_for_ajaximations
-
-        UsersController.filter_chain.pop
-
-        course_menu.should include_text('My Courses')
-        course_menu.should include_text('View all courses')
-        course_menu.find_element(:css, '.customListWrapper').should be_displayed
-      end
-
-      it "should perform customization actions" do
-        def favoriteElsSize
-          ff('#menu_enrollments > .menu-item-drop-column-list li.customListItem').size
-        end
-
-        def checkedEls
-          ffj('#menu_enrollments .customListContent li.customListItem.on')
-        end
-
-        @courses = []
-        20.times { @courses << course_with_teacher({:user => @user, :active_course => true, :active_enrollment => true}).course }
-
-        @user.favorites.by('Course').destroy_all
-        @courses[0...10].each do |course|
-          @user.favorites.build(:context => course)
-        end
-        @user.save
-
-        get "/"
-        driver.execute_script(%{$("#menu li.menu-item:first").trigger('mouseenter')})
-        sleep 0.4 # there's a fixed 300ms delay before the menu will display
-        wait_for_ajaximations
-        favoriteElsSize.should == 10
-        driver.execute_script("$('#menu .customListOpen:first').click()")
-        wait_for_ajaximations
-
-        checkedEls.size.should == 10
-        checkedEls[0].click
-        wait_for_ajaximations
-        checkedEls.size.should == 9
-        favoriteElsSize.should == 9
-        @user.reload
-        @user.favorites.size.should == 9
+        #verify todo list is updated
+        expect(f("#content")).not_to contain_css('.to-do-list > li')
       end
     end
   end

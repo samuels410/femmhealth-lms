@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -24,12 +24,12 @@ describe UserProfile do
       student_in_course(:active_all => true)
       tabs = @student.profile.
         tabs_available(@user, :root_account => Account.default)
-      tabs.map { |t| t[:id] }.should_not include UserProfile::TAB_PROFILE
+      expect(tabs.map { |t| t[:id] }).not_to include UserProfile::TAB_PROFILE
 
       Account.default.update_attribute :settings, :enable_profiles => true
-      tabs = @student.profile(true).
+      tabs = @student.reload.profile.
         tabs_available(@user, :root_account => Account.default)
-      tabs.map { |t| t[:id] }.should include UserProfile::TAB_PROFILE
+      expect(tabs.map { |t| t[:id] }).to include UserProfile::TAB_PROFILE
     end
   end
 end

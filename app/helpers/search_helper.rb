@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -26,7 +26,12 @@ module SearchHelper
   # If a course is provided, just return it (and its groups/sections)
   def load_all_contexts(options = {})
     context = options[:context]
-    @contexts = Rails.cache.fetch(['all_conversation_contexts', @current_user, context].cache_key, :expires_in => 10.minutes) do
+    permissions = options[:permissions]
+
+    include_all_permissions = (permissions == :all)
+    permissions = permissions.presence && Array(permissions).map(&:to_sym)
+
+    @contexts = Rails.cache.fetch(['all_conversation_contexts', @current_user, context, permissions].cache_key, :expires_in => 10.minutes) do
       contexts = {:courses => {}, :groups => {}, :sections => {}}
 
       term_for_course = lambda do |course|
@@ -43,9 +48,17 @@ module SearchHelper
             :term => term_for_course.call(course),
             :state => type == :current ? :active : (course.recently_ended? ? :recently_active : :inactive),
             :available => type == :current && course.available?,
-            :permissions => course.grants_rights?(@current_user),
             :default_section_id => course.default_section(no_create: true).try(:id)
-          }
+          }.tap do |hash|
+            hash[:permissions] =
+              if include_all_permissions
+                course.rights_status(@current_user).select { |key, value| value }
+              elsif permissions
+                course.rights_status(@current_user, *permissions).select { |key, value| value }
+              else
+                {}
+              end
+          end
         end
       end
 
@@ -65,41 +78,62 @@ module SearchHelper
         end
       end
 
-      add_groups = lambda do |groups|
+      add_groups = lambda do |groups, group_context = nil|
+        ActiveRecord::Associations::Preloader.new.preload(groups, [:group_category, :context])
+        ActiveRecord::Associations::Preloader.new.preload(groups, :group_memberships, GroupMembership.where(user_id: @current_user))
         groups.each do |group|
+          group.can_participate = true
           contexts[:groups][group.id] = {
             :id => group.id,
             :name => group.name,
             :type => :group,
             :state => group.active? ? :active : :inactive,
-            :parent => group.context_type == 'Course' ? {:course => group.context.id} : nil,
-            :context_name => group.context.name,
-            :category => group.category,
-            :permissions => group.grants_rights?(@current_user)
-          }
+            :parent => group.context_type == 'Course' ? {:course => group.context_id} : nil,
+            :context_name => (group_context || group.context).name,
+            :category => group.category
+          }.tap do |hash|
+            hash[:permissions] =
+              if include_all_permissions
+                group.rights_status(@current_user).select { |key, value| value }
+              elsif permissions
+                group.rights_status(@current_user, *permissions).select { |key, value| value }
+              else
+                {}
+              end
+          end
         end
       end
 
       if context.is_a?(Course)
         add_courses.call [context], :current
         visibility = context.enrollment_visibility_level_for(@current_user, context.section_visibilities_for(@current_user), true)
-        sections = visibility == :sections ? context.sections_visible_to(@current_user) : context.course_sections
+        sections = case visibility
+        when :sections, :limited
+          context.sections_visible_to(@current_user)
+        when :full
+          context.course_sections
+        else
+          []
+        end
         add_sections.call sections
-        add_groups.call context.groups
+        add_groups.call context.groups.active, context
+      elsif context.is_a?(Group)
+        if context.grants_right?(@current_user, session, :read)
+          add_groups.call [context]
+          add_courses.call [context.context], :current if context.context.is_a?(Course)
+        end
+      elsif context.is_a?(CourseSection)
+        visibility = context.course.enrollment_visibility_level_for(@current_user, context.course.section_visibilities_for(@current_user), true)
+        sections = (visibility == :restricted) ? [] : [context]
+        add_courses.call [context.course], :current
+        add_sections.call context.course.sections_visible_to(@current_user, sections)
       else
-        add_courses.call @current_user.concluded_courses.with_each_shard, :concluded
-        add_courses.call @current_user.courses.with_each_shard, :current
-        add_sections.call @current_user.messageable_sections
-        add_groups.call @current_user.messageable_groups
+        add_courses.call @current_user.concluded_courses.shard(@current_user).to_a, :concluded
+        add_courses.call @current_user.courses.shard(@current_user).to_a, :current
+        add_sections.call @current_user.address_book.sections
+        add_groups.call @current_user.address_book.groups
       end
       contexts
-    end
-    permissions = options[:permissions] || []
-    @contexts.each do |type, contexts|
-      contexts.each do |id, context|
-        context[:permissions] = HashWithIndifferentAccess.new(context[:permissions] || {})
-        context[:permissions].slice!(*permissions) unless permissions == :all
-      end
     end
     @contexts
   end

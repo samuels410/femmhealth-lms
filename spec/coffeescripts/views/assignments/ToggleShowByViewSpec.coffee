@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'underscore'
   'Backbone'
@@ -10,13 +27,14 @@ define [
   'compiled/views/assignments/ToggleShowByView'
   'jquery'
   'helpers/fakeENV'
-], (_, Backbone, AssignmentGroup, Assignment, Course, AssignmentGroupCollection, AssignmentGroupListView, IndexView, ToggleShowByView, $, fakeENV) ->
+  'helpers/assertions'
+], (_, Backbone, AssignmentGroup, Assignment, Course, AssignmentGroupCollection, AssignmentGroupListView, IndexView, ToggleShowByView, $, fakeENV, assertions) ->
 
 
   COURSE_SUBMISSIONS_URL = "/courses/1/submissions"
 
   createView = (varyDates=false) ->
-    ENV.PERMISSIONS = { manage: false }
+    ENV.PERMISSIONS = { manage: false, read_grades: true }
     course = new Course {id: 1}
     #the dates are in opposite order of what they will be sorted into
     assignments = [
@@ -43,7 +61,12 @@ define [
       {id: 2, assignment_id: 4},
       {id: 3, assignment_id: 5, submission_type: 'online'}
     ]
-    server.respondWith "GET", "#{COURSE_SUBMISSIONS_URL}?per_page=50", [
+    url = "#{COURSE_SUBMISSIONS_URL}?"
+    if ENV.observed_student_ids.length == 1
+      url = "#{url}student_ids[]=#{ENV.observed_student_ids[0]}&"
+    url = "#{url}per_page=50"
+
+    server.respondWith "GET", url, [
       200,
       { "Content-Type": "application/json" },
       JSON.stringify(submissions),
@@ -52,18 +75,26 @@ define [
     collection.getGrades()
     server.respond()
 
-  module 'ToggleShowByView',
+  QUnit.module 'ToggleShowByView',
     setup: ->
       @server = sinon.fakeServer.create()
       fakeENV.setup()
+      ENV.observed_student_ids = []
 
     teardown: ->
       fakeENV.teardown()
       @server.restore()
+      $(".ui-dialog").remove()
+      $("ul[id^=ui-id-]").remove()
+
+  test 'should be accessible', (assert) ->
+    view = createView(true)
+    done = assert.async()
+    assertions.isAccessible view, done, {'a11yReport': true}
 
   test 'should sort assignments into groups correctly', ->
 
-    view = createView(false)
+    view = createView()
     getGrades(view.assignmentGroups, @server)
 
     equal view.assignmentGroups.length, 4
@@ -95,3 +126,61 @@ define [
     assignments = upcoming.get("assignments").models
     equal assignments[0].get("due_at"), new Date(3013, 8, 20).toString()
     equal assignments[1].get("due_at"), new Date(3013, 8, 21).toString()
+
+
+  test 'observer view who are not observing a student', ->
+
+    #Regular observer view
+    ENV.current_user_has_been_observer_in_this_course = true
+    view = createView()
+    getGrades(view.assignmentGroups, @server)
+
+    past = view.assignmentGroups.findWhere id: "past"
+    assignments = past.get("assignments").models
+    equal assignments.length, 5
+
+    overdue = view.assignmentGroups.findWhere id: "overdue"
+    equal overdue, undefined
+
+    upcoming = view.assignmentGroups.findWhere id: "upcoming"
+    assignments = upcoming.get("assignments").models
+    equal assignments.length, 2
+
+
+  test 'observer view who are observing a student', ->
+
+    ENV.current_user_has_been_observer_in_this_course = true
+    ENV.observed_student_ids = ["1"]
+    view = createView()
+    getGrades(view.assignmentGroups, @server)
+
+    past = view.assignmentGroups.findWhere id: "past"
+    assignments = past.get("assignments").models
+    equal assignments.length, 3
+
+    overdue = view.assignmentGroups.findWhere id: "overdue"
+    assignments = overdue.get("assignments").models
+    equal assignments.length, 2
+
+    upcoming = view.assignmentGroups.findWhere id: "upcoming"
+    assignments = upcoming.get("assignments").models
+    equal assignments.length, 2
+
+  #This will change in the future from a basic observer with no observing students to
+  #way of selecting which student to observer for now though it defaults to a standard observer
+  test 'observer view who are observing multiple students', ->
+
+    ENV.observed_student_ids = ["1", "2"]
+    ENV.current_user_has_been_observer_in_this_course = true
+    view = createView()
+    getGrades(view.assignmentGroups, @server)
+    past = view.assignmentGroups.findWhere id: "past"
+    assignments = past.get("assignments").models
+    equal assignments.length, 5
+
+    overdue = view.assignmentGroups.findWhere id: "overdue"
+    equal overdue, undefined
+
+    upcoming = view.assignmentGroups.findWhere id: "upcoming"
+    assignments = upcoming.get("assignments").models
+    equal assignments.length, 2

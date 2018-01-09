@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -15,9 +15,9 @@
 # You should have received a copy of the GNU Affero General Public License along
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
-class Canvas::Migration::Worker::CCWorker < Struct.new(:migration_id)
+class Canvas::Migration::Worker::CCWorker < Canvas::Migration::Worker::Base
   def perform(cm=nil)
-    cm ||= ContentMigration.find_by_id migration_id
+    cm ||= ContentMigration.where(id: migration_id).first
     cm.job_progress.start unless cm.skip_job_progress
     begin
       cm.update_conversion_progress(1)
@@ -36,7 +36,14 @@ class Canvas::Migration::Worker::CCWorker < Struct.new(:migration_id)
         raise Canvas::Migration::Error, I18n.t(:no_migration_file, "File required for content migration.")
       end
 
-      converter_class = settings[:converter_class] || Canvas::Migration::Worker::get_converter(settings)
+      converter_class = settings[:converter_class]
+      unless converter_class
+        if settings[:no_archive_file]
+          raise ArgumentError, "converter_class required for content migration with no file"
+        end
+        settings[:archive] = Canvas::Migration::Archive.new(settings)
+        converter_class = settings[:archive].get_converter
+      end
       converter = converter_class.new(settings)
 
       course = converter.export

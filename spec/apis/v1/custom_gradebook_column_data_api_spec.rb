@@ -22,16 +22,16 @@ describe CustomGradebookColumnDataApiController, type: :request do
   include Api
   include Api::V1::CustomGradebookColumn
 
-  before do
+  before :once do
     course_with_teacher active_all: true
     s1, s2 = 2.times.map { |i|
       @course.course_sections.create! name: "section #{i}"
     }
-    @student1, @student2 = 2.times.map { user(active_all: true) }
+    @student1, @student2 = 2.times.map { user_factory(active_all: true) }
     s1.enroll_user @student1, 'StudentEnrollment', 'active'
     s2.enroll_user @student2, 'StudentEnrollment', 'active'
 
-    @ta = user(active_all: true)
+    @ta = user_factory(active_all: true)
     @course.enroll_user @ta, 'TaEnrollment',
       workflow_state: 'active', section: s2,
       limit_privileges_to_course_section: true
@@ -42,7 +42,7 @@ describe CustomGradebookColumnDataApiController, type: :request do
   end
 
   describe 'index' do
-    before do
+    before :once do
       [@student1, @student2].each_with_index { |s,i|
         @col.custom_gradebook_column_data.build(content: "Blah #{i}").tap { |d|
           d.user_id = s.id
@@ -66,9 +66,35 @@ describe CustomGradebookColumnDataApiController, type: :request do
         "/api/v1/courses/#{@course.id}/custom_gradebook_columns/#{@col.id}/data",
         course_id: @course.to_param, id: @col.to_param, action: "index",
         controller: "custom_gradebook_column_data_api", format: "json"
-      response.should be_success
+      expect(response).to be_success
       d = @col.custom_gradebook_column_data.where(user_id: @student2.id).first
-      json.should == [custom_gradebook_column_datum_json(d, @user, session)]
+      expect(json).to eq [custom_gradebook_column_datum_json(d, @user, session)]
+    end
+
+    it 'includes students with inactive enrollments' do
+      student = user_factory(active_all: true)
+      @course.default_section.enroll_user(student, 'StudentEnrollment', 'inactive')
+      @col.custom_gradebook_column_data.create!(user_id: student.id, content: "Example Note")
+      @user = @teacher
+      json = api_call :get,
+        "/api/v1/courses/#{@course.id}/custom_gradebook_columns/#{@col.id}/data",
+        course_id: @course.to_param, id: @col.to_param, action: "index",
+        controller: "custom_gradebook_column_data_api", format: "json"
+      expect(response).to be_success
+      expect(json.map {|datum| datum["user_id"]}).to include student.id
+    end
+
+    it 'includes students with concluded enrollments' do
+      student = user_factory(active_all: true)
+      @course.default_section.enroll_user(student, 'StudentEnrollment', 'completed')
+      @col.custom_gradebook_column_data.create!(user_id: student.id, content: "Example Note")
+      @user = @teacher
+      json = api_call :get,
+        "/api/v1/courses/#{@course.id}/custom_gradebook_columns/#{@col.id}/data",
+        course_id: @course.to_param, id: @col.to_param, action: "index",
+        controller: "custom_gradebook_column_data_api", format: "json"
+      expect(response).to be_success
+      expect(json.map {|datum| datum["user_id"]}).to include student.id
     end
 
     it 'returns the column data' do
@@ -76,8 +102,8 @@ describe CustomGradebookColumnDataApiController, type: :request do
         "/api/v1/courses/#{@course.id}/custom_gradebook_columns/#{@col.id}/data",
         course_id: @course.to_param, id: @col.to_param, action: "index",
         controller: "custom_gradebook_column_data_api", format: "json"
-      response.should be_success
-      json.should =~ @col.custom_gradebook_column_data.map { |d|
+      expect(response).to be_success
+      expect(json).to match_array @col.custom_gradebook_column_data.map { |d|
         custom_gradebook_column_datum_json(d, @user, session)
       }
     end
@@ -88,8 +114,8 @@ describe CustomGradebookColumnDataApiController, type: :request do
         course_id: @course.to_param, id: @col.to_param, per_page: "1",
         action: "index", controller: "custom_gradebook_column_data_api",
         format: "json"
-      response.should be_success
-      json.size.should == 1
+      expect(response).to be_success
+      expect(json.size).to eq 1
     end
   end
 
@@ -119,7 +145,7 @@ describe CustomGradebookColumnDataApiController, type: :request do
       @user = @ta
 
       update(@student2, "asdf")
-      response.should be_success
+      expect(response).to be_success
 
       raw_api_call :put,
         "/api/v1/courses/#{@course.id}/custom_gradebook_columns/#{@col.id}/data/#{@student1.id}",
@@ -130,14 +156,43 @@ describe CustomGradebookColumnDataApiController, type: :request do
       assert_status(404)
     end
 
+    it 'works for students with inactive enrollments' do
+      student = user_factory(active_all: true)
+      @course.default_section.enroll_user(student, 'StudentEnrollment', 'inactive')
+      @user = @teacher
+      update(student, "Example Note")
+      expect(response).to be_success
+      datum = @col.custom_gradebook_column_data.find_by(user_id: student.id)
+      expect(datum.content).to eq "Example Note"
+    end
+
+    it 'works for hidden custom columns' do
+      @col.update!(workflow_state: 'hidden')
+
+      @user = @teacher
+      update(@student1, "Example Note")
+
+      expect(response).to be_success
+    end
+
+    it 'works for students with concluded enrollments' do
+      student = user_factory(active_all: true)
+      @course.default_section.enroll_user(student, 'StudentEnrollment', 'completed')
+      @user = @teacher
+      update(student, "Example Note")
+      expect(response).to be_success
+      datum = @col.custom_gradebook_column_data.find_by(user_id: student.id)
+      expect(datum.content).to eq "Example Note"
+    end
+
     it 'works' do
       json = nil
 
       check = lambda { |content|
-        response.should be_success
-        json["content"].should == content
-        @col.custom_gradebook_column_data.where(user_id: @student1.id)
-        .first.reload.content.should == content
+        expect(response).to be_success
+        expect(json["content"]).to eq content
+        expect(@col.custom_gradebook_column_data.where(user_id: @student1.id)
+        .first.reload.content).to eq content
       }
 
       # create

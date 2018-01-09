@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -41,6 +41,7 @@ define [
     # options must include rootOutcomeGroup or directoryView
     initialize: (opts) ->
       super
+      @inFindDialog = opts.inFindDialog
       @readOnly = opts.readOnly
       @selectFirstItem = opts.selectFirstItem
       @directories = []
@@ -67,7 +68,8 @@ define [
       else
         parent = _.last @directories
         directoryClass = outcomeGroup.get('directoryClass') || OutcomesDirectoryView
-        dir = new directoryClass {outcomeGroup, parent, @readOnly, selectFirstItem: @selectFirstItem}
+        i = _.indexOf @directories, @selectedDir()
+        dir = new directoryClass {outcomeGroup, parent, @readOnly, selectFirstItem: @selectFirstItem, inFindDialog: @inFindDialog, directoryDepth: i + 1}
         @firstDir = false
       @addDir dir
 
@@ -105,9 +107,6 @@ define [
 
     # Select the directory view and optionally select an Outcome or Group.
     selectDir: (dir, selectedModel) =>
-      # don't re-select the same model
-      return if selectedModel and dir is @selectedDir() and selectedModel is @selectedDir()?.prevSelectedModel
-
       # If root selection is an outcome, don't have a dir. Get root most dir to clear selection.
       useDir = if dir then dir else @directories[0]
       useDir.clearSelection() if useDir and !selectedModel
@@ -160,6 +159,9 @@ define [
       else
         i = _.indexOf @directories, @selectedDir()
         @selectDir @directories[i - 1]
+
+      @selectedDir().makeFocusable()
+
       @goingBack = false
 #      if @selectedModel() instanceof OutcomeGroup
 #        parentDir = @selectedDir().parent
@@ -170,8 +172,8 @@ define [
 #      @goingBack = false
 
     updateSidebarWidth: ->
-      sidebarWidth = if @directories.length is 1 then @directoryWidth + 1 else (@directoryWidth * 2) + 2
-      @$el.css width: (@directoryWidth * @directories.length) + @directories.length
+      sidebarWidth = if @directories.length is 1 then @directoryWidth else (@directoryWidth * 2)
+      @$el.css width: (@directoryWidth * @directories.length)
       @$sidebar.animate width: sidebarWidth
 
     renderDir: (dir) =>
@@ -197,8 +199,35 @@ define [
     dirForGroup: (outcomeGroup) ->
       _.find(@directories, (d) -> d.outcomeGroup is outcomeGroup) || @addDirFor(outcomeGroup)
 
+    moveItem: (model, newGroup) ->
+      originalGroup = model.get('parent_outcome_group') || model.outcomeGroup
+      originalDir = @cachedDirectories[originalGroup.id]
+      targetDir =  @cachedDirectories[newGroup.id]
+      if originalGroup.id == newGroup.id
+        $.flashError I18n.t("%{model} is already located in %{newGroup}", {model: model.get('title'), newGroup: newGroup.get('title')})
+        return
+      if model instanceof OutcomeGroup
+        dfd = originalDir.moveGroup(model, newGroup.toJSON())
+      else
+        dfd = originalDir.changeLink(model, newGroup.toJSON())
+      dfd.done =>
+        itemType = if model instanceof OutcomeGroup then 'groups' else 'outcomes'
+        if targetDir
+          dfd = targetDir[itemType].fetch()
+          dfd.done => targetDir.needsReset = true
+        originalDir[itemType].fetch()
+        parentDir = originalDir.parent
+        if parentDir
+          @selectDir(parentDir, parentDir.selectedModel)
+        model.trigger 'finishedMoving'
+        $(".selected:last").focus()
+        #timeout necessary to announce move after modal closes following finishedMoving event
+        setTimeout (->
+          $.flashMessage I18n.t("Successfully moved %{model} to %{newGroup}", {model: model.get('title'), newGroup: newGroup.get('title')})
+        ), 1500
+
     _scrollToDir: (dirIndex, model) ->
-      scrollLeft = (@directoryWidth + 1) * (if model instanceof Outcome then dirIndex - 1 else dirIndex)
+      scrollLeft = @directoryWidth * (if model instanceof Outcome then dirIndex - 1 else dirIndex)
       @$sidebar.animate {scrollLeft: scrollLeft}, duration: 200
       scrollTop = (@entryHeight + 1) * _.indexOf(@directories[dirIndex].views(), _.find(@directories[dirIndex].views(), (v) -> v.model is model))
       @directories[dirIndex].$el.animate {scrollTop: scrollTop}, duration: 200

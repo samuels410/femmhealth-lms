@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,17 +20,41 @@ define [
   'compiled/collections/PaginatedCollection'
   'compiled/collections/GroupUserCollection'
   'compiled/models/Group'
-], (PaginatedCollection, GroupUserCollection, Group) ->
+  'compiled/util/natcompare'
+], (PaginatedCollection, GroupUserCollection, Group, natcompare) ->
 
   class GroupCollection extends PaginatedCollection
     model: Group
-    comparator: (group) -> group.get('name').toLowerCase()
+    comparator: natcompare.byGet('name')
 
     @optionProperty 'category'
     @optionProperty 'loadAll'
+    @optionProperty 'markInactiveStudents'
+
+    _defaultUrl: ->
+      if @forCourse
+        url = super
+        unless ENV.CAN_MANAGE_GROUPS
+          url = url + "?only_own_groups=1"
+        url
+      else
+        '/api/v1/users/self/groups'
 
     url: ->
       if @category?
         @url = "/api/v1/group_categories/#{@category.id}/groups?per_page=50"
       else
         @url = super
+
+    fetchAll: ->
+      @fetchAllDriver(success: @fetchNext)
+
+    fetchNext: =>
+      if @canFetch 'next'
+        @fetch(page: 'next', success: @fetchNext)
+      else
+        @trigger('finish')
+
+    fetchAllDriver: (options = {}) ->
+      options.data = Object.assign per_page: 20, include: "can_message", options.data || {}
+      @fetch options

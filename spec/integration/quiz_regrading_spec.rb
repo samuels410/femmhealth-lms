@@ -1,5 +1,22 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require 'spec_helper'
-require 'lib/quiz_regrading'
+
 describe "QuizRegrading" do
 
   def create_quiz_question!(data)
@@ -18,7 +35,7 @@ describe "QuizRegrading" do
       "question_#{@multiple_answers_question.id}_answer_6" => "0",
       "question_#{@multiple_answers_question.id}_answer_7" => "0"
     }.with_indifferent_access
-    @submission.grade_submission
+    Quizzes::SubmissionGrader.new(@submission).grade_submission
     @submission.save!
   end
 
@@ -34,8 +51,7 @@ describe "QuizRegrading" do
   before do
     course_with_student_logged_in(active_all: true)
     quiz_model(course: @course)
-    @regrade = @quiz.quiz_regrades.find_or_create_by_quiz_id_and_quiz_version(@quiz.id,@quiz.version_number) { |qr| qr.user_id = @student.id }
-    @regrade.should_not be_new_record
+    @regrade = @quiz.quiz_regrades.where(quiz_id: @quiz.id, quiz_version: @quiz.version_number).first_or_create(user: @student)
     @true_false_question = create_quiz_question!({
       :points_possible => 1,
       :question_type => 'true_false_question',
@@ -68,17 +84,17 @@ describe "QuizRegrading" do
     @mcq_qqr = @regrade.quiz_question_regrades.create!(quiz_question_id: @multiple_choice_question.id, regrade_option: 'no_regrade')
     @ttf_qqr = @regrade.quiz_question_regrades.create!(quiz_question_id: @true_false_question.id, regrade_option: 'no_regrade')
     @quiz.generate_quiz_data
-    @quiz.workflow_state = 'available'; @quiz.without_versioning { @quiz.save! }
+    @quiz.workflow_state = 'available'
+    @quiz.without_versioning { @quiz.save! }
     @submission = @quiz.generate_submission(@student)
     reset_submission_data!
     @submission.save!
-    @submission.score.should == 0.5
   end
 
   it 'succesfully regrades the submissions and updates the scores' do
     set_regrade_option!('full_credit')
-    QuizRegrader.regrade!(quiz: @quiz)
-    @submission.reload.score.should == 3
+    Quizzes::QuizRegrader::Regrader.regrade!(quiz: @quiz)
+    expect(@submission.reload.score).to eq 3
 
     set_regrade_option!('current_correct_only')
     data = @true_false_question.question_data
@@ -97,8 +113,33 @@ describe "QuizRegrading" do
     @multiple_answers_question.save!
     @quiz.reload
 
-    QuizRegrader.regrade!(quiz: @quiz)
-    @submission.reload.score.should == 3
+    Quizzes::QuizRegrader::Regrader.regrade!(quiz: @quiz)
+    expect(@submission.reload.score).to eq 3
+  end
+
+  it 'does not expose the question names' do
+    set_regrade_option!('current_correct_only')
+
+    data = @true_false_question.question_data
+    data[:question_name] = 'foo'
+    @true_false_question.question_data = data.to_hash
+    @true_false_question.save!
+
+    data = @multiple_choice_question.question_data
+    data[:question_name] = 'bar'
+    @multiple_choice_question.question_data = data.to_hash
+    @multiple_choice_question.save!
+
+    @quiz.generate_quiz_data
+    @quiz.save!
+
+    Quizzes::QuizRegrader::Regrader.regrade!(quiz: @quiz)
+
+    @submission.reload
+    expect(@quiz.quiz_data[0][:question_name]).to eq 'foo'
+    expect(@quiz.quiz_data[1][:question_name]).to eq 'bar'
+    expect(@submission.quiz_data[0][:question_name]).to eq 'Question 1'
+    expect(@submission.quiz_data[1][:question_name]).to eq 'Question 2'
   end
 
 end

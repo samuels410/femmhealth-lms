@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -24,14 +24,26 @@ class StreamItem < ActiveRecord::Base
 
   has_many :stream_item_instances
   has_many :users, :through => :stream_item_instances
-  belongs_to :context, :polymorphic => true
-  belongs_to :asset, :polymorphic => true, :types => [
+  belongs_to :context, polymorphic: [:course, :account, :group, :assignment_override, :assignment]
+  belongs_to :asset, polymorphic: [
       :collaboration, :conversation, :discussion_entry,
-      :discussion_topic, :message, :submission, :web_conference]
+      :discussion_topic, :message, :submission, :web_conference, :assessment_request]
   validates_presence_of :asset_type, :data
 
-  attr_accessible :context, :asset
   after_destroy :destroy_stream_item_instances
+  attr_accessor :unread, :participant, :invalidate_immediately
+
+  before_save :ensure_notification_category
+
+  def ensure_notification_category
+    if self.asset_type == 'Message'
+      self.notification_category ||= get_notification_category
+    end
+  end
+
+  def get_notification_category
+    self.read_attribute(:data)['notification_category'] || self.data.notification_category
+  end
 
   def self.reconstitute_ar_object(type, data)
     return nil unless data
@@ -44,23 +56,16 @@ class StreamItem < ActiveRecord::Base
     when 'DiscussionTopic', 'Announcement'
       root_discussion_entries = data.delete(:root_discussion_entries)
       root_discussion_entries = root_discussion_entries.map { |entry| reconstitute_ar_object('DiscussionEntry', entry) }
-      if CANVAS_RAILS2
-        res.root_discussion_entries.target = root_discussion_entries
-      else
-        res.association(:root_discussion_entries).target = root_discussion_entries
-      end
+      res.association(:root_discussion_entries).target = root_discussion_entries
       res.attachment = reconstitute_ar_object('Attachment', data.delete(:attachment))
+      res.total_root_discussion_entries = data.delete(:total_root_discussion_entries)
     when 'Submission'
       data['body'] = nil
     end
     if data.has_key?('users')
       users = data.delete('users')
       users = users.map { |user| reconstitute_ar_object('User', user) }
-      if CANVAS_RAILS2
-        res.users.target = users
-      else
-        res.association(:users).target = users
-      end
+      res.association(:users).target = users
     end
     if data.has_key?('participants')
       users = data.delete('participants')
@@ -68,8 +73,22 @@ class StreamItem < ActiveRecord::Base
       res.instance_variable_set(:@participants, users)
     end
 
+    # unnecessary after old stream items have expired
+    if res.is_a?(Conversation) && !data.has_key?('updated_at')
+      data['updated_at'] = Time.now.utc
+    end
+
+    data = res.class.attributes_builder.build_from_database(data) # @attributes is now an AttributeSet
+
     res.instance_variable_set(:@attributes, data)
+    res.instance_variable_set(:@attributes_cache, {})
     res.instance_variable_set(:@new_record, false) if data['id']
+
+    # the after_find from NotificationPreloader won't get triggered
+    if res.respond_to?(:preload_notification) && res.read_attribute(:notification_id)
+      res.preload_notification
+    end
+
     res
   end
 
@@ -95,7 +114,7 @@ class StreamItem < ActiveRecord::Base
   end
 
   def prepare_conversation(conversation)
-    res = conversation.attributes.slice('id', 'has_attachments')
+    res = conversation.attributes.slice('id', 'has_attachments', 'updated_at')
     res['private'] = conversation.private?
     res['participant_count'] = conversation.conversation_participants.size
     # arbitrary limit. would be nice to say "John, Jane, Michael, and 6
@@ -134,7 +153,7 @@ class StreamItem < ActiveRecord::Base
 
   ROOT_DISCUSSION_ENTRY_LIMIT = 3
   def generate_data(object)
-    self.context ||= object.context rescue nil
+    self.context ||= object.try(:context) unless object.is_a?(Message)
 
     case object
     when DiscussionTopic
@@ -149,7 +168,6 @@ class StreamItem < ActiveRecord::Base
       end
       if object.attachment
         hash = object.attachment.attributes.slice('id', 'display_name')
-        hash['scribdable?'] = object.attachment.scribdable?
         res[:attachment] = hash
       end
     when Conversation
@@ -157,10 +175,8 @@ class StreamItem < ActiveRecord::Base
     when Message
       res = object.attributes
       res['notification_category'] = object.notification_display_category
-      if !object.context.is_a?(Context) && object.context.respond_to?(:context) && object.context.context.is_a?(Context)
-        self.context = object.context.context
-      elsif object.asset_context_type
-        self.context_type, self.context_id = object.asset_context_type, object.asset_context_id
+      if !object.context.is_a?(Context) && object.context_context
+        self.context = object.context_context
       end
     when Submission
       res = object.attributes
@@ -173,8 +189,10 @@ class StreamItem < ActiveRecord::Base
     when WebConference
       res = object.attributes
       res['users'] = object.users.map{|u| prepare_user(u)}
+    when AssessmentRequest
+      res = object.attributes
     else
-      raise "Unexpected stream item type: #{object.class.to_s}"
+      raise "Unexpected stream item type: #{object.class}"
     end
     if self.context_type
       res['context_short_name'] = Rails.cache.fetch(['short_name_lookup', self.context_type, self.context_id].cache_key) do
@@ -227,10 +245,6 @@ class StreamItem < ActiveRecord::Base
     res = StreamItem.generate_or_update(object)
     prepare_object_for_unread(object)
 
-    # set the hidden flag if an assignment and muted
-    hidden = object.is_a?(Submission) && object.assignment.muted? ? true : false
-
-
     l_context_type = res.context_type
     Shard.partition_by_shard(user_ids) do |user_ids_subset|
       #these need to be determined per shard
@@ -238,41 +252,40 @@ class StreamItem < ActiveRecord::Base
       l_context_id = res.context_id
       stream_item_id = res.id
 
-      #find out what the current largest stream item instance is so that we can delete them all once the new ones are created
-      greatest_existing_id = StreamItemInstance.where(:stream_item_id => stream_item_id, :user_id => user_ids_subset).maximum(:id) || 0
+      # do the bulk insert in user id order to avoid locking problems on postges < 9.3 (foreign keys)
+      user_ids_subset.sort!
 
-      inserts = user_ids_subset.map do |user_id|
-        {
-          :stream_item_id => stream_item_id,
-          :user_id => user_id,
-          :hidden => hidden,
-          :workflow_state => object_unread_for_user(object, user_id),
-          :context_type => l_context_type,
-          :context_id => l_context_id,
-        }
-      end
+      user_ids_subset.each_slice(500) do |sliced_user_ids|
 
-      StreamItemInstance.bulk_insert(inserts)
+        inserts = sliced_user_ids.map do |user_id|
+          {
+            :stream_item_id => stream_item_id,
+            :user_id => user_id,
+            :hidden => false,
+            :workflow_state => object_unread_for_user(object, user_id),
+            :context_type => l_context_type,
+            :context_id => l_context_id,
+          }
+        end
+        if object.is_a?(Submission) && object.assignment.muted?
+          # set the hidden flag if an assignment and muted (for the owner of the submission)
+          if owner_insert = inserts.detect{|i| i[:user_id] == object.user_id}
+            owner_insert[:hidden] = true
+          end
+        end
 
-      #reset caches manually because the observer wont trigger off of the above mass inserts
-      user_ids_subset.each do |user_id|
-        StreamItemCache.invalidate_recent_stream_items(user_id, l_context_type, l_context_id)
-      end
+        StreamItemInstance.unique_constraint_retry do
+          StreamItemInstance.where(:stream_item_id => stream_item_id, :user_id => sliced_user_ids).delete_all
+          StreamItemInstance.bulk_insert(inserts)
+        end
 
-      # Then delete any old instances from these users' streams.
-      # This won't actually delete StreamItems out of the table, it just deletes
-      # the join table entries.
-      # Old stream items are deleted in a periodic job.
-      StreamItemInstance.where("user_id in (?) AND stream_item_id = ? AND id <= ?",
-            user_ids_subset, stream_item_id, greatest_existing_id).delete_all
+        #reset caches manually because the observer wont trigger off of the above mass inserts
+        sliced_user_ids.each do |user_id|
+          StreamItemCache.invalidate_recent_stream_items(user_id, l_context_type, l_context_id)
+        end
 
-      # touch all the users to invalidate the cache
-      User.transaction do
-        lock_type = true
-        lock_type = 'FOR NO KEY UPDATE' if User.connection.adapter_name == 'PostgreSQL' && User.connection.send(:postgresql_version) >= 90300
-        # lock the rows in a predefined order to prevent deadlocks
-        User.where(id: user_ids).lock(lock_type).order(:id).pluck(:id)
-        User.where(id: user_ids).update_all(updated_at: Time.now.utc)
+        # touch all the users to invalidate the cache
+        User.where(id: sliced_user_ids).touch_all
       end
     end
 
@@ -294,14 +307,16 @@ class StreamItem < ActiveRecord::Base
 
   def self.prepare_object_for_unread(object)
     case object
-    when DiscussionTopic
-      DiscussionTopic.send(:preload_associations, object, :discussion_topic_participants)
+      when DiscussionTopic
+        ActiveRecord::Associations::Preloader.new.preload(object, :discussion_topic_participants)
     end
   end
 
   def self.object_unread_for_user(object, user_id)
     case object
     when DiscussionTopic
+      object.read_state(user_id)
+    when Submission
       object.read_state(user_id)
     else
       nil
@@ -310,13 +325,13 @@ class StreamItem < ActiveRecord::Base
 
   def self.update_read_state_for_asset(asset, new_state, user_id)
     if item = asset.stream_item
-      StreamItemInstance.find_by_user_id_and_stream_item_id(user_id, item.id).try(:update_attribute, :workflow_state, new_state)
+      StreamItemInstance.where(user_id: user_id, stream_item_id: item).first.try(:update_attribute, :workflow_state, new_state)
     end
   end
 
   # call destroy_stream_items using a before_date based on the global setting
   def self.destroy_stream_items_using_setting
-    ttl = Setting.get('stream_items_ttl', 4.weeks).to_i.ago
+    ttl = Setting.get('stream_items_ttl', 4.weeks).to_i.seconds.ago
     # we pass false for the touch_users argument, on the assumption that these
     # stream items that we delete aren't visible on the user's dashboard anymore
     # anyway, so there's no need to invalidate all the caches.
@@ -330,18 +345,20 @@ class StreamItem < ActiveRecord::Base
     count = 0
 
     scope = where("updated_at<?", before_date).
-        includes(:context).
+        preload(:context).
         limit(1000)
-    scope = scope.includes(:stream_item_instances) if touch_users
+    scope = scope.preload(:stream_item_instances) if touch_users
 
     while true
-      batch = scope.reload.all
+      batch = scope.reload.to_a
       batch.each do |item|
         count += 1
         if touch_users
           user_ids.add(item.stream_item_instances.map(&:user_id))
         end
+
         # this will destroy the associated stream_item_instances as well
+        item.invalidate_immediately = true
         item.destroy
       end
       break if batch.empty?
@@ -349,11 +366,7 @@ class StreamItem < ActiveRecord::Base
 
     unless user_ids.empty?
       # touch all the users to invalidate the cache
-      if CANVAS_RAILS2
-        User.update_all({:updated_at => Time.now.utc}, {:id => user_ids.to_a})
-      else
-        User.where(:id => user_ids.to_a).update_all(:updated_at => Time.now.utc)
-      end
+      User.where(:id => user_ids.to_a).touch_all
     end
 
     count
@@ -388,13 +401,14 @@ class StreamItem < ActiveRecord::Base
     case res
     when DiscussionTopic, Announcement
       if res.require_initial_post
-        res.write_attribute(:user_has_posted, true)
+        res.user_has_posted = true
         if res.user_ids_that_can_see_responses && !res.user_ids_that_can_see_responses.member?(viewing_user_id)
           original_res = res
           res = original_res.clone
           res.id = original_res.id
-          res.root_discussion_entries = []
+          res.association(:root_discussion_entries).target = []
           res.user_has_posted = false
+          res.total_root_discussion_entries = original_res.total_root_discussion_entries
           res.readonly!
         end
       end
@@ -405,13 +419,15 @@ class StreamItem < ActiveRecord::Base
 
   public
   def destroy_stream_item_instances
-    self.stream_item_instances.with_each_shard do |scope|
-      if CANVAS_RAILS2
-        # bare scoped call avoid Rails 2 HasManyAssociation loading all objects
-        scope.scoped.delete_all
+    self.stream_item_instances.shard(self).activate do |scope|
+      user_ids = scope.pluck(:user_id)
+      if !self.invalidate_immediately && user_ids.count > 100
+        StreamItemCache.send_later_if_production_enqueue_args(:invalidate_all_recent_stream_items,
+          { :priority => Delayed::LOW_PRIORITY }, user_ids, self.context_type, self.context_id)
       else
-        scope.delete_all
+        StreamItemCache.invalidate_all_recent_stream_items(user_ids, self.context_type, self.context_id)
       end
+      scope.delete_all
       nil
     end
   end

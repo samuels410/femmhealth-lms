@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011-2012 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -18,25 +18,38 @@
 
 require File.expand_path(File.dirname(__FILE__) + '/../spec_helper')
 
+require 'nokogiri'
+
 describe CollaborationsController, type: :request do
 
   it 'should properly link to the user who posted the collaboration' do
     PluginSetting.create!(:name => 'etherpad', :settings => {})
     course_with_teacher_logged_in :active_all => true, :name => "teacher 1"
-    get "/courses/#{@course.id}/collaborations/"
-    response.should be_success
 
-    post "/courses/#{@course.id}/collaborations/", { :collaboration => { :collaboration_type => "EtherPad", :title => "My Collab" } }
-    response.should be_redirect
+    UserService.register(
+      :service => "google_drive",
+      :token => "token",
+      :secret => "secret",
+      :user => @user,
+      :service_domain => "drive.google.com",
+      :service_user_id => "service_user_id",
+      :service_user_name => "service_user_name"
+    )
 
     get "/courses/#{@course.id}/collaborations/"
-    response.should be_success
+    expect(response).to be_success
+
+    post "/courses/#{@course.id}/collaborations/", params: { :collaboration => { :collaboration_type => "EtherPad", :title => "My Collab" } }
+    expect(response).to be_redirect
+
+    get "/courses/#{@course.id}/collaborations/"
+    expect(response).to be_success
 
     html = Nokogiri::HTML(response.body)
     links = html.css("div.collaboration_#{Collaboration.last.id} a.collaborator_link")
-    links.count.should == 1
+    expect(links.count).to eq 1
     link = links.first
-    link.attr("href").should == "/courses/#{@course.id}/users/#{@teacher.id}"
-    link.text.should == "teacher 1"
+    expect(link.attr("href")).to eq "/courses/#{@course.id}/users/#{@teacher.id}"
+    expect(link.text).to eq "teacher 1"
   end
 end

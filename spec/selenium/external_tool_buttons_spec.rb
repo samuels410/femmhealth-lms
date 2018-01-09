@@ -1,13 +1,42 @@
+#
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require File.expand_path(File.dirname(__FILE__) + '/common')
 
 describe "external tool buttons" do
-  include_examples "in-process server selenium tests"
+  include_context "in-process server selenium tests"
 
   before (:each) do
     course_with_teacher_logged_in
   end
 
-  def load_selection_test_tool(element)
+  def editor_traversal
+    "$('textarea[name=message]').parent().find('iframe').contents().find('body')"
+  end
+
+  def editor_html
+    driver.execute_script("return #{editor_traversal}.html()")
+  end
+
+  def editor_text
+    driver.execute_script("return #{editor_traversal}.text()")
+  end
+
+  def load_selection_test_tool(element, context=@course)
     tool = @course.context_external_tools.new(:name => "bob", :consumer_key => "bob", :shared_secret => "bob", :url => "http://www.example.com/ims/lti")
     tool.editor_button = {
         :url => "http://#{HostUrl.default_host}/selection_test",
@@ -15,125 +44,50 @@ describe "external tool buttons" do
         :text => "Selection Test"
     }
     tool.save!
-    get "/courses/#{@course.id}/discussion_topics"
-    wait_for_ajaximations
 
-    add_button = keep_trying_until do
-      add_button = f('.btn-primary')
-      add_button.should_not be_nil
-      add_button
-    end
-    expect_new_page_load { add_button.click }
-    external_tool_button = f(".instructure_external_tool_button")
-    external_tool_button.should be_displayed
+    get "/#{context.class.to_s.downcase.pluralize}/#{context.id}/discussion_topics/new"
+    wait_for_ajaximations
+    external_tool_button = f(".mce-instructure_external_tool_button")
+    expect(external_tool_button).to be_displayed
+
     external_tool_button.click
     wait_for_ajax_requests
-    html = driver.execute_script("return $('textarea[name=message]').editorBox('get_code')")
-    html.should == ""
+    editor_html
+    expect(editor_text).to eq ""
 
-    fj("#external_tool_button_dialog").should be_displayed
+    expect(f("#external_tool_button_dialog")).to be_displayed
 
     in_frame('external_tool_button_frame') do
       f(element).click
-      wait_for_ajax_requests
     end
-    keep_trying_until { !f("#external_tool_button_dialog").should_not be_displayed }
+    expect(f("body")).not_to contain_jqcss("#external_tool_button_dialog:visible")
   end
 
-  it "should allow inserting oembed content from external tool buttons" do
-    load_selection_test_tool("#oembed_link")
-
-    html = driver.execute_script("return $('textarea[name=message]').editorBox('get_code')")
-    html.should match(/ZB8T0193/)
+  it "should allow inserting basic lti links from external tool buttons", priority: "1", test_id: 2624914 do
+    load_selection_test_tool('#basic_lti_link')
+    expect(editor_html).to match(/example/)
+    expect(editor_html).to match(/lti link/)
+    expect(editor_html).to match(/lti embedded link/)
   end
 
-  it "should allow inserting basic lti links from external tool buttons" do
-    load_selection_test_tool("#basic_lti_link")
-    html = driver.execute_script("return $('textarea[name=message]').editorBox('get_code')")
-    html.should match(/example/)
-    html.should match(/lti link/)
-    html.should match(/lti embedded link/)
+  it "should allow inserting iframes from external tool buttons", priority: "1", test_id: 2624915 do
+    load_selection_test_tool('#iframe_link')
+    expect(editor_html).to match(/iframe/)
   end
 
-  it "should allow inserting iframes from external tool buttons" do
-    load_selection_test_tool("#iframe_link")
-    html = driver.execute_script("return $('textarea[name=message]').editorBox('get_code')")
-    html.should match(/iframe/)
+  it "should allow inserting images from external tool buttons", priority: "1", test_id: 2624916 do
+    load_selection_test_tool('#image_link')
+    expect(editor_html).to match(/delete\.png/)
   end
 
-  it "should allow inserting images from external tool buttons" do
-    load_selection_test_tool("#image_link")
-    html = driver.execute_script("return $('textarea[name=message]').editorBox('get_code')")
-    html.should match(/delete\.png/)
+  it "should allow inserting links from external tool buttons", priority: "1", test_id: 2624917 do
+    load_selection_test_tool('#link_link')
+    expect(editor_html).to match(/delete link/)
   end
 
-  it "should allow inserting links from external tool buttons" do
-    load_selection_test_tool("#link_link")
-    html = driver.execute_script("return $('textarea[name=message]').editorBox('get_code')")
-    html.should match(/delete link/)
-  end
+  # TODO reimplement per CNVS-29606, but make sure we're testing at the right level
+  it "should show limited number of external tool buttons"
 
-  it "should show limited number of external tool buttons" do
-    tools = []
-    4.times do |i|
-      tool = @course.context_external_tools.new(:name => "bob", :consumer_key => "bob", :shared_secret => "bob", :url => "http://www.example.com/ims/lti")
-      tool.editor_button = {
-          :url => "http://#{HostUrl.default_host}/selection_test",
-          :icon_url => "/images/add.png",
-          :text => "Selection Test #{i}"
-      }
-      tool.save!
-      tools << tool
-    end
-
-    get "/courses/#{@course.id}/discussion_topics"
-    expect_new_page_load { f('.btn-primary').click }
-    # find things whose id *ends* with instructure_external_button_...
-    fj("[id$='instructure_external_button_#{tools[0].id}']").should be_displayed
-    fj("[id$='instructure_external_button_#{tools[1].id}']").should be_displayed
-    fj("[id$='instructure_external_button_#{tools[2].id}']").should be_nil
-    fj("[id$='instructure_external_button_#{tools[3].id}']").should be_nil
-    f(".mce_instructure_external_button_clump").should be_displayed
-    f(".mce_instructure_external_button_clump").click
-
-    f("#instructure_dropdown_list").should be_displayed
-    ff("#instructure_dropdown_list .option").length.should == 2
-  end
-
-  it "should load external tool if selected from the dropdown" do
-    pending('failing')
-    tools = []
-    4.times do |i|
-      tool = @course.context_external_tools.new(:name => "bob", :consumer_key => "bob", :shared_secret => "bob", :url => "http://www.example.com/ims/lti")
-      tool.editor_button = {
-          :url => "http://#{HostUrl.default_host}/selection_test",
-          :icon_url => "/images/add.png",
-          :text => "Selection Test #{i}"
-      }
-      tool.save!
-      tools << tool
-    end
-
-    get "/courses/#{@course.id}/discussion_topics"
-    expect_new_page_load { f('.btn-primary').click }
-    keep_trying_until { fj(".mce_instructure_external_button_clump").should be_displayed }
-    f(".mce_instructure_external_button_clump").click
-
-    f("#instructure_dropdown_list").should be_displayed
-    ff("#instructure_dropdown_list .option").length.should == 2
-    ff("#instructure_dropdown_list .option").last.click
-
-    keep_trying_until { fj("#external_tool_button_dialog iframe:visible").should be_displayed }
-
-    in_frame('external_tool_button_frame') do
-      keep_trying_until { fj(".link:visible").should be_displayed }
-      f("#oembed_link").click
-      wait_for_ajax_requests
-    end
-
-    wait_for_ajax_requests
-    f("#external_tool_button_dialog").should_not be_displayed
-    html = driver.execute_script("return $('textarea[name=message]').editorBox('get_code')")
-    html.should match(/ZB8T0193/)
-  end
+  # TODO reimplement per CNVS-29607, but make sure we're testing at the right level
+  it "should load external tool if selected from the dropdown"
 end

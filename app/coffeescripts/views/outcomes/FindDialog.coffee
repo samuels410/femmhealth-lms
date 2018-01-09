@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2012 Instructure, Inc.
+# Copyright (C) 2012 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -67,6 +67,7 @@ define [
         directoryView: opts.directoryView
         rootOutcomeGroup: opts.rootOutcomeGroup
         readOnly: true
+        inFindDialog: true
       @content = new ContentView
         el: @$el.find('.outcomes-content')
         instructionsTemplate: instructionsTemplate

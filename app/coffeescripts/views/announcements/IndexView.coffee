@@ -1,4 +1,22 @@
+#
+# Copyright (C) 2012 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
+  'jquery'
   'compiled/views/DiscussionTopics/DiscussionsSettingsView'
   'compiled/views/DiscussionTopics/UserSettingsView'
   'i18n!discussion_topics'
@@ -7,7 +25,7 @@ define [
   'compiled/views/PaginatedView'
   'compiled/views/DiscussionTopics/SummaryView'
   'compiled/collections/AnnouncementsCollection'
-], (DiscussionsSettingsView, UserSettingsView, I18n, _, template, PaginatedView, DiscussionTopicSummaryView, AnnouncementsCollection) ->
+], ($, DiscussionsSettingsView, UserSettingsView, I18n, _, template, PaginatedView, DiscussionTopicSummaryView, AnnouncementsCollection) ->
 
   class IndexView extends PaginatedView
 
@@ -54,12 +72,36 @@ define [
         new UserSettingsView()
       @settingsView.toggle()
 
+    screenreaderSearchResultCount: ->
+      # if count < page limit and we've got the last page, then we've got all the results
+      text = ''
+
+      if Object.keys(@activeFilters()).length == 0
+        text = I18n.t('Showing all announcements')
+      else if !@lastPageFetched
+        text = I18n.t({one: 'One result displayed', other: '%{count} results displayed'}, {count: @resultCount})
+      else
+        text = I18n.t({one: 'One result', other: '%{count} results'}, {count: @resultCount})
+
+      if @$('#searchResultCount').text() != text
+        @$('#searchResultCount').text(text)
+
+
     renderList: =>
       $list = @$('.discussionTopicIndexList').empty()
-      nothingMatched = not _.any @collection.map @addDiscussionTopicToList
-      @$('.nothingMatchedFilter').toggle nothingMatched && !@collection.fetchingNextPage
-      makeSortable = !nothingMatched &&
-                     !@activeFilters.length &&
+      fetching = @collection.fetchingNextPage
+      # this is kinda weird. we map with the side effecting add function and use the results, which are either jquery
+      # objects or null i think, to determine how many results we have since the add function applies the filter.
+      @resultCount = _.filter(@collection.map(@addDiscussionTopicToList), Boolean).length
+      gotSomething = @resultCount > 0
+      noResults = !gotSomething && !fetching
+      filtering = Object.keys(@activeFilters()).length > 0
+
+      @screenreaderSearchResultCount()
+      @$('.nothingMatchedFilter').toggle noResults
+
+      makeSortable = gotSomething &&
+                     !filtering &&
                      !@isShowingAnnouncements() &&
                      @options.permissions.moderate
       if makeSortable
@@ -95,18 +137,15 @@ define [
     toggleActionsForSelectedDiscussions: =>
       selectedTopics = @selectedTopics()
       atLeastOneSelected = selectedTopics.length > 0
-      $actions = @$('#actionsForSelectedDiscussions').toggle atLeastOneSelected
+      $actions = @$('#actionsForSelectedDiscussions')
       if atLeastOneSelected
+        $actions.removeClass 'screenreader-only'
+        $actions.find('button,input').prop('disabled', false)
         checkLock = _.any selectedTopics, (model) -> model.get('locked')
-        $actions.find('#lock').prop('checked', checkLock).button
-          text: false
-          icons:
-            primary: 'ui-icon-locked'
-        $actions.find('#delete').button
-          text: false
-          icons:
-            primary: 'ui-icon-trash'
         $actions.buttonset()
+      else
+        $actions.addClass 'screenreader-only'
+        $actions.find('button,input').prop('disabled', true)
 
     toggleLockingSelectedTopics: ->
       lock = @$('#lock').is(':checked')
@@ -161,10 +200,8 @@ define [
       onlyGraded: -> @get 'assignment_id'
       onlyUnread: -> (@get('read_state') is 'unread') or @get('unread_count')
       searchTerm: (term) ->
-        words = term.match(/\w+/ig)
-        pattern = "(#{_.uniq(words).join('|')})"
-        regexp = new RegExp(pattern, "igm")
-
+        return unless term
+        regexp = new RegExp(term, "ig")
         @get('author')?.display_name?.match(regexp) ||
           @get('title').match(regexp) ||
           @summary().match(regexp)

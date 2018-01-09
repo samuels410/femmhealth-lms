@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,9 +19,5 @@
 class ScribdMimeType < ActiveRecord::Base
   has_many :attachments
 
-  attr_accessible :extension, :name
-
-  unless CANVAS_RAILS2
-    self.shard_category = :unsharded
-  end
+  self.shard_category = :unsharded
 end

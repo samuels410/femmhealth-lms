@@ -1,5 +1,24 @@
-<% add_crumb 'Profile Pictures' %>
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
+<% add_crumb t(:page_title, 'Profile Pictures') %>
 <% content_for :page_title do %><%= t(:page_title, "Profile Pictures") %><% end %>
+
 <% content_for :stylesheets do %>
 <style>
 .views .selected {
@@ -14,18 +33,6 @@
 #avatars tr .avatar_state {
   width: 50px;
 }
-#avatars tr.approved .avatar_state {
-  background: url(/images/graded.16px.png) no-repeat center center
-}
-#avatars tr.reported .avatar_state {
-  background: url(/images/warning.png) no-repeat center center
-}
-#avatars tr.re_reported .avatar_state {
-  background: url(/images/warning_dim.png) no-repeat center center
-}
-#avatars tr.locked .avatar_state {
-  background: url(/images/lock.png) no-repeat center center
-}
 #avatars td {
   border-bottom: 1px dotted #ddd;
   padding: 2px 0;
@@ -35,7 +42,7 @@
 }
 </style>
 <% end %>
-<h2><%= t(:title, "Profile Pictures") %></h2>
+<h1><%= t(:title, "Profile Pictures") %></h1>
 <div class="views">
   <span style="padding-right: 10px; font-weight: bold;"><%= before_label :show, 'Show' %> </span>
   <a href="?avatar_state=submitted" id="submitted_profile"  class="<%= 'selected' if @avatar_state == 'submitted' %>"><%= t(:submitted_link, { :zero => "Submitted", :one => "Submitted %{count}", :other => "Submitted %{count}" }, :count => @avatar_counts[:submitted] || 0) %></a> |
@@ -45,15 +52,31 @@
 </div>
 
 <% if @users.empty? %>
-  <h3 style="padding-top: 20px;"><%= t(:no_avatars_message, "No Profile Pics to Show") %></h3>
+  <h2 style="padding-top: 20px;"><%= t(:no_avatars_message, "No Profile Pics to Show") %></h2>
 <% end %>
 <table id="avatars">
 <% @users.each do |user| %>
   <tr class="<%= user.avatar_state %>">
-    <td style="width: 50px;">
-      <div class="avatar"><img src="<%= user.avatar_url(50, @domain_root_account.settings[:avatars]) %>" style="width: 50px; max-height: 75px;"/></div>
+    <td style="width: 54px;">
+      <%= avatar user, url: nil %>
     </td>
     <td class="avatar_state">
+      <% if user.avatar_state == :reported %>
+        <span class="screenreader-only"><%= t('Reported') %></span>
+        <i class="icon-warning" aria-hidden="true"></i>
+      <% end %>
+      <% if user.avatar_state == :re_reported %>
+        <span class="screenreader-only"><%= t('Re-Reported') %></span>
+        <i class="icon-warning" aria-hidden="true"></i>
+      <% end %>
+      <% if user.avatar_state == :locked %>
+        <span class="screenreader-only"><%= t('Locked') %></span>
+        <i class="icon-lock" aria-hidden="true"></i>
+      <% end %>
+      <% if user.avatar_state == :approved %>
+        <span class="screenreader-only"><%= t('Approved') %></span>
+        <i class="icon-check" aria-hidden="true"></i>
+      <% end %>
     </td>
     <td>
       <div class="name"><a href="<%= user_url(user.id) %>"><%= user.name %></a></div>

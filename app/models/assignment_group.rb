@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -20,20 +20,27 @@ class AssignmentGroup < ActiveRecord::Base
 
   include Workflow
 
-  attr_accessible :name, :rules, :assignment_weighting_scheme, :group_weight, :position, :default_assignment_name
   attr_readonly :context_id, :context_type
-  belongs_to :context, :polymorphic => true
+  belongs_to :context, polymorphic: [:course]
   acts_as_list scope: { context: self, workflow_state: 'available' }
   has_a_broadcast_policy
+  serialize :integration_data, Hash
 
-  has_many :assignments, :order => 'position, due_at, title', :dependent => :destroy
-  has_many :active_assignments, :class_name => 'Assignment', :conditions => ['assignments.workflow_state != ?', 'deleted'], :order => 'assignments.position, assignments.due_at, assignments.title'
-  has_many :published_assignments, :class_name => 'Assignment', :conditions => "assignments.workflow_state = 'published'", :order => 'assignments.position, assignments.due_at, assignments.title'
+  has_many :scores, -> { active }
+  has_many :assignments, -> { order('position, due_at, title') }, dependent: :destroy
 
-  validates_presence_of :context_id, :context_type, :workflow_state
-  validates_length_of :rules, :maximum => maximum_text_length, :allow_nil => true, :allow_blank => true
-  validates_length_of :default_assignment_name, :maximum => maximum_string_length, :allow_nil => true
-  validates_length_of :name, :maximum => maximum_string_length, :allow_nil => true
+  has_many :active_assignments, -> {
+    where("assignments.workflow_state<>'deleted'").order('assignments.position, assignments.due_at, assignments.title')
+  }, class_name: 'Assignment'
+
+  has_many :published_assignments, -> {
+    where(workflow_state: 'published').order('assignments.position, assignments.due_at, assignments.title')
+  }, class_name: 'Assignment'
+
+  validates :context_id, :context_type, :workflow_state, presence: true
+  validates :rules, length: { maximum: maximum_text_length }, allow_nil: true, allow_blank: true
+  validates :default_assignment_name, length: { maximum: maximum_string_length }, allow_nil: true
+  validates :name, length: { maximum: maximum_string_length }, allow_nil: true
 
   before_save :set_context_code
   before_save :generate_default_values
@@ -45,7 +52,7 @@ class AssignmentGroup < ActiveRecord::Base
     if self.name.blank?
       self.name = t 'default_title', "Assignments"
     end
-    if !self.group_weight
+    if !self.group_weight || self.group_weight.nan?
       self.group_weight = 0
     end
     self.default_assignment_name = self.name
@@ -55,7 +62,7 @@ class AssignmentGroup < ActiveRecord::Base
 
   def update_student_grades
     if self.rules_changed? || self.group_weight_changed?
-      connection.after_transaction_commit { self.context.recompute_student_scores }
+      self.class.connection.after_transaction_commit { self.context.recompute_student_scores }
     end
   end
 
@@ -64,11 +71,18 @@ class AssignmentGroup < ActiveRecord::Base
   end
 
   set_policy do
-    given { |user, session| self.context.grants_rights?(user, session, :read, :view_all_grades, :manage_grades).any?(&:last) }
+    given { |user, session| self.context.grants_any_right?(user, session, :read, :view_all_grades, :manage_grades) }
     can :read
 
-    given { |user, session| self.context.grants_rights?(user, session, :manage_assignments).any?(&:last) }
-    can :read and can :create and can :update and can :delete
+    given { |user, session| self.context.grants_right?(user, session, :manage_assignments) }
+    can :read and can :create and can :update
+
+    given do |user, session|
+      self.context.grants_right?(user, session, :manage_assignments) &&
+        (self.context.account_membership_allows(user) ||
+         !any_assignment_in_closed_grading_period?)
+    end
+    can :delete
   end
 
   workflow do
@@ -76,15 +90,15 @@ class AssignmentGroup < ActiveRecord::Base
     state :deleted
   end
 
-  alias_method :destroy!, :destroy
+  alias_method :destroy_permanently!, :destroy
   def destroy
     self.workflow_state = 'deleted'
-    self.assignments.active.include_quiz_and_topic.each{|a| a.destroy }
+    self.assignments.active.include_submittables.each(&:destroy)
     self.save
   end
 
   def restore(try_to_selectively_undelete_assignments = true)
-    to_restore = self.assignments.include_quiz_and_topic
+    to_restore = self.assignments.include_submittables
     if try_to_selectively_undelete_assignments
       # It's a pretty good guess that if an assignment was modified at the same
       # time that this group was last modified, that assignment was deleted
@@ -135,11 +149,11 @@ class AssignmentGroup < ActiveRecord::Base
   end
 
   def points_possible
-    self.assignments.map{|a| a.points_possible || 0}.sum
+    self.assignments.reduce(0) { |sum, assignment| sum + (assignment.points_possible || 0) }
   end
 
-  scope :include_active_assignments, includes(:active_assignments)
-  scope :active, where("assignment_groups.workflow_state<>'deleted'")
+  scope :include_active_assignments, -> { preload(:active_assignments) }
+  scope :active, -> { where("assignment_groups.workflow_state<>'deleted'") }
   scope :before, lambda { |date| where("assignment_groups.created_at<?", date) }
   scope :for_context_codes, lambda { |codes| active.where(:context_code => codes).order(:position) }
   scope :for_course, lambda { |course| where(:context_id => course, :context_type => 'Course') }
@@ -151,7 +165,7 @@ class AssignmentGroup < ActiveRecord::Base
 
   set_broadcast_policy do |p|
     p.dispatch :grade_weight_changed
-    p.to { context.participating_students }
+    p.to { context.participating_students_by_date }
     p.whenever { |record|
       false &&
       record.changed_in_state(:available, :fields => :group_weight)
@@ -160,67 +174,6 @@ class AssignmentGroup < ActiveRecord::Base
 
   def students
     assignments.map(&:students).flatten
-  end
-
-  def self.process_migration(data, migration)
-    add_groups_for_imported_assignments(data, migration)
-    groups = data['assignment_groups'] ? data['assignment_groups']: []
-    groups.each do |group|
-      if migration.import_object?("assignment_groups", group['migration_id'])
-        begin
-          import_from_migration(group, migration.context)
-        rescue
-          migration.add_import_warning(t('#migration.assignment_group_type', "Assignment Group"), group[:title], $!)
-        end
-      end
-    end
-    migration.context.assignment_groups.first.try(:fix_position_conflicts)
-  end
-
-  def self.add_groups_for_imported_assignments(data, migration)
-    return unless data['assignments'] && migration.migration_settings[:migration_ids_to_import] &&
-      migration.migration_settings[:migration_ids_to_import][:copy] &&
-      migration.migration_settings[:migration_ids_to_import][:copy].length > 0
-
-    migration.migration_settings[:migration_ids_to_import][:copy]['assignment_groups'] ||= {}
-    data['assignments'].each do |assignment_hash|
-      a_hash = assignment_hash.with_indifferent_access
-      if migration.import_object?("assignments", a_hash['migration_id']) &&
-          group_mig_id = a_hash['assignment_group_migration_id']
-        migration.migration_settings[:migration_ids_to_import][:copy]['assignment_groups'][group_mig_id] = true
-      end
-    end
-  end
-
-  def self.import_from_migration(hash, context, item=nil)
-    hash = hash.with_indifferent_access
-    return nil if hash[:migration_id] && hash[:assignment_groups_to_import] && !hash[:assignment_groups_to_import][hash[:migration_id]]
-    item ||= find_by_context_id_and_context_type_and_id(context.id, context.class.to_s, hash[:id])
-    item ||= find_by_context_id_and_context_type_and_migration_id(context.id, context.class.to_s, hash[:migration_id]) if hash[:migration_id]
-    item ||= context.assignment_groups.new
-    context.imported_migration_items << item if context.imported_migration_items && item.new_record?
-    item.migration_id = hash[:migration_id]
-    item.workflow_state = 'available' if item.deleted?
-    item.name = hash[:title]
-    item.position = hash[:position].to_i if hash[:position] && hash[:position].to_i > 0
-    item.group_weight = hash[:group_weight] if hash[:group_weight]
-
-    if hash[:rules] && hash[:rules].length > 0
-      rules = ""
-      hash[:rules].each do |rule|
-        if rule[:drop_type] == "drop_lowest" || rule[:drop_type] == "drop_highest"
-          rules += "#{rule[:drop_type]}:#{rule[:drop_count]}\n"
-        elsif rule[:drop_type] == "never_drop"
-          if context.respond_to?(:assignment_group_no_drop_assignments)
-            context.assignment_group_no_drop_assignments[rule[:assignment_migration_id]] = item
-          end
-        end
-      end
-      item.rules = rules unless rules == ''
-    end
-
-    item.save!
-    item
   end
 
   def self.add_never_drop_assignment(group, assignment)
@@ -237,21 +190,43 @@ class AssignmentGroup < ActiveRecord::Base
     return false unless PluginSetting.settings_for_plugin(:assignment_freezer)
     return false unless self.active_assignments.length > 0
 
-    self.active_assignments.each do |asmnt|
-      return true if asmnt.frozen_for_user?(user)
+    self.active_assignments.any? do |assignment|
+      assignment.frozen_for_user?(user)
     end
-
-    false
   end
 
   def has_frozen_assignment_group_id_assignment?(user)
     return false unless PluginSetting.settings_for_plugin(:assignment_freezer)
     return false unless self.active_assignments.length > 0
 
-    self.active_assignments.each do |asmnt|
-      return true if asmnt.att_frozen?(:assignment_group_id,user)
+    self.active_assignments.any? do |assignment|
+      assignment.att_frozen?(:assignment_group_id, user)
     end
-    false
+  end
+
+  def any_assignment_in_closed_grading_period?
+    effective_due_dates.any_in_closed_grading_period?
+  end
+
+  def effective_due_dates
+    @effective_due_dates ||= EffectiveDueDates.for_course(context, published_assignments)
+  end
+  private :effective_due_dates
+
+  def visible_assignments(user, includes=[])
+    self.class.visible_assignments(user, self.context, [self], includes)
+  end
+
+  def self.visible_assignments(user, context, assignment_groups, includes = [])
+    if context.grants_any_right?(user, :manage_grades, :read_as_admin, :manage_assignments)
+      scope = context.active_assignments.where(:assignment_group_id => assignment_groups)
+    elsif user.nil?
+      scope = context.active_assignments.published.where(:assignment_group_id => assignment_groups)
+    else
+      scope = user.assignments_visible_in_course(context).
+              where(:assignment_group_id => assignment_groups).published
+    end
+    includes.any? ? scope.preload(includes) : scope
   end
 
   def move_assignments_to(move_to_id)
@@ -259,17 +234,9 @@ class AssignmentGroup < ActiveRecord::Base
     order = new_group.assignments.active.pluck(:id)
     ids_to_change = self.assignments.active.pluck(:id)
     order += ids_to_change
-    Assignment.where(:id => ids_to_change).update_all(:assignment_group_id => new_group, :updated_at => Time.now.utc) unless ids_to_change.empty?
-    Assignment.find_by_id(order).update_order(order) unless order.empty?
+    Assignment.where(:id => ids_to_change).update_all(:assignment_group_id => new_group.id, :updated_at => Time.now.utc) unless ids_to_change.empty?
+    Assignment.where(id: order).first.update_order(order) unless order.empty?
     new_group.touch
     self.reload
-  end
-
-  def self.assignment_scope_for_grading(context)
-    if context.feature_enabled?(:draft_state)
-      :published_assignments
-    else
-      :active_assignments
-    end
   end
 end

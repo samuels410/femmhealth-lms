@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2013 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -33,12 +33,14 @@ describe AuditorApiController do
 
   context 'check_configured' do
     it 'should return not_found if database is not configured' do
-      Canvas::Cassandra::DatabaseBuilder.stubs(:configured?).returns(false)
-      audits_controller.expects(:not_found).once
-      audits_controller.check_configured.should raise_error
+      allow(Canvas::Cassandra::DatabaseBuilder).to receive(:configured?).and_return(false)
+      expect(audits_controller).to receive(:render).with(hash_including(status: :not_found))
+      audits_controller.check_configured
+    end
 
-      Canvas::Cassandra::DatabaseBuilder.stubs(:configured?).returns(true)
-      audits_controller.check_configured.should be_nil
+    it 'should not block when database is configured' do
+      allow(Canvas::Cassandra::DatabaseBuilder).to receive(:configured?).and_return(true)
+      expect(audits_controller.check_configured).to be_nil
     end
   end
 
@@ -48,34 +50,34 @@ describe AuditorApiController do
       end_time = start_time + 2.hour
 
       # No params
-      audits_controller.stubs(:params).returns({})
-      audits_controller.query_options.should == {}
+      allow(audits_controller).to receive(:params).and_return({})
+      expect(audits_controller.query_options).to eq({})
 
       # Unrelated params
       params = { course_id: 42 }
-      audits_controller.stubs(:params).returns(params)
-      audits_controller.query_options.should == {}
+      allow(audits_controller).to receive(:params).and_return(params)
+      expect(audits_controller.query_options).to eq({})
 
       # Start time
       params = { start_time: start_time.iso8601 }
-      audits_controller.stubs(:params).returns(params)
-      audits_controller.query_options.should == { oldest: start_time }
+      allow(audits_controller).to receive(:params).and_return(params)
+      expect(audits_controller.query_options).to eq({ oldest: start_time })
 
       # End time
       params = { end_time: end_time.iso8601 }
-      audits_controller.stubs(:params).returns(params)
-      audits_controller.query_options.should == { newest: end_time }
+      allow(audits_controller).to receive(:params).and_return(params)
+      expect(audits_controller.query_options).to eq({ newest: end_time })
 
       # Start and end times
       params = {
         start_time: start_time.iso8601,
         end_time: end_time.iso8601
       }
-      audits_controller.stubs(:params).returns(params)
-      audits_controller.query_options.should == {
+      allow(audits_controller).to receive(:params).and_return(params)
+      expect(audits_controller.query_options).to eq({
         oldest: start_time,
         newest: end_time
-      }
+      })
     end
   end
 end

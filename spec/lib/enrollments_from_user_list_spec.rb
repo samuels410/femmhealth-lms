@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -30,36 +30,57 @@ describe EnrollmentsFromUserList do
   context "initialized object" do
 
     it "should initialize with a course id" do
-      lambda{EnrollmentsFromUserList.new}.should raise_error(ArgumentError, 'wrong number of arguments (0 for 1)')
+      expect{EnrollmentsFromUserList.new }.to raise_error(ArgumentError, /^wrong number of arguments/)
       e = EnrollmentsFromUserList.new(@course)
-      e.course.should eql(@course)
+      expect(e.course).to eql(@course)
     end
-    
+
     it "should process with an user list" do
       enrollments = EnrollmentsFromUserList.process(@el, @course)
-      enrollments.all? {|e| e.should be_is_a(StudentEnrollment)}
+      enrollments.all? {|e| expect(e).to be_is_a(StudentEnrollment)}
     end
-    
+
     it "should process repeat addresses without creating new users" do
       @el = UserList.new(list_to_parse_with_repeats)
       enrollments = EnrollmentsFromUserList.process(@el, @course)
-      enrollments.length.should eql(3)
+      expect(enrollments.length).to eql(3)
+    end
+
+    it "should respect the section option when a user is already enrolled in another section" do
+      othersection = @course.course_sections.create! name: 'othersection'
+      @teacher.pseudonyms.create! unique_id: 'teacher@example.com'
+      @el = UserList.new('teacher@example.com')
+      enrollments = EnrollmentsFromUserList.process(@el, @course, course_section_id: othersection.to_param, enrollment_type: 'TeacherEnrollment')
+      expect(enrollments.map(&:course_section_id)).to eq([othersection.id])
+      expect(@teacher.teacher_enrollments.where(course_id: @course).pluck(:course_section_id)).to match_array([@course.default_section.id, othersection.id])
     end
 
   end
-  
+
   context "EnrollmentsFromUserList.process" do
     it "should be able to process from the class" do
       enrollments = EnrollmentsFromUserList.process(@el, @course)
-      enrollments.all? {|e| e.should be_is_a(StudentEnrollment)}
+      enrollments.all? {|e| expect(e).to be_is_a(StudentEnrollment)}
+    end
+
+    it "touches only users whose enrollments were updated" do
+      Timecop.freeze(1.hour.ago) do
+        @david_sr = user_with_pseudonym(:username => 'david_richards@example.com')
+        @david_jr = user_with_pseudonym(:username => 'david_richards_jr@example.com')
+        @course.enroll_student(@david_jr)
+      end
+      EnrollmentsFromUserList.process(UserList.new(list_to_parse), @course)
+      cutoff = 30.minutes.ago
+      expect(@david_sr.reload.updated_at).to be > cutoff
+      expect(@david_jr.reload.updated_at).to be < cutoff
     end
   end
-  
+
 end
 
 
 def list_to_parse
-  %{david@example.com, "Richards, David" <david_richards@example.com>, David Richards <david_richards_jr@example.com}
+  %{david@example.com, "Richards, David" <david_richards@example.com>, David Richards <david_richards_jr@example.com>}
 end
 
 def list_to_parse_with_repeats

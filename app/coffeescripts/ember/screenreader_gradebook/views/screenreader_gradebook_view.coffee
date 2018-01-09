@@ -1,50 +1,27 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+
 define [
   'ember'
-  'compiled/gradebook2/GradebookHeaderMenu'
-  'compiled/gradebook2/AssignmentGroupWeightsDialog'
-  'compiled/gradebook2/UploadDialog'
-  'compiled/SubmissionDetailsDialog'
-], (Ember, GradebookHeaderMenu, AssignmentGroupWeightsDialog,  UploadDialog, SubmissionDetailsDialog) ->
+  'ic-tabs/dist/amd/main'
+], (Ember) ->
 
   ScreenreaderGradebookView = Ember.View.extend
 
-    setupDialog: (->
-      @agDialog = new AssignmentGroupWeightsDialog({context: ENV.GRADEBOOK_OPTIONS, assignmentGroups:[]})
-    ).on('didInsertElement')
-
-    removeDialog: (->
-      @agDialog.$dialog.dialog('destroy')
-    ).on('willDestroyElement')
-
-    actions:
-      openDialog: (dialogType) ->
-        con = @controller
-        options =
-          assignment: con.get('selectedAssignment')
-          students: con.studentsHash()
-          selected_section: con.get('selectedSection')?.id
-          context_id: ENV.GRADEBOOK_OPTIONS.context_id
-          context_url: ENV.GRADEBOOK_OPTIONS.context_url
-          speed_grader_enabled: ENV.GRADEBOOK_OPTIONS.speed_grader_enabled
-          change_grade_url: ENV.GRADEBOOK_OPTIONS.change_grade_url
-
-        dialogs =
-          'upload': UploadDialog::init
-          'assignment_details': GradebookHeaderMenu::showAssignmentDetails
-          'message_students': GradebookHeaderMenu::messageStudentsWho
-          'set_default_grade': GradebookHeaderMenu::setDefaultGrade
-          'curve_grades': GradebookHeaderMenu::curveGrades
-          'submission': SubmissionDetailsDialog.open
-
-        switch dialogType
-          when 'ag_weights'
-            options =
-              context: ENV.GRADEBOOK_OPTIONS
-              assignmentGroups: con.get('assignment_groups').toArray()
-            @agDialog.update(options)
-            @agDialog.$dialog.dialog('open')
-          when 'submission'
-            dialogs[dialogType]?.call(this, con.get('selectedAssignment'), con.get('selectedStudent'), options)
-          else
-            dialogs[dialogType]?.call(this, options)
-
+    didInsertElement: ->
+      #horrible hack to get disabled instead of disabled="disabled" on buttons
+      this.$('button:disabled').prop('disabled', true)

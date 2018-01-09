@@ -1,20 +1,37 @@
-define([
-  'i18n!section',
-  'jquery' /* $ */,
-  'jquery.ajaxJSON' /* ajaxJSON */,
-  'jquery.instructure_date_and_time' /* time_field, datetime_field */,
-  'jquery.instructure_forms' /* formSubmit, formErrors */,
-  'jqueryui/dialog',
-  'jquery.instructure_misc_helpers' /* replaceTags */,
-  'jquery.instructure_misc_plugins' /* confirmDelete, showIf */,
-  'jquery.keycodes' /* keycodes */,
-  'jquery.loadingImg' /* loadingImage */,
-  'jquery.templateData' /* fillTemplateData */,
-  'jqueryui/autocomplete' /* /\.autocomplete/ */,
-  'compiled/PaginatedList',
-  'jst/courses/section/enrollment',
-  'compiled/presenters/sectionEnrollmentPresenter'
-], function(I18n, $, _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, PaginatedList, enrollmentTemplate, sectionEnrollmentPresenter) {
+/*
+ * Copyright (C) 2011 - present Instructure, Inc.
+ *
+ * This file is part of Canvas.
+ *
+ * Canvas is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License.
+ *
+ * Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+ * A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+import I18n from 'i18n!section'
+import $ from 'jquery'
+import './jquery.ajaxJSON'
+import './jquery.instructure_date_and_time' /* time_field, datetime_field */
+import './jquery.instructure_forms' /* formSubmit, formErrors */
+import 'jqueryui/dialog'
+import './jquery.instructure_misc_helpers' /* replaceTags */
+import './jquery.instructure_misc_plugins' /* confirmDelete, showIf */
+import './jquery.keycodes'
+import './jquery.loadingImg'
+import './jquery.templateData'
+import 'jqueryui/autocomplete'
+import PaginatedList from 'compiled/PaginatedList'
+import enrollmentTemplate from 'jst/courses/section/enrollment'
+import sectionEnrollmentPresenter from 'compiled/presenters/sectionEnrollmentPresenter'
+import 'jsx/context_cards/StudentContextCardTrigger'
 
   $(document).ready(function() {
     var section_id = window.location.pathname.split('/')[4],
@@ -23,13 +40,13 @@ define([
         currentEnrollmentList   = new PaginatedList($('#current-enrollment-list'), {
           presenter: sectionEnrollmentPresenter,
           template: enrollmentTemplate,
-          url: '/api/v1/sections/' + section_id + '/enrollments'
+          url: '/api/v1/sections/' + section_id + '/enrollments?include[]=can_be_removed'
         }),
         completedEnrollmentList = new PaginatedList($('#completed-enrollment-list'), {
           presenter: sectionEnrollmentPresenter,
-          requestParams: { state: 'completed' },
+          requestParams: { state: 'completed', page: 1, per_page: 25 },
           template: enrollmentTemplate,
-          url: '/api/v1/sections/' + section_id + '/enrollments'
+          url: '/api/v1/sections/' + section_id + '/enrollments?include[]=can_be_removed'
         });
 
     $edit_section_form.formSubmit({
@@ -47,7 +64,6 @@ define([
       error: function(data) {
         $edit_section_form.loadingImage('remove');
         $edit_section_form.show();
-        $edit_section_form.formErrors(data);
       }
     })
     .find(":text")
@@ -132,7 +148,9 @@ define([
       }
       course.name = course.name || I18n.t('default_course_name', "Course ID \"%{course_id}\"", {course_id: course.id});
       $("#course_autocomplete_name_holder").show();
-      $("#course_autocomplete_name").text(I18n.t('status.confirming_course', "Confirming %{course_name}...", {course_name: course.name}));
+      var confirmingText = I18n.t('status.confirming_course', "Confirming %{course_name}...", {course_name: course.name});
+      $("#course_autocomplete_name").text(confirmingText);
+      $.screenReaderFlashMessage(confirmingText);
       $("#sis_id_holder,#account_name_holder").hide();
       $("#course_autocomplete_account_name").hide();
       var url = $.replaceTags($("#course_confirm_crosslist_url").attr('href'), 'id', course.id);
@@ -147,13 +165,16 @@ define([
           };
           $("#course_autocomplete_name_holder").fillTemplateData({data: template_data});
           $("#course_autocomplete_name").text(data.course.name);
+          $.screenReaderFlashMessage(data.course.name);
           $("#sis_id_holder").showIf(template_data.sis_id);
           $("#account_name_holder").showIf(template_data.account_name);
 
           $("#course_autocomplete_id").val(data.course.id);
           $("#crosslist_course_form .submit_button").attr('disabled', false);
         } else {
-          $("#course_autocomplete_name").text(I18n.t('errors.course_not_authorized_for_crosslist', "%{course_name} not authorized for cross-listing", {course_name: course.name}));
+          var errorText = I18n.t('errors.course_not_authorized_for_crosslist', "%{course_name} not authorized for cross-listing", {course_name: course.name});
+          $("#course_autocomplete_name").text(errorText);
+          $.screenReaderFlashError(errorText);
           $("#sis_id_holder,#account_name_holder").hide();
         }
       }, function(data) {
@@ -161,4 +182,3 @@ define([
       });
     });
   });
-});

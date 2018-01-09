@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -16,9 +16,11 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+require 'atom'
+
 # @API Discussion Topics
 class DiscussionEntriesController < ApplicationController
-  before_filter :require_context, :except => :public_feed
+  before_action :require_context_and_read_access, :except => :public_feed
 
   def show
     @entry = @context.discussion_entries.find(params[:id]).tap{|e| e.current_user = @current_user}
@@ -38,7 +40,10 @@ class DiscussionEntriesController < ApplicationController
     @topic = @context.discussion_topics.active.find(params[:discussion_entry].delete(:discussion_topic_id))
     params[:discussion_entry].delete :remove_attachment rescue nil
     parent_id = params[:discussion_entry].delete(:parent_id)
-    @entry = @topic.discussion_entries.new(params[:discussion_entry])
+
+    entry_params = params.require(:discussion_entry).permit(:message, :plaintext_message)
+
+    @entry = @topic.discussion_entries.temp_record(entry_params)
     @entry.current_user = @current_user
     @entry.user_id = @current_user ? @current_user.id : nil
     @entry.parent_id = parent_id
@@ -83,28 +88,27 @@ class DiscussionEntriesController < ApplicationController
   #
   # @example_request
   #   curl -X PUT 'https://<canvas>/api/v1/courses/<course_id>/discussion_topics/<topic_id>/entries/<entry_id>' \
-  #        -F 'message=<message>' \ 
+  #        -F 'message=<message>' \
   #        -H "Authorization: Bearer <token>"
   def update
     @topic = @context.all_discussion_topics.active.find(params[:topic_id]) if params[:topic_id].present?
-    params[:discussion_entry] ||= params
-    @remove_attachment = params[:discussion_entry].delete :remove_attachment
-    # unused attributes during update
-    params[:discussion_entry].delete(:discussion_topic_id)
-    params[:discussion_entry].delete(:parent_id)
-    params[:discussion_entry][:message] = process_incoming_html_content(params[:discussion_entry][:message])
+
+    entry_params = (params[:discussion_entry] || params).permit(:message, :plaintext_message, :remove_attachment)
+    entry_params[:message] = process_incoming_html_content(entry_params[:message]) if entry_params[:message]
+
+    @remove_attachment = entry_params.delete :remove_attachment
 
     @entry = (@topic || @context).discussion_entries.find(params[:id])
     raise(ActiveRecord::RecordNotFound) if @entry.deleted?
-
     @topic ||= @entry.discussion_topic
     @entry.current_user = @current_user
-    @entry.attachment_id = nil if @remove_attachment == '1'
+    @entry.attachment_id = nil if @remove_attachment == '1' || params[:attachment].nil?
+
     if authorized_action(@entry, @current_user, :update)
       return if context_file_quota_exceeded?
       @entry.editor = @current_user
       respond_to do |format|
-        if @entry.update_attributes(params[:discussion_entry].slice(:message, :plaintext_message))
+        if @entry.update_attributes(entry_params)
           save_attachment
           format.html {
             flash[:notice] = t :updated_entry_notice, 'Entry was successfully updated.'
@@ -139,7 +143,7 @@ class DiscussionEntriesController < ApplicationController
 
       respond_to do |format|
         format.html { redirect_to named_context_url(@context, :context_discussion_topic_url, @entry.discussion_topic_id) }
-        format.json { render :nothing => true, :status => :no_content }
+        format.json { head :no_content }
       end
     end
   end
@@ -149,24 +153,11 @@ class DiscussionEntriesController < ApplicationController
     @topic = @context.discussion_topics.active.find(params[:discussion_topic_id])
     if !@topic.podcast_enabled && request.format == :rss
       @problem = t :disabled_podcasts_notice, "Podcasts have not been enabled for this topic."
-      @template_format = 'html'
-      @template.template_format = 'html'
-      render :text => @template.render(:file => "shared/unauthorized_feed", :layout => "layouts/application"), :status => :bad_request # :template => "shared/unauthorized_feed", :status => :bad_request
+      render "shared/unauthorized_feed", status: :bad_request, :formats => [:html]
       return
     end
-    if authorized_action(@topic, @current_user, :read)
-      @all_discussion_entries = @topic.discussion_entries.active
-      @discussion_entries = @all_discussion_entries
-      if request.format == :rss && !@topic.podcast_has_student_posts
-        @admins = @context.admins
-        @discussion_entries = @discussion_entries.find_all_by_user_id(@admins.map(&:id))
-      end
-      if !@topic.user_can_see_posts?(@current_user)
-        @discussion_entries = []
-      end
-      if @topic.locked_for?(@current_user) && !@topic.grants_right?(@current_user, nil, :update)
-        @discussion_entries = []
-      end
+    if authorized_action(@context, @current_user, :read) && authorized_action(@topic, @current_user, :read)
+      @discussion_entries = @topic.entries_for_feed(@current_user, request.format == :rss)
       respond_to do |format|
         format.atom {
           feed = Atom::Feed.new do |f|
@@ -179,7 +170,7 @@ class DiscussionEntriesController < ApplicationController
           @discussion_entries.sort_by{|e| e.updated_at}.each do |e|
             feed.entries << e.to_atom
           end
-          render :text => feed.to_xml
+          render :plain => feed.to_xml
         }
         format.rss {
           @entries = [@topic] + @discussion_entries
@@ -195,7 +186,7 @@ class DiscussionEntriesController < ApplicationController
             channel.items << item
           end
           rss.channel = channel
-          render :text => rss.to_s
+          render :plain => rss.to_s
         }
       end
     end
@@ -221,7 +212,9 @@ class DiscussionEntriesController < ApplicationController
   def save_attachment
     return unless can_attach?
 
-    @attachment = @context.attachments.create(params[:attachment])
+    attachment_params = params.require(:attachment).
+      permit(Attachment.permitted_attributes)
+    @attachment = @context.attachments.create(attachment_params)
     @entry.attachment = @attachment
     @entry.save
   end
@@ -230,9 +223,7 @@ class DiscussionEntriesController < ApplicationController
   #
   # Returns a boolean.
   def context_file_quota_exceeded?
-    context = named_context_url(@context, :context_discussion_topic_url,
-      @topic.id)
-    can_attach?(1.kilobyte) && quota_exceeded(context)
+    can_attach?(1.kilobyte) && quota_exceeded(@current_user, named_context_url(@context, :context_discussion_topic_url, @topic.id))
   end
 
 

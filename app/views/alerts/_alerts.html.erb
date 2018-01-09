@@ -1,4 +1,22 @@
-<% jammit_css :alerts %>
+<%
+# Copyright (C) 2011 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+%>
+
+<% css_bundle :alerts %>
 <% js_bundle :alerts %>
 
 <p>
@@ -24,11 +42,14 @@
 </div>
 
 <div class="button-container" style="margin-top: 20px;">
-  <button class="btn btn-primary add_alert_link"><i class="icon-add"></i> <%= t('buttons.add_alert', 'Add Alert') %></button>
+  <button class="Button Button--primary add_alert_link">
+    <span aria-hidden="true"><i class="icon-plus"></i> <%= t('buttons.add_alert', 'Alert') %></span>
+    <span class="screenreader-only"><%= t('Add Alert') %></span>
+  </button>
 </div>
 
 <%
-  count = "<span class='displaying' /><input type='text' name='alert[criteria][][threshold]' class='editing' size='2' />".html_safe
+  count = "%{count}" # we'll replace this with an input in js-land
   alert_data = {
     :DATA => @alerts,
     :POSSIBLE_RECIPIENTS_ORDER => [':student', ':teachers'],
@@ -58,9 +79,9 @@
       }
     }
   }
-  @role_types.each do |role|
-    alert_data[:POSSIBLE_RECIPIENTS_ORDER] << role[:name]
-    alert_data[:POSSIBLE_RECIPIENTS][role[:name]] = {:label => role[:label]}
+  (@account_roles || []).each do |role|
+    alert_data[:POSSIBLE_RECIPIENTS_ORDER] << role[:id]
+    alert_data[:POSSIBLE_RECIPIENTS][role[:id]] = {:label => role[:label]}
   end
   if @context.enable_user_notes
     alert_data[:POSSIBLE_CRITERIA_ORDER] << 'UserNote'

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -17,14 +17,15 @@
 #
 
 class Announcement < DiscussionTopic
-  
-  belongs_to :context, :polymorphic => true
-  
+
+  belongs_to :context, polymorphic: [:course, :group]
+
   has_a_broadcast_policy
   include HasContentTags
-  
+  include Plannable
+
   sanitize_field :message, CanvasSanitize::SANITIZE
-  
+
   before_save :infer_content
   before_save :respect_context_lock_rules
   validates_presence_of :context_id
@@ -50,12 +51,27 @@ class Announcement < DiscussionTopic
   end
   protected :respect_context_lock_rules
 
+  def self.lock_from_course(course)
+    Announcement.where(
+      :context_type => 'Course',
+      :context_id => course,
+      :workflow_state => 'active'
+    ).update_all(:locked => true)
+  end
+
   set_broadcast_policy! do
     dispatch :new_announcement
-    to { active_participants(true) - [user] }
+    to { users_with_permissions(active_participants_include_tas_and_teachers(true) - [user]) }
     whenever { |record|
-      record.context.available? and
-      ((record.just_created and !(record.post_delayed? || record.unpublished?)) || record.changed_state(:active, record.draft_state_enabled? ? :unpublished : :post_delayed))
+      record.send_notification_for_context? and
+        ((record.just_created and !(record.post_delayed? || record.unpublished?)) || record.changed_state(:active, :unpublished) || record.changed_state(:active, :post_delayed))
+    }
+
+    dispatch :announcement_created_by_you
+    to { user }
+    whenever { |record|
+      record.send_notification_for_context? and
+        ((record.just_created and !(record.post_delayed? || record.unpublished?)) || record.changed_state(:active, :unpublished) || record.changed_state(:active, :post_delayed))
     }
   end
 
@@ -66,17 +82,33 @@ class Announcement < DiscussionTopic
     given { |user| self.user.present? && self.user == user && self.discussion_entries.active.empty? }
     can :delete
 
-    given { |user, session| self.context.grants_right?(user, session, :read) }
+    given do |user|
+      self.grants_right?(user, :read) &&
+       (self.context.is_a?(Group) ||
+        (user &&
+         (self.context.grants_right?(user, :read_as_admin) ||
+          (self.context.is_a?(Course) &&
+           self.context.includes_user?(user)))))
+    end
+    can :read_replies
+
+    given { |user, session| self.context.grants_right?(user, session, :read_announcements) }
     can :read
 
-    given { |user, session| self.context.grants_right?(user, session, :post_to_forum) }
+    given { |user, session| self.context.grants_right?(user, session, :post_to_forum) && !self.locked?}
     can :reply
 
     given { |user, session| self.context.is_a?(Group) && self.context.grants_right?(user, session, :post_to_forum) }
     can :create
 
-    given { |user, session| self.context.grants_right?(user, session, :moderate_forum) } #admins.include?(user) }
-    can :update and can :delete and can :reply and can :create and can :read and can :attach
+    given { |user, session| self.context.grants_all_rights?(user, session, :read_announcements, :moderate_forum) } #admins.include?(user) }
+    can :update and can :read_as_admin and can :delete and can :reply and can :create and can :read and can :attach
+
+    given do |user, session|
+      self.allow_rating && (!self.only_graders_can_rate ||
+                            self.context.grants_right?(user, session, :manage_grades))
+    end
+    can :rate
   end
 
   def is_announcement; true end
@@ -90,11 +122,15 @@ class Announcement < DiscussionTopic
     :topic_is_announcement
   end
 
-  def can_unpublish?
+  def can_unpublish?(opts=nil)
     false
   end
 
   def published?
     true
+  end
+
+  def assignment
+    nil
   end
 end

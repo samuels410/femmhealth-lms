@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2011 Instructure, Inc.
+# Copyright (C) 2011 - present Instructure, Inc.
 #
 # This file is part of Canvas.
 #
@@ -19,13 +19,13 @@
 module Api::V1::ExternalTools
   include Api::V1::Json
 
-  def external_tools_json(tools, context, user, session, extension_types = ContextExternalTool::EXTENSION_TYPES)
+  def external_tools_json(tools, context, user, session, extension_types = Lti::ResourcePlacement::PLACEMENTS)
     tools.map do |topic|
       external_tool_json(topic, context, user, session, extension_types)
     end
   end
 
-  def external_tool_json(tool, context, user, session, extension_types = ContextExternalTool::EXTENSION_TYPES)
+  def external_tool_json(tool, context, user, session, extension_types = Lti::ResourcePlacement::PLACEMENTS)
     methods = %w[privacy_level custom_fields workflow_state vendor_help_link]
     methods += extension_types
     json = api_json(tool, user, session,
@@ -37,9 +37,10 @@ module Api::V1::ExternalTools
     json['selection_width'] = tool.settings[:selection_width] if tool.settings.key? :selection_width
     json['selection_height'] = tool.settings[:selection_height] if tool.settings.key? :selection_height
     json['icon_url'] = tool.settings[:icon_url] if tool.settings.key? :icon_url
+    json['not_selectable'] = tool.not_selectable
     extension_types.each do |type|
       if json[type]
-        json[type]['label'] = tool.label_for(type, user.locale)
+        json[type]['label'] = tool.label_for(type, I18n.locale)
         json[type].delete 'labels'
         json.delete 'labels'
 
@@ -56,6 +57,8 @@ module Api::V1::ExternalTools
   def tool_pagination_url
     if @context.is_a? Course
       api_v1_course_external_tools_url(@context)
+    elsif @context.is_a? Group
+      api_v1_group_external_tools_url(@context)
     else
       api_v1_account_external_tools_url(@context)
     end
@@ -72,6 +75,7 @@ module Api::V1::ExternalTools
       query_params[:url] = opts[:url] if opts.include?(:url)
       query_params[:launch_type] = opts[:launch_type] if opts.include?(:launch_type)
       query_params[:assignment_id] = opts[:assignment_id] if opts.include?(:assignment_id)
+      query_params[:module_item_id] = opts[:module_item_id] if opts.include?(:module_item_id)
       uri.query = query_params.to_query
 
       uri.to_s
